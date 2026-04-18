@@ -5,7 +5,6 @@ import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { MemeTrend } from "@/app/page";
 
-// ── Complete ScanResult type
 interface ScanResult extends MemeTrend {
   platforms?: string[];
   isNewCoin?: boolean;
@@ -61,7 +60,7 @@ const RUG_COLOR: Record<string, string> = {
   low: "#00c47a",
   medium: "#ffaa00",
   high: "#ff2222",
-  unknown: "#444",
+  unknown: "#666",
 };
 
 const PRED_COLOR = {
@@ -96,6 +95,24 @@ const PLATFORM_ICON: Record<string, string> = {
   hackernews: "🔶",
 };
 
+// ── READABLE color palette for labels/sub-text
+// OLD dark grays (#2a2a2a, #3a3a3a) → NEW readable grays (#888, #999, #aaa)
+const C = {
+  label: "#777", // section labels, stat card labels
+  sub: "#888", // secondary text
+  body: "#aaa", // body text, descriptions
+  dim: "#666", // dimmer secondary
+  accent: "#e8490f", // primary accent
+  green: "#00c47a",
+  gold: "#ffd700",
+  purple: "#a855f7",
+  blue: "#00b4d8",
+  red: "#ff4444",
+  border: "#1e1e1e",
+  bg: "#0a0a0a",
+  bgDark: "#060606",
+};
+
 function fmtMcap(n?: number): string {
   if (!n || n === 0) return "—";
   if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
@@ -127,7 +144,6 @@ async function fetchLiveTokenData(
     );
     if (!res.ok) return {};
     const data = await res.json();
-
     const solanaPairs = (data?.pairs || [])
       .filter((p: { chainId: string }) => p.chainId === "solana")
       .sort(
@@ -136,13 +152,11 @@ async function fetchLiveTokenData(
           b: { liquidity?: { usd?: number } },
         ) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0),
       );
-
     if (!solanaPairs.length) return {};
     const pair = solanaPairs[0];
     const ageMinutes = pair.pairCreatedAt
       ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
       : undefined;
-
     let age: string | undefined;
     if (ageMinutes !== undefined) {
       age =
@@ -152,7 +166,6 @@ async function fetchLiveTokenData(
             ? `${Math.floor(ageMinutes / 60)}h old`
             : `${Math.floor(ageMinutes / 1440)}d old`;
     }
-
     return {
       mcap: pair.fdv || pair.marketCap,
       liquidity: pair.liquidity?.usd,
@@ -167,7 +180,7 @@ async function fetchLiveTokenData(
   }
 }
 
-// ── Stat card with colored value
+// ── Stat card — FIXED: readable label + value colors
 function StatCard({
   label,
   value,
@@ -184,16 +197,16 @@ function StatCard({
   return (
     <div
       style={{
-        background: "#0a0a0a",
-        border: "1px solid #161616",
+        background: C.bg,
+        border: `1px solid ${C.border}`,
         borderRadius: 6,
         padding: "10px 12px",
       }}
     >
       <div
         style={{
-          color: "#3a3a3a",
-          fontSize: 8,
+          color: C.label,
+          fontSize: 9,
           ...MONO,
           letterSpacing: "0.14em",
           marginBottom: 6,
@@ -204,7 +217,7 @@ function StatCard({
       </div>
       <div
         style={{
-          color: loading ? "#222" : color || "#e8e8e8",
+          color: loading ? "#333" : color || "#e8e8e8",
           fontSize: 16,
           fontWeight: 800,
           ...MONO,
@@ -213,10 +226,51 @@ function StatCard({
         {loading ? "···" : value}
       </div>
       {sub && !loading && (
-        <div style={{ color: "#333", fontSize: 8, ...MONO, marginTop: 2 }}>
+        <div style={{ color: C.sub, fontSize: 8, ...MONO, marginTop: 2 }}>
           {sub}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Narrative badge — NEW: shows the viral story behind the coin
+function NarrativeBadge({
+  context,
+  celebMention,
+  isCeleb,
+}: {
+  context?: string;
+  celebMention?: string;
+  isCeleb: boolean;
+}) {
+  if (!context) return null;
+  return (
+    <div
+      style={{
+        background: isCeleb ? "#0d0a00" : "#0a0a0d",
+        border: `1px solid ${isCeleb ? "#ffd70022" : "#e8490f22"}`,
+        borderRadius: 5,
+        padding: "9px 12px",
+        marginBottom: 2,
+      }}
+    >
+      <div
+        style={{
+          color: isCeleb ? C.gold : C.accent,
+          fontSize: 8,
+          ...MONO,
+          letterSpacing: "0.14em",
+          marginBottom: 5,
+        }}
+      >
+        {isCeleb
+          ? `⭐ ${celebMention?.toUpperCase() || "CELEBRITY"} TRIGGER`
+          : "✦ NARRATIVE ORIGIN"}
+      </div>
+      <div style={{ color: C.body, fontSize: 10, ...MONO, lineHeight: 1.7 }}>
+        {context}
+      </div>
     </div>
   );
 }
@@ -259,7 +313,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
       setLiveData(data);
       setLiveLoading(false);
     });
-
     const interval = setInterval(() => {
       if (selectedMeme?.contractAddress)
         fetchLiveTokenData(selectedMeme.contractAddress).then(setLiveData);
@@ -277,7 +330,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
       predictionReason: "",
       loading: true,
     });
-
     try {
       const params = new URLSearchParams({
         keyword: meme.keyword,
@@ -290,7 +342,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
         priceChange1h: String(meme.priceChange1h || 0),
         celebMention: meme.celebMention || "",
       });
-
       const res = await fetch(`/api/analyze?${params.toString()}`);
       const data = await res.json();
       setEvidence({ ...data, loading: false });
@@ -315,13 +366,11 @@ export default function TokenPanel({ selectedMeme }: Props) {
     setBuying(true);
     setBuyStatus("idle");
     setBuyMsg("");
-
     try {
       const amountSol = parseFloat(buyAmount);
       if (isNaN(amountSol) || amountSol <= 0) throw new Error("Invalid amount");
       if ((solBalance || 0) < amountSol + 0.01)
         throw new Error("Insufficient SOL balance");
-
       const quoteRes = await fetch(
         `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${selectedMeme.contractAddress}&amount=${Math.floor(amountSol * LAMPORTS_PER_SOL)}&slippageBps=1000`,
       );
@@ -331,7 +380,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
         );
       const quote = await quoteRes.json();
       if (quote.error) throw new Error(quote.error);
-
       const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -343,12 +391,10 @@ export default function TokenPanel({ selectedMeme }: Props) {
       });
       if (!swapRes.ok) throw new Error("Failed to build swap transaction");
       const { swapTransaction } = await swapRes.json();
-
       const txBuf = Buffer.from(swapTransaction, "base64");
       const tx = Transaction.from(txBuf);
       const sig = await sendTransaction(tx, connection);
       await connection.confirmTransaction(sig, "confirmed");
-
       setBuyStatus("success");
       setBuyMsg(`✓ Bought! TX: ${sig.slice(0, 8)}...${sig.slice(-8)}`);
       setSolBalance((prev) => (prev !== null ? prev - amountSol : null));
@@ -380,8 +426,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
     return (
       <div
         style={{
-          background: "#060606",
-          border: "1px solid #111",
+          background: C.bgDark,
+          border: `1px solid #111`,
           borderRadius: 8,
           display: "flex",
           flexDirection: "column",
@@ -393,7 +439,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
       >
         <div
           style={{
-            color: "#111",
+            color: "#1a1a1a",
             fontSize: 32,
             letterSpacing: "0.3em",
             ...MONO,
@@ -403,7 +449,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
         </div>
         <div
           style={{
-            color: "#1a1a1a",
+            color: "#2a2a2a",
             fontSize: 10,
             letterSpacing: "0.2em",
             ...MONO,
@@ -429,11 +475,11 @@ export default function TokenPanel({ selectedMeme }: Props) {
   const safetyColor =
     safetyScore !== null
       ? safetyScore >= 70
-        ? "#00c47a"
+        ? C.green
         : safetyScore >= 40
           ? "#ffaa00"
           : "#ff2222"
-      : "#444";
+      : "#555";
 
   const isCeleb =
     selectedMeme.onCeleb ||
@@ -446,10 +492,27 @@ export default function TokenPanel({ selectedMeme }: Props) {
     { key: "buy", label: "BUY / CREATE" },
   ] as const;
 
+  // Platform label colors — FIXED: readable
+  const PLAT_COLOR: Record<string, string> = {
+    celebrity: C.gold,
+    ai: C.accent,
+    pumpfun: C.purple,
+    dexscreener: C.blue,
+    twitter: "#c8d0dc",
+    coingecko: "#8dc63f",
+    reddit: "#ff6644",
+    "google-trends": "#5a9af4",
+    "google-news": "#5a9af4",
+    youtube: "#ff4444",
+    kym: "#44cc44",
+    hackernews: "#ff8833",
+    telegram: "#36b5f4",
+  };
+
   return (
     <div
       style={{
-        background: "#060606",
+        background: C.bgDark,
         border: "1px solid #111",
         borderRadius: 8,
         display: "flex",
@@ -462,7 +525,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
       <div
         style={{
           padding: "14px 16px 0",
-          borderBottom: "1px solid #111",
+          borderBottom: "1px solid #1a1a1a",
           flexShrink: 0,
         }}
       >
@@ -475,7 +538,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Token name */}
+            {/* Token name row */}
             <div
               style={{
                 display: "flex",
@@ -487,7 +550,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
             >
               <span
                 style={{
-                  color: isCeleb ? "#ffd700" : "#fff",
+                  color: isCeleb ? C.gold : "#fff",
                   fontSize: 24,
                   fontWeight: 900,
                   ...MONO,
@@ -496,13 +559,12 @@ export default function TokenPanel({ selectedMeme }: Props) {
               >
                 ${selectedMeme.keyword.toUpperCase()}
               </span>
-
               {isCeleb && (
                 <span
                   style={{
                     fontSize: 9,
-                    color: "#ffd700",
-                    border: "1px solid #ffd70044",
+                    color: C.gold,
+                    border: `1px solid ${C.gold}44`,
                     padding: "3px 7px",
                     borderRadius: 3,
                     ...MONO,
@@ -520,8 +582,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 <span
                   style={{
                     fontSize: 9,
-                    color: "#a855f7",
-                    border: "1px solid #a855f744",
+                    color: C.purple,
+                    border: `1px solid ${C.purple}44`,
                     padding: "3px 7px",
                     borderRadius: 3,
                     ...MONO,
@@ -562,19 +624,19 @@ export default function TokenPanel({ selectedMeme }: Props) {
               )}
             </div>
 
-            {/* Price + live indicator */}
+            {/* Price row */}
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
-                marginBottom: 6,
+                marginBottom: 8,
               }}
             >
               {displayPrice ? (
                 <span
                   style={{
-                    color: "#e8490f",
+                    color: C.accent,
                     fontSize: 15,
                     fontWeight: 700,
                     ...MONO,
@@ -586,27 +648,27 @@ export default function TokenPanel({ selectedMeme }: Props) {
               {displayChange1h !== undefined && displayChange1h !== null && (
                 <span
                   style={{
-                    color: (displayChange1h ?? 0) >= 0 ? "#00c47a" : "#ff4444",
+                    color: (displayChange1h ?? 0) >= 0 ? C.green : C.red,
                     fontSize: 13,
                     fontWeight: 700,
                     ...MONO,
                   }}
                 >
                   {fmtPct(displayChange1h)}{" "}
-                  <span style={{ color: "#333", fontSize: 9 }}>1h</span>
+                  <span style={{ color: C.dim, fontSize: 9 }}>1h</span>
                 </span>
               )}
               {displayChange24h !== undefined && displayChange24h !== null && (
                 <span
                   style={{
-                    color: (displayChange24h ?? 0) >= 0 ? "#00c47a" : "#ff4444",
+                    color: (displayChange24h ?? 0) >= 0 ? C.green : C.red,
                     fontSize: 11,
                     ...MONO,
-                    opacity: 0.7,
+                    opacity: 0.8,
                   }}
                 >
                   {fmtPct(displayChange24h)}{" "}
-                  <span style={{ color: "#333", fontSize: 9 }}>24h</span>
+                  <span style={{ color: C.dim, fontSize: 9 }}>24h</span>
                 </span>
               )}
               {selectedMeme.contractAddress && (
@@ -618,24 +680,18 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     background: liveLoading ? "#ffaa00" : "#00c47a55",
                     display: "inline-block",
                   }}
-                  title="Live data refreshes every 30s"
+                  title="Live · refreshes 30s"
                 />
               )}
             </div>
 
-            {/* AI context */}
+            {/* Narrative context — NEW prominent display */}
             {selectedMeme.aiContext && (
-              <div
-                style={{
-                  color: isCeleb ? "#ffd70055" : "#444",
-                  fontSize: 10,
-                  ...MONO,
-                  lineHeight: 1.6,
-                  maxWidth: 340,
-                }}
-              >
-                {isCeleb ? "⭐" : "✦"} {selectedMeme.aiContext}
-              </div>
+              <NarrativeBadge
+                context={selectedMeme.aiContext}
+                celebMention={selectedMeme.celebMention}
+                isCeleb={isCeleb}
+              />
             )}
           </div>
 
@@ -644,7 +700,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
             <div
               style={{
                 display: "flex",
-                flexDirection: "column",
+                flexDirection: "column" as const,
                 alignItems: "center",
                 gap: 3,
                 flexShrink: 0,
@@ -680,7 +736,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     color: safetyColor,
                     fontSize: 7,
                     ...MONO,
-                    opacity: 0.5,
+                    opacity: 0.6,
                   }}
                 >
                   /100
@@ -711,9 +767,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 border: "none",
                 borderBottom:
                   activeTab === key
-                    ? "2px solid #e8490f"
+                    ? `2px solid ${C.accent}`
                     : "2px solid transparent",
-                color: activeTab === key ? "#e8490f" : "#2a2a2a",
+                color: activeTab === key ? C.accent : C.dim,
                 fontSize: 9,
                 ...MONO,
                 letterSpacing: "0.12em",
@@ -729,10 +785,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
 
       {/* ── Content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
-        {/* ════ OVERVIEW TAB ════ */}
+        {/* ════ OVERVIEW ════ */}
         {activeTab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {/* Stats grid */}
             <div
               style={{
                 display: "grid",
@@ -750,9 +805,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 value={fmtMcap(displayLiquidity)}
                 color={
                   !displayLiquidity
-                    ? "#333"
+                    ? C.dim
                     : displayLiquidity >= 50000
-                      ? "#00c47a"
+                      ? C.green
                       : displayLiquidity >= 10000
                         ? "#ffaa00"
                         : "#ff4444"
@@ -767,18 +822,17 @@ export default function TokenPanel({ selectedMeme }: Props) {
               <StatCard
                 label="1H Change"
                 value={fmtPct(displayChange1h) || "—"}
-                color={(displayChange1h ?? 0) >= 0 ? "#00c47a" : "#ff4444"}
+                color={(displayChange1h ?? 0) >= 0 ? C.green : C.red}
                 loading={liveLoading && displayChange1h === undefined}
               />
               <StatCard
                 label="24H Change"
                 value={fmtPct(displayChange24h) || "—"}
-                color={(displayChange24h ?? 0) >= 0 ? "#00c47a" : "#ff4444"}
+                color={(displayChange24h ?? 0) >= 0 ? C.green : C.red}
                 loading={liveLoading && displayChange24h === undefined}
               />
             </div>
 
-            {/* Second row */}
             <div
               style={{
                 display: "grid",
@@ -790,11 +844,10 @@ export default function TokenPanel({ selectedMeme }: Props) {
               <StatCard
                 label="24H Volume"
                 value={fmtMcap(displayVolume)}
-                color={displayVolume ? "#e8490f" : undefined}
+                color={displayVolume ? C.accent : undefined}
               />
             </div>
 
-            {/* Price + platforms row */}
             <div
               style={{
                 display: "grid",
@@ -805,7 +858,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
               <StatCard
                 label="Price"
                 value={fmtPrice(displayPrice)}
-                color={displayPrice ? "#e8490f" : undefined}
+                color={displayPrice ? C.accent : undefined}
               />
               <StatCard
                 label="Sources"
@@ -817,15 +870,15 @@ export default function TokenPanel({ selectedMeme }: Props) {
             {selectedMeme.contractAddress && (
               <div
                 style={{
-                  background: "#0a0a0a",
-                  border: "1px solid #161616",
+                  background: C.bg,
+                  border: `1px solid ${C.border}`,
                   borderRadius: 6,
                   padding: "10px 12px",
                 }}
               >
                 <div
                   style={{
-                    color: "#3a3a3a",
+                    color: C.label,
                     fontSize: 8,
                     ...MONO,
                     letterSpacing: "0.14em",
@@ -844,7 +897,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 >
                   <span
                     style={{
-                      color: "#555",
+                      color: C.sub,
                       fontSize: 9,
                       ...MONO,
                       wordBreak: "break-all" as const,
@@ -857,8 +910,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     onClick={copyCA}
                     style={{
                       background: copiedCA ? "#001a0a" : "#1a1a1a",
-                      border: `1px solid ${copiedCA ? "#00c47a33" : "#222"}`,
-                      color: copiedCA ? "#00c47a" : "#555",
+                      border: `1px solid ${copiedCA ? "#00c47a33" : "#2a2a2a"}`,
+                      color: copiedCA ? C.green : C.sub,
                       fontSize: 8,
                       ...MONO,
                       padding: "4px 10px",
@@ -873,12 +926,12 @@ export default function TokenPanel({ selectedMeme }: Props) {
               </div>
             )}
 
-            {/* Quick links — both DexScreener AND Pump.fun */}
+            {/* Quick links */}
             {selectedMeme.contractAddress && (
               <div>
                 <div
                   style={{
-                    color: "#2a2a2a",
+                    color: C.label,
                     fontSize: 8,
                     ...MONO,
                     letterSpacing: "0.12em",
@@ -894,22 +947,22 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     {
                       label: "DexScreener",
                       url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
-                      color: "#00b4d8",
+                      color: C.blue,
                     },
                     {
                       label: "Pump.fun",
                       url: `https://pump.fun/${selectedMeme.contractAddress}`,
-                      color: "#a855f7",
+                      color: C.purple,
                     },
                     {
                       label: "Rugcheck",
                       url: `https://rugcheck.xyz/tokens/${selectedMeme.contractAddress}`,
-                      color: "#00c47a",
+                      color: C.green,
                     },
                     {
                       label: "Solscan",
                       url: `https://solscan.io/token/${selectedMeme.contractAddress}`,
-                      color: "#e8490f",
+                      color: C.accent,
                     },
                   ].map(({ label, url, color }) => (
                     <a
@@ -939,11 +992,11 @@ export default function TokenPanel({ selectedMeme }: Props) {
               </div>
             )}
 
-            {/* Platforms detected */}
+            {/* Platforms detected — FIXED readable colors */}
             <div>
               <div
                 style={{
-                  color: "#2a2a2a",
+                  color: C.label,
                   fontSize: 8,
                   ...MONO,
                   letterSpacing: "0.12em",
@@ -955,23 +1008,26 @@ export default function TokenPanel({ selectedMeme }: Props) {
               <div
                 style={{ display: "flex", flexWrap: "wrap" as const, gap: 5 }}
               >
-                {(selectedMeme.platforms || []).map((plat) => (
-                  <span
-                    key={plat}
-                    style={{
-                      fontSize: 9,
-                      ...MONO,
-                      color: "#555",
-                      background: "#0d0d0d",
-                      border: "1px solid #181818",
-                      padding: "3px 8px",
-                      borderRadius: 3,
-                    }}
-                  >
-                    {PLATFORM_ICON[plat] || "·"}{" "}
-                    {plat.toUpperCase().replace(/-/g, " ")}
-                  </span>
-                ))}
+                {(selectedMeme.platforms || []).map((plat) => {
+                  const col = PLAT_COLOR[plat] || C.sub;
+                  return (
+                    <span
+                      key={plat}
+                      style={{
+                        fontSize: 9,
+                        ...MONO,
+                        color: col,
+                        background: "#0d0d0d",
+                        border: `1px solid ${col}22`,
+                        padding: "3px 8px",
+                        borderRadius: 3,
+                      }}
+                    >
+                      {PLATFORM_ICON[plat] || "·"}{" "}
+                      {plat.toUpperCase().replace(/-/g, " ")}
+                    </span>
+                  );
+                })}
               </div>
             </div>
 
@@ -1003,7 +1059,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 </div>
                 <div
                   style={{
-                    color: "#888",
+                    color: C.body,
                     fontSize: 10,
                     ...MONO,
                     lineHeight: 1.7,
@@ -1020,7 +1076,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 onClick={() => setActiveTab("buy")}
                 style={{
                   flex: 1,
-                  background: "#e8490f",
+                  background: C.accent,
                   border: "none",
                   color: "#fff",
                   fontSize: 11,
@@ -1048,8 +1104,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   style={{
                     width: "100%",
                     background: "transparent",
-                    border: "1px solid #00b4d844",
-                    color: "#00b4d8",
+                    border: `1px solid ${C.blue}44`,
+                    color: C.blue,
                     fontSize: 10,
                     ...MONO,
                     padding: "11px",
@@ -1067,13 +1123,13 @@ export default function TokenPanel({ selectedMeme }: Props) {
           </div>
         )}
 
-        {/* ════ EVIDENCE TAB ════ */}
+        {/* ════ EVIDENCE ════ */}
         {activeTab === "evidence" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {evidence?.loading ? (
               <div
                 style={{
-                  color: "#333",
+                  color: C.dim,
                   fontSize: 10,
                   ...MONO,
                   padding: "24px 0",
@@ -1095,7 +1151,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   >
                     <div
                       style={{
-                        color: "#e8490f",
+                        color: C.accent,
                         fontSize: 8,
                         ...MONO,
                         letterSpacing: "0.15em",
@@ -1106,7 +1162,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     </div>
                     <div
                       style={{
-                        color: "#888",
+                        color: C.body,
                         fontSize: 10,
                         ...MONO,
                         lineHeight: 1.8,
@@ -1118,12 +1174,11 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   </div>
                 )}
 
-                {/* On-chain links always visible */}
                 {selectedMeme.contractAddress && (
                   <div>
                     <div
                       style={{
-                        color: "#2a2a2a",
+                        color: C.label,
                         fontSize: 8,
                         ...MONO,
                         letterSpacing: "0.12em",
@@ -1143,22 +1198,22 @@ export default function TokenPanel({ selectedMeme }: Props) {
                         {
                           label: "DexScreener",
                           url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
-                          color: "#00b4d8",
+                          color: C.blue,
                         },
                         {
                           label: "Pump.fun",
                           url: `https://pump.fun/${selectedMeme.contractAddress}`,
-                          color: "#a855f7",
+                          color: C.purple,
                         },
                         {
                           label: "Rugcheck",
                           url: `https://rugcheck.xyz/tokens/${selectedMeme.contractAddress}`,
-                          color: "#00c47a",
+                          color: C.green,
                         },
                         {
                           label: "Solscan",
                           url: `https://solscan.io/token/${selectedMeme.contractAddress}`,
-                          color: "#e8490f",
+                          color: C.accent,
                         },
                       ].map(({ label, url, color }) => (
                         <a
@@ -1177,7 +1232,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
                               ...MONO,
                               padding: "5px 10px",
                               borderRadius: 3,
-                              cursor: "pointer",
                             }}
                           >
                             ↗ {label}
@@ -1191,7 +1245,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 <div>
                   <div
                     style={{
-                      color: "#2a2a2a",
+                      color: C.label,
                       fontSize: 8,
                       ...MONO,
                       letterSpacing: "0.12em",
@@ -1203,7 +1257,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   {(evidence?.links || []).length === 0 ? (
                     <div
                       style={{
-                        color: "#1a1a1a",
+                        color: C.dim,
                         fontSize: 10,
                         ...MONO,
                         padding: "16px 0",
@@ -1229,12 +1283,11 @@ export default function TokenPanel({ selectedMeme }: Props) {
                         >
                           <div
                             style={{
-                              background: "#0a0a0a",
-                              border: "1px solid #151515",
+                              background: C.bg,
+                              border: `1px solid ${C.border}`,
                               borderRadius: 5,
                               padding: "10px 12px",
                               cursor: "pointer",
-                              transition: "border-color 0.15s",
                             }}
                             onMouseEnter={(e) =>
                               ((
@@ -1244,7 +1297,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                             onMouseLeave={(e) =>
                               ((
                                 e.currentTarget as HTMLElement
-                              ).style.borderColor = "#151515")
+                              ).style.borderColor = C.border)
                             }
                           >
                             <div
@@ -1260,7 +1313,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                               </span>
                               <span
                                 style={{
-                                  color: "#444",
+                                  color: C.sub,
                                   fontSize: 8,
                                   ...MONO,
                                   letterSpacing: "0.1em",
@@ -1271,7 +1324,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                               </span>
                               <span
                                 style={{
-                                  color: "#1a1a1a",
+                                  color: C.dim,
                                   fontSize: 8,
                                   ...MONO,
                                   marginLeft: "auto",
@@ -1282,7 +1335,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                             </div>
                             <div
                               style={{
-                                color: "#777",
+                                color: C.body,
                                 fontSize: 10,
                                 ...MONO,
                                 lineHeight: 1.5,
@@ -1304,13 +1357,13 @@ export default function TokenPanel({ selectedMeme }: Props) {
           </div>
         )}
 
-        {/* ════ SAFETY TAB ════ */}
+        {/* ════ SAFETY ════ */}
         {activeTab === "safety" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {evidence?.loading ? (
               <div
                 style={{
-                  color: "#333",
+                  color: C.dim,
                   fontSize: 10,
                   ...MONO,
                   padding: "24px 0",
@@ -1321,7 +1374,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
               </div>
             ) : (
               <>
-                {/* Score + label */}
                 <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
                   <div
                     style={{
@@ -1376,7 +1428,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     </div>
                     <div
                       style={{
-                        color: "#555",
+                        color: C.sub,
                         fontSize: 9,
                         ...MONO,
                         lineHeight: 1.7,
@@ -1392,7 +1444,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                         {(selectedMeme.rugRisk || "unknown").toUpperCase()}
                       </span>
                       {selectedMeme.rugDetails && (
-                        <span style={{ color: "#333" }}>
+                        <span style={{ color: C.dim }}>
                           {" "}
                           — {selectedMeme.rugDetails}
                         </span>
@@ -1401,7 +1453,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   </div>
                 </div>
 
-                {/* Safety checks */}
                 <div
                   style={{
                     display: "flex",
@@ -1419,7 +1470,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                         display: "flex",
                         alignItems: "flex-start",
                         gap: 10,
-                        background: "#0a0a0a",
+                        background: C.bg,
                         border: `1px solid ${item.pass ? "#00c47a11" : "#ff222211"}`,
                         borderRadius: 5,
                         padding: "9px 11px",
@@ -1427,7 +1478,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     >
                       <span
                         style={{
-                          color: item.pass ? "#00c47a" : "#ff2222",
+                          color: item.pass ? C.green : "#ff2222",
                           fontSize: 13,
                           flexShrink: 0,
                           marginTop: -1,
@@ -1438,7 +1489,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                       <div>
                         <div
                           style={{
-                            color: item.pass ? "#00c47a" : "#ff4444",
+                            color: item.pass ? C.green : "#ff4444",
                             fontSize: 9,
                             ...MONO,
                             fontWeight: 700,
@@ -1447,9 +1498,10 @@ export default function TokenPanel({ selectedMeme }: Props) {
                         >
                           {item.label}
                         </div>
+                        {/* FIXED: detail text is now readable #888 not #555 */}
                         <div
                           style={{
-                            color: "#555",
+                            color: C.sub,
                             fontSize: 9,
                             ...MONO,
                             lineHeight: 1.6,
@@ -1484,15 +1536,14 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     </div>
                     <div
                       style={{
-                        color: "#663333",
+                        color: "#cc6666",
                         fontSize: 9,
                         ...MONO,
                         lineHeight: 1.7,
                       }}
                     >
                       This token has been flagged as high risk by Rugcheck. Mint
-                      authority or freeze authority may still be active. You
-                      could lose everything.
+                      authority or freeze authority may still be active.
                     </div>
                   </div>
                 )}
@@ -1501,14 +1552,14 @@ export default function TokenPanel({ selectedMeme }: Props) {
           </div>
         )}
 
-        {/* ════ BUY / CREATE TAB ════ */}
+        {/* ════ BUY / CREATE ════ */}
         {activeTab === "buy" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {!publicKey ? (
               <div
                 style={{
                   background: "#0d0d0d",
-                  border: "1px solid #1a1a1a",
+                  border: `1px solid ${C.border}`,
                   borderRadius: 5,
                   padding: "16px",
                   textAlign: "center" as const,
@@ -1516,7 +1567,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
               >
                 <div
                   style={{
-                    color: "#333",
+                    color: C.sub,
                     fontSize: 10,
                     ...MONO,
                     marginBottom: 4,
@@ -1524,7 +1575,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 >
                   CONNECT WALLET TO BUY
                 </div>
-                <div style={{ color: "#1a1a1a", fontSize: 9, ...MONO }}>
+                <div style={{ color: C.dim, fontSize: 9, ...MONO }}>
                   Use the wallet button in the header
                 </div>
               </div>
@@ -1532,7 +1583,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
               <div
                 style={{
                   background: "#050505",
-                  border: "1px solid #111",
+                  border: `1px solid #111`,
                   borderRadius: 5,
                   padding: "8px 12px",
                   display: "flex",
@@ -1540,12 +1591,12 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   alignItems: "center",
                 }}
               >
-                <span style={{ color: "#333", fontSize: 9, ...MONO }}>
+                <span style={{ color: C.sub, fontSize: 9, ...MONO }}>
                   BALANCE
                 </span>
                 <span
                   style={{
-                    color: "#e8490f",
+                    color: C.accent,
                     fontSize: 14,
                     fontWeight: 700,
                     ...MONO,
@@ -1559,7 +1610,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
             <div>
               <div
                 style={{
-                  color: "#333",
+                  color: C.label,
                   fontSize: 8,
                   ...MONO,
                   letterSpacing: "0.12em",
@@ -1577,7 +1628,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                       flex: 1,
                       background: buyAmount === amt ? "#1a0800" : "#0d0d0d",
                       border: `1px solid ${buyAmount === amt ? "#e8490f66" : "#1a1a1a"}`,
-                      color: buyAmount === amt ? "#e8490f" : "#444",
+                      color: buyAmount === amt ? C.accent : C.sub,
                       fontSize: 9,
                       ...MONO,
                       padding: "6px 0",
@@ -1598,8 +1649,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 style={{
                   width: "100%",
                   marginTop: 6,
-                  background: "#0a0a0a",
-                  border: "1px solid #1a1a1a",
+                  background: C.bg,
+                  border: `1px solid ${C.border}`,
                   color: "#e0e0e0",
                   fontSize: 12,
                   ...MONO,
@@ -1652,13 +1703,13 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     ? "#111"
                     : selectedMeme.rugRisk === "high"
                       ? "#1a0000"
-                      : "#e8490f",
+                      : C.accent,
                   border:
                     selectedMeme.rugRisk === "high"
                       ? "1px solid #ff222233"
                       : "none",
                   color: buying
-                    ? "#555"
+                    ? C.dim
                     : selectedMeme.rugRisk === "high"
                       ? "#ff2222"
                       : "#fff",
@@ -1685,7 +1736,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
               <div>
                 <div
                   style={{
-                    color: "#333",
+                    color: C.label,
                     fontSize: 8,
                     ...MONO,
                     letterSpacing: "0.12em",
@@ -1703,8 +1754,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   <button
                     style={{
                       background: "#0f0018",
-                      border: "1px solid #a855f744",
-                      color: "#a855f7",
+                      border: `1px solid ${C.purple}44`,
+                      color: C.purple,
                       fontSize: 11,
                       fontWeight: 700,
                       ...MONO,
@@ -1732,7 +1783,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
               >
                 <div
                   style={{
-                    color: buyStatus === "success" ? "#00c47a" : "#ff4444",
+                    color: buyStatus === "success" ? C.green : "#ff4444",
                     fontSize: 9,
                     ...MONO,
                   }}
@@ -1742,12 +1793,12 @@ export default function TokenPanel({ selectedMeme }: Props) {
               </div>
             )}
 
-            {/* DEX quick links in buy tab */}
+            {/* DEX terminals */}
             {selectedMeme.contractAddress && (
               <div>
                 <div
                   style={{
-                    color: "#2a2a2a",
+                    color: C.label,
                     fontSize: 8,
                     ...MONO,
                     letterSpacing: "0.12em",
@@ -1763,7 +1814,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     {
                       label: "BullX",
                       url: `https://bullx.io/terminal?chainId=1399811149&address=${selectedMeme.contractAddress}`,
-                      color: "#e8490f",
+                      color: C.accent,
                     },
                     {
                       label: "Photon",
@@ -1773,12 +1824,12 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     {
                       label: "Axiom",
                       url: `https://axiom.trade/t/${selectedMeme.contractAddress}`,
-                      color: "#00c47a",
+                      color: C.green,
                     },
                     {
                       label: "DexScreener",
                       url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
-                      color: "#00b4d8",
+                      color: C.blue,
                     },
                   ].map(({ label, url, color }) => (
                     <a
@@ -1808,10 +1859,10 @@ export default function TokenPanel({ selectedMeme }: Props) {
               </div>
             )}
 
-            <div style={{ borderTop: "1px solid #111", paddingTop: 14 }}>
+            <div style={{ borderTop: `1px solid #111`, paddingTop: 14 }}>
               <div
                 style={{
-                  color: "#222",
+                  color: C.label,
                   fontSize: 8,
                   ...MONO,
                   letterSpacing: "0.12em",
@@ -1822,8 +1873,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
               </div>
               <div
                 style={{
-                  background: "#0a0a0a",
-                  border: "1px solid #1a1a1a",
+                  background: C.bg,
+                  border: `1px solid ${C.border}`,
                   borderRadius: 4,
                   padding: "8px 12px",
                   display: "flex",
@@ -1832,7 +1883,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   gap: 8,
                 }}
               >
-                <span style={{ color: "#333", fontSize: 10, ...MONO }}>
+                <span style={{ color: C.sub, fontSize: 10, ...MONO }}>
                   /buy{" "}
                   {selectedMeme.contractAddress
                     ? `${selectedMeme.contractAddress.slice(0, 8)}...`
@@ -1845,7 +1896,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   style={{
                     background: copiedTg ? "#001a0a" : "#111",
                     border: `1px solid ${copiedTg ? "#00c47a33" : "#222"}`,
-                    color: copiedTg ? "#00c47a" : "#555",
+                    color: copiedTg ? C.green : C.sub,
                     fontSize: 8,
                     ...MONO,
                     padding: "4px 10px",
@@ -1857,9 +1908,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   {copiedTg ? "COPIED!" : "COPY"}
                 </button>
               </div>
-              <div
-                style={{ color: "#1a1a1a", fontSize: 8, ...MONO, marginTop: 4 }}
-              >
+              <div style={{ color: C.dim, fontSize: 8, ...MONO, marginTop: 4 }}>
                 Paste into Trojan / Bonk Bot / BullX
               </div>
             </div>

@@ -14,7 +14,6 @@ interface McapSnapshot {
   ts: number;
   mcap: number;
 }
-
 interface HistoryEntry {
   keyword: string;
   displayName?: string;
@@ -32,7 +31,6 @@ interface HistoryEntry {
   lastChecked: number;
   tookProfitAt?: number;
 }
-
 interface Props {
   onSelectMeme?: (meme: MemeTrend) => void;
 }
@@ -44,6 +42,25 @@ const MONO = {
 const AUTO_REFRESH_MS = 60_000;
 const UNDO_TIMEOUT_MS = 10_000;
 
+// Readable colors — minimum contrast on dark bg
+const C = {
+  primary: "#f0f0f0", // headings, tickers
+  secondary: "#aaaaaa", // body text
+  muted: "#777777", // secondary labels (still readable)
+  dim: "#555555", // timestamps, faint labels
+  label: "#666666", // section labels
+  orange: "#e8490f",
+  green: "#00c47a",
+  yellow: "#ffd700",
+  purple: "#a855f7",
+  blue: "#00b4d8",
+  red: "#ff4444",
+  amber: "#ffaa00",
+  bg: "#050505",
+  bgCard: "#0d0d0d",
+  border: "#1a1a1a",
+};
+
 function safeSnapshots(raw: unknown): McapSnapshot[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(
@@ -54,7 +71,6 @@ function safeSnapshots(raw: unknown): McapSnapshot[] {
       typeof (s as Record<string, unknown>).mcap === "number",
   );
 }
-
 function safeEntry(key: string, raw: unknown): HistoryEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -87,53 +103,48 @@ function safeEntry(key: string, raw: unknown): HistoryEntry | null {
     return null;
   }
 }
-
 function loadSafeHistory(): Record<string, HistoryEntry> {
   if (typeof window === "undefined") return {};
   try {
     const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || "{}");
-    const result: Record<string, HistoryEntry> = {};
-    for (const [key, val] of Object.entries(raw)) {
-      const entry = safeEntry(key, val);
-      if (entry) result[key] = entry;
+    const out: Record<string, HistoryEntry> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const e = safeEntry(k, v);
+      if (e) out[k] = e;
     }
-    return result;
+    return out;
   } catch {
     return {};
   }
 }
-
-function isGarbageKeyword(kw: string): boolean {
+function isGarbage(kw: string): boolean {
   if (kw.length > 14) return true;
   if (/^[1-9A-HJ-NP-Za-km-z]{10,}$/.test(kw)) return true;
   if (/\d{4,}/.test(kw)) return true;
-  const vowels = (kw.match(/[aeiou]/gi) || []).length;
-  if (kw.length >= 8 && vowels === 0) return true;
+  if (kw.length >= 8 && (kw.match(/[aeiou]/gi) || []).length === 0) return true;
   return false;
 }
-
 function fmtMcap(n: number): string {
-  if (!n || n === 0) return "—";
-  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  if (!n) return "—";
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
   return `$${n.toFixed(0)}`;
 }
-function fmtTimeAgo(ts: number): string {
-  const mins = Math.floor((Date.now() - ts) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+function fmtAgo(ts: number): string {
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
-function calcX(initial: number, current: number): number {
-  if (!initial || initial === 0) return 0;
-  return current / initial;
+function calcX(init: number, cur: number): number {
+  return !init || init === 0 ? 0 : cur / init;
 }
 
-// ─── TOKEN AVATAR ────────────────────────────────────────────────────────────
-function TokenAvatar({
+// ── Avatar
+function Avatar({
   imageUrl,
   symbol,
   size = 40,
@@ -142,37 +153,27 @@ function TokenAvatar({
   symbol: string;
   size?: number;
 }) {
-  const [imgError, setImgError] = useState(false);
+  const [err, setErr] = useState(false);
   const letter = (symbol || "?").charAt(0).toUpperCase();
-
-  if (imageUrl && !imgError) {
+  if (imageUrl && !err)
     return (
       <img
         src={imageUrl}
         alt={symbol}
         width={size}
         height={size}
-        onError={() => setImgError(true)}
+        onError={() => setErr(true)}
         style={{
           width: size,
           height: size,
           borderRadius: "50%",
           objectFit: "cover",
           flexShrink: 0,
-          border: "1px solid #1a1a1a",
+          border: `1px solid ${C.border}`,
         }}
       />
     );
-  }
-
-  const palette = [
-    "#e8490f",
-    "#a855f7",
-    "#00b4d8",
-    "#00c47a",
-    "#ffd700",
-    "#ff4500",
-  ];
+  const palette = [C.orange, C.purple, C.blue, C.green, C.yellow, "#ff4500"];
   const bg = palette[letter.charCodeAt(0) % palette.length];
   return (
     <div
@@ -197,50 +198,40 @@ function TokenAvatar({
   );
 }
 
-// ─── SPARKLINE ───────────────────────────────────────────────────────────────
-function Sparkline({ snapshots }: { snapshots: McapSnapshot[] }) {
-  const safe = safeSnapshots(snapshots);
+// ── Sparkline
+function Spark({ snaps }: { snaps: McapSnapshot[] }) {
+  const safe = safeSnapshots(snaps);
   if (safe.length < 2) return null;
-  const vals = safe.map((s) => s.mcap);
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const range = max - min || 1;
+  const vals = safe.map((s) => s.mcap),
+    min = Math.min(...vals),
+    max = Math.max(...vals),
+    range = max - min || 1;
   const W = 72,
     H = 24;
   const pts = safe
-    .map((s, i) => {
-      const x = (i / (safe.length - 1)) * W;
-      const y = H - ((s.mcap - min) / range) * (H - 2) - 1;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
+    .map(
+      (s, i) =>
+        `${((i / (safe.length - 1)) * W).toFixed(1)},${(H - ((s.mcap - min) / range) * (H - 2) - 1).toFixed(1)}`,
+    )
     .join(" ");
-  const last = vals[vals.length - 1];
-  const isUp = last >= vals[0];
-  const color = isUp ? "#00c47a" : "#ff4455";
-  const firstPt = `0,${H}`;
-  const lastPt = `${W},${H}`;
+  const up = vals[vals.length - 1] >= vals[0];
+  const col = up ? C.green : C.red;
   return (
     <svg width={W} height={H} style={{ display: "block", overflow: "visible" }}>
       <defs>
-        <linearGradient
-          id={`sg-${isUp ? "up" : "dn"}`}
-          x1="0"
-          y1="0"
-          x2="0"
-          y2="1"
-        >
-          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        <linearGradient id={`sg${up ? "u" : "d"}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={col} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={col} stopOpacity="0" />
         </linearGradient>
       </defs>
       <polygon
-        points={`${firstPt} ${pts} ${lastPt}`}
-        fill={`url(#sg-${isUp ? "up" : "dn"})`}
+        points={`0,${H} ${pts} ${W},${H}`}
+        fill={`url(#sg${up ? "u" : "d"})`}
       />
       <polyline
         points={pts}
         fill="none"
-        stroke={color}
+        stroke={col}
         strokeWidth="1.5"
         strokeLinejoin="round"
         strokeLinecap="round"
@@ -249,52 +240,51 @@ function Sparkline({ snapshots }: { snapshots: McapSnapshot[] }) {
   );
 }
 
-// ─── X BADGE ─────────────────────────────────────────────────────────────────
+// ── X Badge
 function XBadge({
   xNow,
   xPeak,
-  isUpdating,
+  updating,
 }: {
   xNow: number;
   xPeak: number;
-  isUpdating: boolean;
+  updating: boolean;
 }) {
-  const isMega = xPeak >= 5;
-  const isWin = xPeak >= 2;
-  const isDead = xNow < 0.3;
-  const color = isMega
-    ? "#ffd700"
+  const isMega = xPeak >= 5,
+    isWin = xPeak >= 2,
+    isDead = xNow < 0.3;
+  const col = isMega
+    ? C.yellow
     : isWin
-      ? "#00c47a"
+      ? C.green
       : xNow >= 1.2
-        ? "#ffaa00"
+        ? C.amber
         : isDead
-          ? "#ff4455"
-          : "#444";
-  const bg = isMega
-    ? "#120c00"
-    : isWin
-      ? "#001610"
-      : isDead
-        ? "#120000"
-        : "#0c0c0c";
-  const displayX = isUpdating ? null : xNow >= 0.01 ? xNow : null;
-  const xStr = displayX
-    ? displayX >= 100
-      ? `${displayX.toFixed(0)}x`
-      : displayX >= 10
-        ? `${displayX.toFixed(1)}x`
-        : `${displayX.toFixed(2)}x`
-    : "—";
-
+          ? C.red
+          : C.dim;
+  const str = updating
+    ? null
+    : xNow >= 0.01
+      ? xNow >= 100
+        ? `${xNow.toFixed(0)}x`
+        : xNow >= 10
+          ? `${xNow.toFixed(1)}x`
+          : `${xNow.toFixed(2)}x`
+      : null;
   return (
     <div
       style={{
         flexShrink: 0,
         width: 64,
         height: 54,
-        background: bg,
-        border: `1px solid ${color}33`,
+        background: isMega
+          ? "#120c00"
+          : isWin
+            ? "#001610"
+            : isDead
+              ? "#120000"
+              : C.bgCard,
+        border: `1px solid ${col}33`,
         borderRadius: 6,
         display: "flex",
         flexDirection: "column" as const,
@@ -304,23 +294,30 @@ function XBadge({
       }}
     >
       <div
-        style={{ color: "#333", fontSize: 7, letterSpacing: "0.12em", ...MONO }}
+        style={{
+          color: C.muted,
+          fontSize: 7,
+          letterSpacing: "0.12em",
+          ...MONO,
+        }}
       >
         NOW
       </div>
       <div
         style={{
-          color: isUpdating ? "#2a2a2a" : color,
-          fontSize: xStr.length > 5 ? 13 : 16,
+          color: updating ? C.dim : col,
+          fontSize: (str || "").length > 5 ? 13 : 16,
           fontWeight: 900,
           lineHeight: 1,
           ...MONO,
         }}
       >
-        {isUpdating ? "···" : xStr}
+        {updating ? "···" : str || "—"}
       </div>
-      {xPeak > xNow * 1.15 && !isUpdating && (
-        <div style={{ color: "#ffd70044", fontSize: 7, ...MONO, marginTop: 1 }}>
+      {xPeak > xNow * 1.15 && !updating && (
+        <div
+          style={{ color: `${C.yellow}55`, fontSize: 7, ...MONO, marginTop: 1 }}
+        >
           pk {xPeak >= 10 ? xPeak.toFixed(1) : xPeak.toFixed(2)}x
         </div>
       )}
@@ -331,152 +328,133 @@ function XBadge({
 export default function WinsPanel({ onSelectMeme }: Props) {
   const [history, setHistory] = useState<Record<string, HistoryEntry>>({});
   const [refreshing, setRefreshing] = useState(false);
-  const [nextRefreshIn, setNextRefreshIn] = useState(AUTO_REFRESH_MS / 1000);
-  const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
-  const [updatingKeys, setUpdatingKeys] = useState<Set<string>>(new Set());
-  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(
-    new Set(),
+  const [nextIn, setNextIn] = useState(AUTO_REFRESH_MS / 1000);
+  const [lastAt, setLastAt] = useState<string | null>(null);
+  const [updating, setUpdating] = useState<Set<string>>(new Set());
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [undoSnap, setUndoSnap] = useState<Record<string, HistoryEntry> | null>(
+    null,
   );
-  const [undoSnapshot, setUndoSnapshot] = useState<Record<
-    string,
-    HistoryEntry
-  > | null>(null);
-  const [undoCountdown, setUndoCountdown] = useState(0);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [undoCD, setUndoCD] = useState(0);
+  const [selKey, setSelKey] = useState<string | null>(null);
 
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const undoCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoCD_ref = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const h = loadSafeHistory();
     const clean: Record<string, HistoryEntry> = {};
-    for (const [key, entry] of Object.entries(h)) {
-      // Drop garbage keywords
-      if (isGarbageKeyword(key)) continue;
-      // Drop tokens with no contract address and no mcap — pure noise
-      if (!entry.contractAddress && entry.initialMcap === 0) continue;
-      // Drop tokens that never had any real mcap data
-      if (
-        entry.initialMcap === 0 &&
-        entry.currentMcap === 0 &&
-        entry.peakMcap === 0
-      )
+    for (const [k, e] of Object.entries(h)) {
+      if (isGarbage(k)) continue;
+      if (!e.contractAddress && e.initialMcap === 0) continue;
+      if (e.initialMcap === 0 && e.currentMcap === 0 && e.peakMcap === 0)
         continue;
-      clean[key] = entry;
+      clean[k] = e;
     }
-    if (Object.keys(clean).length !== Object.keys(h).length) {
-      saveHistory(clean);
-    }
+    if (Object.keys(clean).length !== Object.keys(h).length) saveHistory(clean);
     setHistory(clean);
-    backfillTokenMeta(clean);
+    backfill(clean);
   }, []);
 
-  async function backfillTokenMeta(h: Record<string, HistoryEntry>) {
+  async function backfill(h: Record<string, HistoryEntry>) {
     const toFill = Object.values(h).filter(
       (e) => e.contractAddress && !e.tokenImageUrl,
     );
     if (!toFill.length) return;
-    const updated = { ...h };
+    const upd = { ...h };
     for (let i = 0; i < toFill.length; i += 8) {
       await Promise.all(
-        toFill.slice(i, i + 8).map(async (entry) => {
-          const meta = await fetchTokenMeta(entry.contractAddress!);
-          if (meta) {
-            updated[entry.keyword] = {
-              ...updated[entry.keyword],
-              displayName: updated[entry.keyword].displayName || meta.name,
-              tokenSymbol: updated[entry.keyword].tokenSymbol || meta.symbol,
+        toFill.slice(i, i + 8).map(async (e) => {
+          const meta = await fetchTokenMeta(e.contractAddress!);
+          if (meta)
+            upd[e.keyword] = {
+              ...upd[e.keyword],
+              displayName: upd[e.keyword].displayName || meta.name,
+              tokenSymbol: upd[e.keyword].tokenSymbol || meta.symbol,
               tokenImageUrl: meta.imageUrl,
             };
-          }
         }),
       );
     }
-    saveHistory(updated);
-    setHistory({ ...updated });
+    saveHistory(upd);
+    setHistory({ ...upd });
   }
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && undoSnapshot)
-        handleUndo();
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && undoSnap) doUndo();
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [undoSnapshot]);
+  }, [undoSnap]);
 
-  const handleUndo = () => {
-    if (!undoSnapshot) return;
-    saveHistory(undoSnapshot);
-    setHistory({ ...undoSnapshot });
-    setUndoSnapshot(null);
-    setUndoCountdown(0);
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    if (undoCountdownRef.current) clearInterval(undoCountdownRef.current);
+  const doUndo = () => {
+    if (!undoSnap) return;
+    saveHistory(undoSnap);
+    setHistory({ ...undoSnap });
+    setUndoSnap(null);
+    setUndoCD(0);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    if (undoCD_ref.current) clearInterval(undoCD_ref.current);
   };
-
-  const startUndoTimer = (snapshot: Record<string, HistoryEntry>) => {
-    setUndoSnapshot(snapshot);
-    let secs = UNDO_TIMEOUT_MS / 1000;
-    setUndoCountdown(secs);
-    if (undoCountdownRef.current) clearInterval(undoCountdownRef.current);
-    undoCountdownRef.current = setInterval(() => {
-      secs -= 1;
-      setUndoCountdown(secs);
-      if (secs <= 0) {
-        clearInterval(undoCountdownRef.current!);
-        setUndoSnapshot(null);
+  const startUndo = (snap: Record<string, HistoryEntry>) => {
+    setUndoSnap(snap);
+    let s = UNDO_TIMEOUT_MS / 1000;
+    setUndoCD(s);
+    if (undoCD_ref.current) clearInterval(undoCD_ref.current);
+    undoCD_ref.current = setInterval(() => {
+      s -= 1;
+      setUndoCD(s);
+      if (s <= 0) {
+        clearInterval(undoCD_ref.current!);
+        setUndoSnap(null);
       }
     }, 1000);
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = setTimeout(() => {
-      setUndoSnapshot(null);
-      setUndoCountdown(0);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => {
+      setUndoSnap(null);
+      setUndoCD(0);
     }, UNDO_TIMEOUT_MS);
   };
 
-  const handleDeleteToken = (keyword: string, e: React.MouseEvent) => {
+  const delToken = (kw: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const current = loadSafeHistory();
-    startUndoTimer({ ...current });
-    delete current[keyword];
-    saveHistory(current);
-    setHistory({ ...current });
-    if (selectedKey === keyword) setSelectedKey(null);
+    const cur = loadSafeHistory();
+    startUndo({ ...cur });
+    delete cur[kw];
+    saveHistory(cur);
+    setHistory({ ...cur });
+    if (selKey === kw) setSelKey(null);
   };
-
-  const handleClear = () => {
-    startUndoTimer(loadSafeHistory());
+  const clearAll = () => {
+    startUndo(loadSafeHistory());
     localStorage.removeItem(HISTORY_KEY);
     setHistory({});
-    setSelectedKey(null);
+    setSelKey(null);
   };
 
-  // ── Card click: load into TokenPanel instead of opening DexScreener
-  const handleCardClick = (entry: HistoryEntry) => {
-    setSelectedKey(entry.keyword);
-
+  const cardClick = (entry: HistoryEntry) => {
+    setSelKey(entry.keyword);
     if (onSelectMeme) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const meme: any = {
+      const m: any = {
         keyword: entry.tokenSymbol || entry.keyword,
         score: entry.currentMcap || 0,
         posts: 1,
-        source: entry.platforms?.join(", ") || "history",
+        source: entry.platforms?.join(",") || "history",
         hasTicker: !!entry.contractAddress,
         crossPlatforms: entry.platforms?.length || 1,
         isNewCoin: false,
-        ageLabel: undefined,
         mcap: entry.currentMcap || entry.initialMcap,
         platforms: entry.platforms,
         contractAddress: entry.contractAddress,
         celebMention: entry.celebMention,
         aiContext: entry.aiContext,
       };
-      onSelectMeme(meme);
+      onSelectMeme(m);
     }
   };
 
@@ -484,9 +462,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     const entries = Object.values(h).filter((e) => e.contractAddress);
     if (!entries.length) return h;
     setRefreshing(true);
-    setUpdatingKeys(new Set(entries.map((e) => e.keyword)));
-    const updated = { ...h };
-
+    setUpdating(new Set(entries.map((e) => e.keyword)));
+    const upd = { ...h };
     await Promise.all(
       entries.map(async (entry) => {
         try {
@@ -494,92 +471,84 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           if (!mcap || mcap <= 0) return;
           const now = Date.now();
           const e: HistoryEntry = {
-            ...updated[entry.keyword],
-            snapshots: safeSnapshots(updated[entry.keyword].snapshots),
+            ...upd[entry.keyword],
+            snapshots: safeSnapshots(upd[entry.keyword].snapshots),
           };
           e.currentMcap = mcap;
           e.lastChecked = now;
           if (mcap > e.peakMcap) e.peakMcap = mcap;
-          const snaps = e.snapshots;
-          const lastSnap = snaps[snaps.length - 1];
-          if (!lastSnap) {
+          const snaps = e.snapshots,
+            last = snaps[snaps.length - 1];
+          if (!last) {
             if (e.initialMcap === 0) e.initialMcap = mcap;
             e.snapshots = [{ ts: now, mcap }];
           } else {
-            const timeDiff = now - lastSnap.ts;
-            const mcapChange =
-              Math.abs(mcap - lastSnap.mcap) / (lastSnap.mcap || 1);
-            if (timeDiff > 1_800_000 || mcapChange > 0.05) {
+            if (
+              now - last.ts > 1_800_000 ||
+              Math.abs(mcap - last.mcap) / (last.mcap || 1) > 0.05
+            ) {
               e.snapshots = [...snaps, { ts: now, mcap }];
               if (e.snapshots.length > 48) e.snapshots.shift();
             }
           }
-          updated[entry.keyword] = e;
+          upd[entry.keyword] = e;
         } catch {
           /* skip */
         }
       }),
     );
-
-    saveHistory(updated);
-    setHistory({ ...updated });
+    saveHistory(upd);
+    setHistory({ ...upd });
     setRefreshing(false);
-    setUpdatingKeys(new Set());
-    setLastRefreshed(new Date().toLocaleTimeString());
-    return updated;
+    setUpdating(new Set());
+    setLastAt(new Date().toLocaleTimeString());
+    return upd;
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     const schedule = () => {
-      let secs = AUTO_REFRESH_MS / 1000;
-      setNextRefreshIn(secs);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      countdownRef.current = setInterval(() => {
-        secs -= 1;
-        if (!cancelled) setNextRefreshIn(Math.max(secs, 0));
+      let s = AUTO_REFRESH_MS / 1000;
+      setNextIn(s);
+      if (cdTimer.current) clearInterval(cdTimer.current);
+      cdTimer.current = setInterval(() => {
+        s -= 1;
+        if (!cancelled) setNextIn(Math.max(s, 0));
       }, 1000);
-      refreshTimerRef.current = setTimeout(async () => {
+      rfTimer.current = setTimeout(async () => {
         if (cancelled) return;
-        const h = loadSafeHistory();
-        await runRefresh(h);
+        await runRefresh(loadSafeHistory());
         if (!cancelled) schedule();
       }, AUTO_REFRESH_MS);
     };
     schedule();
     return () => {
       cancelled = true;
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (rfTimer.current) clearTimeout(rfTimer.current);
+      if (cdTimer.current) clearInterval(cdTimer.current);
     };
   }, [runRefresh]);
 
-  const historyList = Object.values(history).sort(
+  const list = Object.values(history).sort(
     (a, b) =>
       calcX(b.initialMcap, b.peakMcap) - calcX(a.initialMcap, a.peakMcap),
   );
-
-  const winners = historyList.filter(
-    (e) => calcX(e.initialMcap, e.peakMcap) >= 2,
-  );
-  const bestX = historyList.reduce(
+  const winners = list.filter((e) => calcX(e.initialMcap, e.peakMcap) >= 2);
+  const bestX = list.reduce(
     (b, e) => Math.max(b, calcX(e.initialMcap, e.peakMcap)),
     0,
   );
-  const bestToken = historyList.find(
-    (e) => calcX(e.initialMcap, e.peakMcap) === bestX,
-  );
-  const takeProfitAlerts = historyList.filter(
+  const bestTok = list.find((e) => calcX(e.initialMcap, e.peakMcap) === bestX);
+  const tpAlerts = list.filter(
     (e) =>
-      calcX(e.initialMcap, e.currentMcap) >= 2 &&
-      !dismissedAlerts.has(e.keyword),
+      calcX(e.initialMcap, e.currentMcap) >= 2 && !dismissed.has(e.keyword),
   );
 
   return (
     <div
       style={{
-        background: "#050505",
-        border: "1px solid #111",
+        background: C.bg,
+        border: `1px solid ${C.border}`,
         borderRadius: 8,
         overflow: "hidden",
         height: "100%",
@@ -588,20 +557,20 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       }}
     >
       <style>{`
-        @keyframes dot-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        @keyframes alert-glow { 0%,100%{box-shadow:0 0 8px #ffd70022} 50%{box-shadow:0 0 18px #ffd70055} }
-        .wc { cursor: pointer; transition: background 0.1s; position: relative; }
-        .wc:hover { background: #0a0a0a !important; }
-        .wc-del { opacity: 0; transition: opacity 0.12s; }
-        .wc:hover .wc-del { opacity: 1; }
-        .tp-badge { animation: alert-glow 2s ease-in-out infinite; }
+        @keyframes dpulse{0%,100%{opacity:1}50%{opacity:.4}}
+        @keyframes aglow{0%,100%{box-shadow:0 0 8px #ffd70022}50%{box-shadow:0 0 18px #ffd70055}}
+        .wc{cursor:pointer;transition:background .1s;position:relative}
+        .wc:hover{background:#0a0a0a!important}
+        .wdel{opacity:0;transition:opacity .12s}
+        .wc:hover .wdel{opacity:1}
+        .tpb{animation:aglow 2s ease-in-out infinite}
       `}</style>
 
-      {/* ── HEADER */}
+      {/* HEADER */}
       <div
         style={{
           background: "#030303",
-          borderBottom: "1px solid #111",
+          borderBottom: `1px solid ${C.border}`,
           padding: "11px 14px",
           display: "flex",
           alignItems: "center",
@@ -615,7 +584,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         >
           <span
             style={{
-              color: "#e8490f",
+              color: C.orange,
               fontSize: 11,
               fontWeight: 800,
               letterSpacing: "0.2em",
@@ -629,34 +598,32 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               width: 6,
               height: 6,
               borderRadius: "50%",
-              background: refreshing ? "#ffaa00" : "#00c47a",
-              boxShadow: `0 0 5px ${refreshing ? "#ffaa00" : "#00c47a"}88`,
-              display: "inline-block",
-              animation: "dot-pulse 2s ease-in-out infinite",
               flexShrink: 0,
+              background: refreshing ? C.amber : C.green,
+              boxShadow: `0 0 5px ${refreshing ? C.amber : C.green}88`,
+              display: "inline-block",
+              animation: "dpulse 2s ease-in-out infinite",
             }}
           />
-          {takeProfitAlerts.length > 0 && (
+          {tpAlerts.length > 0 && (
             <span
-              className="tp-badge"
+              className="tpb"
               style={{
                 fontSize: 9,
-                color: "#ffd700",
-                border: "1px solid #ffd70033",
+                color: C.yellow,
+                border: `1px solid ${C.yellow}33`,
                 padding: "2px 6px",
                 borderRadius: 3,
                 ...MONO,
-                background: "#ffd7000f",
+                background: `${C.yellow}0f`,
                 letterSpacing: "0.08em",
               }}
             >
-              💰 {takeProfitAlerts.length}× TAKE PROFIT
+              💰 {tpAlerts.length}× TAKE PROFIT
             </span>
           )}
-          <span
-            style={{ color: "#1c1c1c", fontSize: 9, ...MONO, flexShrink: 0 }}
-          >
-            {refreshing ? "refreshing..." : `↻ ${nextRefreshIn}s`}
+          <span style={{ color: C.dim, fontSize: 9, ...MONO, flexShrink: 0 }}>
+            {refreshing ? "refreshing..." : `↻ ${nextIn}s`}
           </span>
         </div>
         <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
@@ -665,8 +632,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
             disabled={refreshing}
             style={{
               background: "#0a1a0a",
-              border: "1px solid #00c47a1a",
-              color: refreshing ? "#1a1a1a" : "#00c47a",
+              border: `1px solid ${C.green}22`,
+              color: refreshing ? C.dim : C.green,
               fontSize: 9,
               ...MONO,
               padding: "4px 10px",
@@ -678,11 +645,11 @@ export default function WinsPanel({ onSelectMeme }: Props) {
             {refreshing ? "···" : "↻ NOW"}
           </button>
           <button
-            onClick={handleClear}
+            onClick={clearAll}
             style={{
               background: "transparent",
-              border: "1px solid #161616",
-              color: "#2a2a2a",
+              border: `1px solid ${C.border}`,
+              color: C.muted,
               fontSize: 9,
               ...MONO,
               padding: "4px 9px",
@@ -695,12 +662,12 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       </div>
 
-      {/* ── STATS ROW */}
-      {historyList.length > 0 && (
+      {/* STATS */}
+      {list.length > 0 && (
         <div
           style={{
             background: "#030303",
-            borderBottom: "1px solid #0d0d0d",
+            borderBottom: `1px solid ${C.bgCard}`,
             padding: "10px 14px",
             display: "flex",
             gap: 0,
@@ -710,28 +677,30 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           {[
             {
               label: "TRACKED",
-              value: historyList.length.toString(),
-              color: "#e8490f",
+              value: list.length.toString(),
+              color: C.orange,
             },
             {
               label: "2X+ WINS",
               value: winners.length.toString(),
-              color: "#00c47a",
+              color: C.green,
             },
             {
               label: "BEST",
               value:
                 bestX >= 1
-                  ? `${bestX >= 10 ? bestX.toFixed(1) : bestX.toFixed(2)}x`
+                  ? bestX >= 10
+                    ? `${bestX.toFixed(1)}x`
+                    : `${bestX.toFixed(2)}x`
                   : "—",
-              color: "#ffd700",
+              color: C.yellow,
               sub:
-                bestToken && bestX >= 1.5
-                  ? `$${(bestToken.tokenSymbol || bestToken.keyword).toUpperCase()}`
+                bestTok && bestX >= 1.5
+                  ? `$${(bestTok.tokenSymbol || bestTok.keyword).toUpperCase()}`
                   : undefined,
             },
-            { label: "REFRESH", value: lastRefreshed || "—", color: "#333" },
-          ].map((stat, i) => (
+            { label: "REFRESH", value: lastAt || "—", color: C.muted },
+          ].map((s, i) => (
             <div
               key={i}
               style={{
@@ -742,18 +711,18 @@ export default function WinsPanel({ onSelectMeme }: Props) {
             >
               <div
                 style={{
-                  color: "#1e1e1e",
+                  color: C.label,
                   fontSize: 7,
                   letterSpacing: "0.14em",
                   ...MONO,
                   marginBottom: 3,
                 }}
               >
-                {stat.label}
+                {s.label}
               </div>
               <div
                 style={{
-                  color: stat.color,
+                  color: s.color,
                   fontSize: i === 3 ? 10 : 18,
                   fontWeight: i === 3 ? 500 : 900,
                   ...MONO,
@@ -763,18 +732,18 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   whiteSpace: "nowrap" as const,
                 }}
               >
-                {stat.value}
+                {s.value}
               </div>
-              {stat.sub && (
+              {(s as { sub?: string }).sub && (
                 <div
                   style={{
-                    color: "#ffd70044",
+                    color: `${C.yellow}66`,
                     fontSize: 7,
                     ...MONO,
                     marginTop: 2,
                   }}
                 >
-                  {stat.sub}
+                  {(s as { sub?: string }).sub}
                 </div>
               )}
             </div>
@@ -782,12 +751,12 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       )}
 
-      {/* ── UNDO TOAST */}
-      {undoSnapshot && undoCountdown > 0 && (
+      {/* UNDO */}
+      {undoSnap && undoCD > 0 && (
         <div
           style={{
             background: "#0e0800",
-            borderBottom: "1px solid #e8490f22",
+            borderBottom: `1px solid ${C.orange}22`,
             padding: "9px 14px",
             display: "flex",
             alignItems: "center",
@@ -798,19 +767,19 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           <div>
             <div
               style={{
-                color: "#e8490f",
+                color: C.orange,
                 fontSize: 10,
                 fontWeight: 700,
                 ...MONO,
                 letterSpacing: "0.1em",
               }}
             >
-              CLEARED — undo in {undoCountdown}s
+              CLEARED — undo in {undoCD}s
             </div>
             <div
               style={{
                 height: 2,
-                background: "#1a1a1a",
+                background: C.border,
                 borderRadius: 1,
                 marginTop: 5,
                 width: 120,
@@ -820,8 +789,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               <div
                 style={{
                   height: "100%",
-                  width: `${(undoCountdown / (UNDO_TIMEOUT_MS / 1000)) * 100}%`,
-                  background: "#e8490f",
+                  width: `${(undoCD / (UNDO_TIMEOUT_MS / 1000)) * 100}%`,
+                  background: C.orange,
                   borderRadius: 1,
                   transition: "width 1s linear",
                 }}
@@ -829,9 +798,9 @@ export default function WinsPanel({ onSelectMeme }: Props) {
             </div>
           </div>
           <button
-            onClick={handleUndo}
+            onClick={doUndo}
             style={{
-              background: "#e8490f",
+              background: C.orange,
               border: "none",
               color: "#fff",
               fontSize: 10,
@@ -847,8 +816,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       )}
 
-      {/* ── EMPTY STATE */}
-      {historyList.length === 0 && !undoSnapshot && (
+      {/* EMPTY */}
+      {list.length === 0 && !undoSnap && (
         <div
           style={{
             flex: 1,
@@ -862,7 +831,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         >
           <div
             style={{
-              color: "#0e0e0e",
+              color: "#111",
               fontSize: 28,
               fontWeight: 900,
               letterSpacing: "0.4em",
@@ -873,7 +842,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           </div>
           <div
             style={{
-              color: "#1a1a1a",
+              color: C.dim,
               fontSize: 10,
               letterSpacing: "0.2em",
               ...MONO,
@@ -883,7 +852,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           </div>
           <div
             style={{
-              color: "#141414",
+              color: C.dim,
               fontSize: 9,
               ...MONO,
               textAlign: "center",
@@ -897,39 +866,35 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       )}
 
-      {/* ── TOKEN CARDS */}
+      {/* CARDS */}
       <div style={{ flex: 1, overflowY: "auto" as const }}>
-        {historyList.map((entry) => {
-          const safeSnaps = safeSnapshots(entry.snapshots);
+        {list.map((entry) => {
+          const snaps = safeSnapshots(entry.snapshots);
           const xNow = calcX(entry.initialMcap, entry.currentMcap);
           const xPeak = calcX(entry.initialMcap, entry.peakMcap);
-          const isMega = xPeak >= 5;
-          const isWin = xPeak >= 2;
-          const isDead = xNow < 0.3;
+          const isMega = xPeak >= 5,
+            isWin = xPeak >= 2,
+            isDead = xNow < 0.3;
           const hasDumped = xNow < 0.7 && xPeak >= 1.5;
           const isCeleb = !!entry.celebMention;
-          const isUpdating = updatingKeys.has(entry.keyword);
-          const showTP = xNow >= 2 && !dismissedAlerts.has(entry.keyword);
-          const isSelected = selectedKey === entry.keyword;
-
-          const accentColor = isMega
-            ? "#ffd700"
+          const isUpd = updating.has(entry.keyword);
+          const showTP = xNow >= 2 && !dismissed.has(entry.keyword);
+          const isSel = selKey === entry.keyword;
+          const accent = isMega
+            ? C.yellow
             : isWin
-              ? "#00c47a"
+              ? C.green
               : xNow >= 1.2
-                ? "#ffaa00"
+                ? C.amber
                 : isDead
-                  ? "#ff4455"
-                  : "#1e1e1e";
-          const dropFromPeak =
+                  ? C.red
+                  : C.border;
+          const drop =
             xPeak > 0
               ? ((entry.peakMcap - entry.currentMcap) / entry.peakMcap) * 100
               : 0;
-
-          const displaySymbol = (
-            entry.tokenSymbol || entry.keyword
-          ).toUpperCase();
-          const displayName =
+          const sym = (entry.tokenSymbol || entry.keyword).toUpperCase();
+          const dispName =
             entry.displayName &&
             entry.displayName.toLowerCase() !== entry.keyword.toLowerCase()
               ? entry.displayName
@@ -939,20 +904,20 @@ export default function WinsPanel({ onSelectMeme }: Props) {
             <div
               key={entry.keyword}
               className="wc"
-              onClick={() => handleCardClick(entry)}
+              onClick={() => cardClick(entry)}
               style={{
-                borderBottom: "1px solid #0a0a0a",
+                borderBottom: `1px solid ${C.bgCard}`,
                 borderTop: "none",
                 borderRight: "none",
-                borderLeft: `2px solid ${isSelected ? (isMega ? "#ffd700" : "#e8490f") : accentColor}`,
-                background: isSelected ? "#0d0300" : "#050505",
+                borderLeft: `2px solid ${isSel ? (isMega ? C.yellow : C.orange) : accent}`,
+                background: isSel ? "#0d0300" : C.bg,
               }}
             >
-              {/* Take-profit banner */}
+              {/* TAKE PROFIT BANNER */}
               {showTP && (
                 <div
                   style={{
-                    borderBottom: "1px solid #ffd70018",
+                    borderBottom: `1px solid ${C.yellow}22`,
                     padding: "7px 14px",
                     display: "flex",
                     alignItems: "center",
@@ -964,7 +929,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   <div style={{ minWidth: 0 }}>
                     <div
                       style={{
-                        color: "#ffd700",
+                        color: C.yellow,
                         fontSize: 9,
                         fontWeight: 900,
                         letterSpacing: "0.12em",
@@ -978,7 +943,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     </div>
                     <div
                       style={{
-                        color: "#ffd70044",
+                        color: `${C.yellow}77`,
                         fontSize: 8,
                         ...MONO,
                         marginTop: 2,
@@ -999,7 +964,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       >
                         <button
                           style={{
-                            background: "#00c47a",
+                            background: C.green,
                             border: "none",
                             color: "#000",
                             fontSize: 9,
@@ -1018,14 +983,12 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        setDismissedAlerts(
-                          (prev) => new Set([...prev, entry.keyword]),
-                        );
+                        setDismissed((p) => new Set([...p, entry.keyword]));
                       }}
                       style={{
                         background: "transparent",
-                        border: "1px solid #ffd70022",
-                        color: "#ffd70055",
+                        border: `1px solid ${C.yellow}22`,
+                        color: `${C.yellow}77`,
                         fontSize: 9,
                         ...MONO,
                         padding: "5px 8px",
@@ -1039,15 +1002,14 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 </div>
               )}
 
-              {/* Card body */}
+              {/* BODY */}
               <div
                 style={{
                   padding: "11px 12px",
-                  opacity: isUpdating ? 0.5 : 1,
-                  transition: "opacity 0.3s",
+                  opacity: isUpd ? 0.5 : 1,
+                  transition: "opacity .3s",
                 }}
               >
-                {/* Row 1: avatar + name + x badge */}
                 <div
                   style={{
                     display: "flex",
@@ -1056,13 +1018,14 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     marginBottom: 8,
                   }}
                 >
-                  <TokenAvatar
+                  <Avatar
                     imageUrl={entry.tokenImageUrl}
-                    symbol={displaySymbol}
+                    symbol={sym}
                     size={40}
                   />
 
                   <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* Name badges */}
                     <div
                       style={{
                         display: "flex",
@@ -1075,22 +1038,22 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       <span
                         style={{
                           color: isMega
-                            ? "#ffd700"
+                            ? C.yellow
                             : isWin
-                              ? "#00c47a"
-                              : "#c0c0c0",
+                              ? C.green
+                              : C.primary,
                           fontSize: 15,
                           fontWeight: 900,
                           ...MONO,
                           letterSpacing: "0.04em",
                         }}
                       >
-                        ${displaySymbol}
+                        ${sym}
                       </span>
-                      {displayName && (
+                      {dispName && (
                         <span
                           style={{
-                            color: "#2a2a2a",
+                            color: C.muted,
                             fontSize: 9,
                             ...MONO,
                             overflow: "hidden",
@@ -1099,20 +1062,19 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             maxWidth: 100,
                           }}
                         >
-                          {displayName}
+                          {dispName}
                         </span>
                       )}
                       {isMega && (
                         <span
                           style={{
                             fontSize: 8,
-                            color: "#ffd700",
-                            border: "1px solid #ffd70033",
+                            color: C.yellow,
+                            border: `1px solid ${C.yellow}33`,
                             padding: "2px 5px",
                             borderRadius: 2,
                             ...MONO,
-                            background: "#ffd7001a",
-                            letterSpacing: "0.1em",
+                            background: `${C.yellow}1a`,
                           }}
                         >
                           🚀 MEGA
@@ -1122,8 +1084,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         <span
                           style={{
                             fontSize: 8,
-                            color: "#00c47a",
-                            border: "1px solid #00c47a22",
+                            color: C.green,
+                            border: `1px solid ${C.green}22`,
                             padding: "2px 5px",
                             borderRadius: 2,
                             ...MONO,
@@ -1143,15 +1105,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             ...MONO,
                           }}
                         >
-                          ↓ {dropFromPeak.toFixed(0)}%
+                          ↓ {drop.toFixed(0)}%
                         </span>
                       )}
                       {isDead && !hasDumped && (
                         <span
                           style={{
                             fontSize: 8,
-                            color: "#ff4455",
-                            border: "1px solid #ff445522",
+                            color: C.red,
+                            border: `1px solid ${C.red}22`,
                             padding: "2px 5px",
                             borderRadius: 2,
                             ...MONO,
@@ -1164,8 +1126,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         <span
                           style={{
                             fontSize: 8,
-                            color: "#ffd700",
-                            border: "1px solid #ffd70022",
+                            color: C.yellow,
+                            border: `1px solid ${C.yellow}22`,
                             padding: "2px 5px",
                             borderRadius: 2,
                             ...MONO,
@@ -1176,10 +1138,11 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       )}
                     </div>
 
+                    {/* AI context — NOW READABLE */}
                     {entry.aiContext && (
                       <div
                         style={{
-                          color: "#252525",
+                          color: C.muted,
                           fontSize: 9,
                           ...MONO,
                           overflow: "hidden",
@@ -1189,7 +1152,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           maxWidth: "95%",
                         }}
                       >
-                        {entry.aiContext.slice(0, 55)}
+                        {entry.aiContext.slice(0, 60)}
                       </div>
                     )}
 
@@ -1206,15 +1169,13 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         {
                           label: "IN",
                           value: fmtMcap(entry.initialMcap),
-                          color: "#333",
+                          color: C.muted,
                         },
                         null,
                         {
                           label: "NOW",
-                          value: isUpdating
-                            ? "···"
-                            : fmtMcap(entry.currentMcap),
-                          color: isUpdating ? "#222" : accentColor,
+                          value: isUpd ? "···" : fmtMcap(entry.currentMcap),
+                          color: isUpd ? C.dim : accent,
                         },
                         ...(entry.peakMcap > entry.currentMcap * 1.1
                           ? [
@@ -1222,7 +1183,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                               {
                                 label: "PEAK",
                                 value: fmtMcap(entry.peakMcap),
-                                color: "#ffd70066",
+                                color: `${C.yellow}99`,
                               },
                             ]
                           : []),
@@ -1231,11 +1192,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           return (
                             <span
                               key={i}
-                              style={{
-                                color: "#161616",
-                                fontSize: 10,
-                                ...MONO,
-                              }}
+                              style={{ color: C.dim, fontSize: 10, ...MONO }}
                             >
                               →
                             </span>
@@ -1244,15 +1201,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           <div
                             key={i}
                             style={{
-                              background: "#0a0a0a",
-                              border: "1px solid #141414",
+                              background: C.bgCard,
+                              border: `1px solid ${C.border}`,
                               borderRadius: 3,
                               padding: "3px 7px",
                             }}
                           >
                             <div
                               style={{
-                                color: "#1c1c1c",
+                                color: C.label,
                                 fontSize: 7,
                                 ...MONO,
                                 marginBottom: 1,
@@ -1277,17 +1234,16 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     </div>
                   </div>
 
-                  <XBadge xNow={xNow} xPeak={xPeak} isUpdating={isUpdating} />
+                  <XBadge xNow={xNow} xPeak={xPeak} updating={isUpd} />
                 </div>
 
-                {/* Sparkline */}
-                {safeSnaps.length >= 2 && (
+                {snaps.length >= 2 && (
                   <div style={{ marginBottom: 8, marginLeft: 50 }}>
-                    <Sparkline snapshots={safeSnaps} />
+                    <Spark snaps={snaps} />
                   </div>
                 )}
 
-                {/* Footer row */}
+                {/* Footer */}
                 <div
                   style={{
                     display: "flex",
@@ -1300,16 +1256,16 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 5 }}
                   >
-                    <span style={{ color: "#1c1c1c", fontSize: 8, ...MONO }}>
-                      {fmtTimeAgo(entry.seenAt)}
+                    <span style={{ color: C.muted, fontSize: 8, ...MONO }}>
+                      {fmtAgo(entry.seenAt)}
                     </span>
                     {entry.platforms.slice(0, 2).map((p) => (
                       <span
                         key={p}
                         style={{
                           fontSize: 8,
-                          color: "#252525",
-                          border: "1px solid #181818",
+                          color: C.dim,
+                          border: `1px solid ${C.border}`,
                           padding: "1px 5px",
                           borderRadius: 2,
                           ...MONO,
@@ -1324,7 +1280,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   >
                     <span
                       style={{
-                        color: xNow >= 1 ? "#00c47a33" : "#ff445533",
+                        color: xNow >= 1 ? `${C.green}77` : `${C.red}77`,
                         fontSize: 9,
                         fontWeight: 700,
                         ...MONO,
@@ -1343,8 +1299,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             fontSize: 8,
-                            color: "#00b4d8",
-                            border: "1px solid #00b4d822",
+                            color: C.blue,
+                            border: `1px solid ${C.blue}33`,
                             padding: "2px 6px",
                             borderRadius: 2,
                             textDecoration: "none",
@@ -1360,8 +1316,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             fontSize: 8,
-                            color: "#a855f7",
-                            border: "1px solid #a855f722",
+                            color: C.purple,
+                            border: `1px solid ${C.purple}33`,
                             padding: "2px 6px",
                             borderRadius: 2,
                             textDecoration: "none",
@@ -1373,12 +1329,12 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       </>
                     )}
                     <button
-                      className="wc-del"
-                      onClick={(e) => handleDeleteToken(entry.keyword, e)}
+                      className="wdel"
+                      onClick={(e) => delToken(entry.keyword, e)}
                       style={{
                         background: "transparent",
-                        border: "1px solid #141414",
-                        color: "#222",
+                        border: `1px solid ${C.border}`,
+                        color: C.dim,
                         fontSize: 8,
                         width: 18,
                         height: 18,
@@ -1394,16 +1350,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         (e.currentTarget as HTMLElement).style.background =
                           "#1a0000";
                         (e.currentTarget as HTMLElement).style.borderColor =
-                          "#ff445533";
-                        (e.currentTarget as HTMLElement).style.color =
-                          "#ff4455";
+                          `${C.red}44`;
+                        (e.currentTarget as HTMLElement).style.color = C.red;
                       }}
                       onMouseLeave={(e) => {
                         (e.currentTarget as HTMLElement).style.background =
                           "transparent";
                         (e.currentTarget as HTMLElement).style.borderColor =
-                          "#141414";
-                        (e.currentTarget as HTMLElement).style.color = "#222";
+                          C.border;
+                        (e.currentTarget as HTMLElement).style.color = C.dim;
                       }}
                     >
                       ✕

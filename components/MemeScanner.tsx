@@ -140,7 +140,6 @@ export async function fetchCurrentMcap(ca: string): Promise<number | null> {
   }
 }
 
-// Detect CA-fragment garbage keywords
 function isGarbageKeyword(kw: string): boolean {
   if (kw.length > 14) return true;
   if (/^[1-9A-HJ-NP-Za-km-z]{10,}$/.test(kw)) return true;
@@ -150,18 +149,14 @@ function isGarbageKeyword(kw: string): boolean {
   return false;
 }
 
-// Minimum quality gates for Win Tracker
-// Tokens below these are noise — not worth watching
-const MIN_TRACK_SCORE = 500_000;
-const MIN_TRACK_MCAP = 5_000;
+// Lowered thresholds so more tokens get tracked
+const MIN_TRACK_SCORE = 100_000;
+const MIN_TRACK_MCAP = 1_000;
 
 export function recordTokenSighting(result: ScanResult) {
   if (!result.contractAddress) return;
   if (isGarbageKeyword(result.keyword)) return;
-
-  // Skip weak signals — celeb tokens bypass this since they're always relevant
   if ((result.score || 0) < MIN_TRACK_SCORE && !result.celebMention) return;
-  // Skip tokens with a known mcap that's too tiny to matter
   if ((result.mcap || 0) > 0 && (result.mcap || 0) < MIN_TRACK_MCAP) return;
 
   const h = loadHistory();
@@ -222,7 +217,7 @@ export function recordTokenSighting(result: ScanResult) {
 
 function getAgeDisplay(ageMinutes: number | undefined) {
   if (ageMinutes === undefined)
-    return { label: "", color: "#2a2a2a", isStale: false, isFresh: false };
+    return { label: "", color: "#555", isStale: false, isFresh: false };
   const days = ageMinutes / 1440;
   if (days > 14)
     return {
@@ -291,10 +286,10 @@ const RUG_COLOR: Record<string, string> = {
   low: "#00c47a",
   medium: "#ffaa00",
   high: "#ff2222",
-  unknown: "#333",
+  unknown: "#555",
 };
 
-// ─── TOKEN AVATAR ────────────────────────────────────────────────────────────
+// ─── TOKEN AVATAR ─────────────────────────────────────────────────────────────
 function TokenAvatar({
   imageUrl,
   symbol,
@@ -321,7 +316,7 @@ function TokenAvatar({
           borderRadius: "50%",
           objectFit: "cover",
           flexShrink: 0,
-          border: "1px solid #1a1a1a",
+          border: "1px solid #2a2a2a",
         }}
       />
     );
@@ -359,7 +354,7 @@ function TokenAvatar({
   );
 }
 
-// ─── DECISION CHAIN ──────────────────────────────────────────────────────────
+// ─── DECISION CHAIN ───────────────────────────────────────────────────────────
 function DecisionChain({ item }: { item: ScanResult }) {
   const platforms = item.platforms || [];
   const signals: { label: string; color: string; reason: string }[] = [];
@@ -462,7 +457,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
         gap: 10,
         padding: "12px 14px",
         background: "#040404",
-        borderTop: "1px solid #0d0d0d",
+        borderTop: "1px solid #111",
       }}
     >
       <div>
@@ -476,8 +471,8 @@ function DecisionChain({ item }: { item: ScanResult }) {
         >
           <span
             style={{
-              color: "#2a2a2a",
-              fontSize: 8,
+              color: "#666",
+              fontSize: 9,
               ...MONO,
               letterSpacing: "0.14em",
             }}
@@ -487,7 +482,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
           <span
             style={{
               color: confidenceColor,
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: 700,
               ...MONO,
             }}
@@ -498,7 +493,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
         <div
           style={{
             height: 3,
-            background: "#111",
+            background: "#1a1a1a",
             borderRadius: 2,
             overflow: "hidden",
           }}
@@ -517,8 +512,8 @@ function DecisionChain({ item }: { item: ScanResult }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div
           style={{
-            color: "#1e1e1e",
-            fontSize: 7,
+            color: "#555",
+            fontSize: 8,
             ...MONO,
             letterSpacing: "0.14em",
             marginBottom: 2,
@@ -545,7 +540,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
               <div
                 style={{
                   color: sig.color,
-                  fontSize: 8,
+                  fontSize: 9,
                   fontWeight: 700,
                   ...MONO,
                   letterSpacing: "0.1em",
@@ -555,8 +550,8 @@ function DecisionChain({ item }: { item: ScanResult }) {
               </div>
               <div
                 style={{
-                  color: "#444",
-                  fontSize: 9,
+                  color: "#666",
+                  fontSize: 10,
                   ...MONO,
                   lineHeight: 1.5,
                   marginTop: 1,
@@ -568,7 +563,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
           </div>
         ))}
         {signals.length === 0 && (
-          <div style={{ color: "#222", fontSize: 9, ...MONO }}>
+          <div style={{ color: "#444", fontSize: 10, ...MONO }}>
             Weak signal — insufficient cross-platform confirmation
           </div>
         )}
@@ -580,11 +575,11 @@ function DecisionChain({ item }: { item: ScanResult }) {
             <span
               key={p}
               style={{
-                fontSize: 7,
+                fontSize: 8,
                 ...MONO,
                 color: PLATFORM_META[p].color,
                 border: `1px solid ${PLATFORM_META[p].color}33`,
-                padding: "1px 5px",
+                padding: "2px 6px",
                 borderRadius: 2,
               }}
             >
@@ -629,7 +624,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       );
       if (!toEnrich.length) return results;
       setEnriching(true);
-
       for (let i = 0; i < toEnrich.length; i += 12) {
         await Promise.all(
           toEnrich.slice(i, i + 12).map(async (r) => {
@@ -686,10 +680,8 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         clearInterval(ticker);
         setProgress(100);
         const { results, logs } = res.data;
-
         const enriched = await enrichWithTokenMeta(results);
         enriched.forEach(recordTokenSighting);
-
         setScanLog([...logs.slice(-8)]);
         setTrends(enriched);
         setLastScan(new Date().toLocaleTimeString());
@@ -758,7 +750,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     if (hasChain) return { label: "ON-CHAIN", color: "#00c47a" };
     if (item.hasTicker && hasSocial)
       return { label: "TRENDING", color: "#e8490f" };
-    return { label: "WATCH", color: "#333" };
+    return { label: "WATCH", color: "#555" };
   };
 
   const filtered = trends.filter((t) => {
@@ -814,7 +806,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     <div
       style={{
         background: "#060606",
-        border: "1px solid #141414",
+        border: "1px solid #1a1a1a",
         borderRadius: 8,
         overflow: "hidden",
         height: "100%",
@@ -822,9 +814,10 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         flexDirection: "column",
       }}
     >
+      {/* Header */}
       <div
         style={{
-          borderBottom: "1px solid #111",
+          borderBottom: "1px solid #1a1a1a",
           padding: "12px 16px",
           display: "flex",
           alignItems: "center",
@@ -844,13 +837,13 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
             <span
               style={{
                 color: "#e8490f",
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 700,
                 letterSpacing: "0.18em",
                 ...MONO,
               }}
             >
-              MEME SCANNER
+              WRAITH SCANNER
             </span>
             <span
               style={{
@@ -865,7 +858,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
             <span
               style={{
                 color: loading ? "#ffaa00" : enriching ? "#ffaa00" : "#00c47a",
-                fontSize: 9,
+                fontSize: 10,
                 ...MONO,
               }}
             >
@@ -914,9 +907,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
               </span>
             )}
           </div>
-          <div
-            style={{ color: "#2a2a2a", fontSize: 10, marginTop: 3, ...MONO }}
-          >
+          <div style={{ color: "#666", fontSize: 10, marginTop: 3, ...MONO }}>
             {loading
               ? scanLog[scanLog.length - 1] || "Initializing..."
               : enriching
@@ -931,8 +922,8 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
             onClick={() => setAutoScan((v) => !v)}
             style={{
               background: autoScan ? "#001a08" : "#111",
-              border: `1px solid ${autoScan ? "#00c47a44" : "#1a1a1a"}`,
-              color: autoScan ? "#00c47a" : "#444",
+              border: `1px solid ${autoScan ? "#00c47a44" : "#222"}`,
+              color: autoScan ? "#00c47a" : "#555",
               borderRadius: 4,
               padding: "5px 9px",
               fontSize: 9,
@@ -962,18 +953,19 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         </div>
       </div>
 
+      {/* Progress bar */}
       {loading && (
         <div
           style={{
             background: "#050505",
-            borderBottom: "1px solid #0d0d0d",
+            borderBottom: "1px solid #111",
             padding: "10px 16px",
           }}
         >
           <div
             style={{
               height: 2,
-              background: "#111",
+              background: "#1a1a1a",
               borderRadius: 1,
               marginBottom: 8,
               overflow: "hidden",
@@ -998,8 +990,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                   style={{
                     fontSize: 9,
                     ...MONO,
-                    color:
-                      step === i ? "#e8490f" : step > i ? "#222" : "#1a1a1a",
+                    color: step === i ? "#e8490f" : step > i ? "#444" : "#333",
                   }}
                 >
                   {step === i ? ">" : "·"} {label.toUpperCase()}
@@ -1032,10 +1023,11 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         </div>
       )}
 
+      {/* Filter tabs */}
       <div
         style={{
           padding: "5px 10px",
-          borderBottom: "1px solid #0d0d0d",
+          borderBottom: "1px solid #111",
           display: "flex",
           gap: 3,
           background: "#040404",
@@ -1053,7 +1045,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
               style={{
                 background: active ? "#111" : "transparent",
                 border: `1px solid ${active ? col + "55" : "transparent"}`,
-                color: active ? col : "#2a2a2a",
+                color: active ? col : "#555",
                 borderRadius: 3,
                 padding: "3px 8px",
                 fontSize: 9,
@@ -1080,7 +1072,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         >
           <div
             style={{
-              color: "#0d0d0d",
+              color: "#222",
               fontSize: 28,
               ...MONO,
               letterSpacing: "0.3em",
@@ -1088,7 +1080,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
           >
             WRAITH
           </div>
-          <div style={{ color: "#1a1a1a", fontSize: 10, ...MONO }}>
+          <div style={{ color: "#444", fontSize: 10, ...MONO }}>
             {filter === "celeb"
               ? "NO CELEB SIGNALS"
               : filter === "safe"
@@ -1100,6 +1092,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         </div>
       )}
 
+      {/* Token list */}
       <div style={{ flex: 1, overflowY: "auto" as const }}>
         {filtered.map((t, i) => {
           const sig = getSignal(t);
@@ -1124,7 +1117,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
               : null;
 
           return (
-            <div key={t.keyword} style={{ borderBottom: "1px solid #080808" }}>
+            <div key={t.keyword} style={{ borderBottom: "1px solid #0d0d0d" }}>
               <button
                 onClick={() => {
                   onSelectMeme(t);
@@ -1133,7 +1126,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                 style={{
                   width: "100%",
                   textAlign: "left",
-                  padding: "9px 14px",
+                  padding: "10px 14px",
                   background: isSelected
                     ? isCeleb
                       ? "#0d0a00"
@@ -1148,7 +1141,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                   justifyContent: "space-between",
                   cursor: "pointer",
                   gap: 8,
-                  opacity: qualityWarning ? 0.5 : ageDisplay.isStale ? 0.35 : 1,
+                  opacity: qualityWarning ? 0.6 : ageDisplay.isStale ? 0.4 : 1,
                 }}
                 onMouseEnter={(e) => {
                   if (!isSelected)
@@ -1174,10 +1167,11 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                     flex: 1,
                   }}
                 >
+                  {/* Rank number */}
                   <span
                     style={{
-                      color: "#1e1e1e",
-                      fontSize: 9,
+                      color: "#444",
+                      fontSize: 10,
                       ...MONO,
                       width: 18,
                       flexShrink: 0,
@@ -1194,13 +1188,14 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                   />
 
                   <div style={{ minWidth: 0, flex: 1 }}>
+                    {/* Name row */}
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
                         gap: 4,
                         flexWrap: "wrap" as const,
-                        marginBottom: 2,
+                        marginBottom: 3,
                       }}
                     >
                       <span
@@ -1208,7 +1203,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                           color: isCeleb
                             ? "#ffd700"
                             : ageDisplay.isStale
-                              ? "#555"
+                              ? "#666"
                               : "#f0f0f0",
                           fontSize: 13,
                           fontWeight: 700,
@@ -1220,7 +1215,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       {displayName && (
                         <span
                           style={{
-                            color: "#2e2e2e",
+                            color: "#555",
                             fontSize: 9,
                             ...MONO,
                             overflow: "hidden",
@@ -1235,7 +1230,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       {ageDisplay.label && (
                         <span
                           style={{
-                            fontSize: 7,
+                            fontSize: 8,
                             ...MONO,
                             color: ageDisplay.color,
                             border: `1px solid ${ageDisplay.color}44`,
@@ -1255,7 +1250,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       {isCeleb && (
                         <span
                           style={{
-                            fontSize: 7,
+                            fontSize: 8,
                             color: "#ffd700",
                             border: "1px solid #ffd70044",
                             padding: "1px 5px",
@@ -1273,7 +1268,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       {t.isNewCoin && (
                         <span
                           style={{
-                            fontSize: 7,
+                            fontSize: 8,
                             color: "#a855f7",
                             border: "1px solid #a855f744",
                             padding: "1px 4px",
@@ -1287,8 +1282,8 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       {qualityWarning && (
                         <span
                           style={{
-                            fontSize: 7,
-                            color: "#444",
+                            fontSize: 8,
+                            color: "#555",
                             border: "1px solid #33333344",
                             padding: "1px 4px",
                             borderRadius: 2,
@@ -1315,7 +1310,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                             <span
                               key={plat}
                               style={{
-                                fontSize: 7,
+                                fontSize: 8,
                                 color: pi.color,
                                 border: `1px solid ${pi.color}33`,
                                 padding: "1px 4px",
@@ -1330,7 +1325,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       {t.rugRisk && t.rugRisk !== "unknown" && (
                         <span
                           style={{
-                            fontSize: 7,
+                            fontSize: 8,
                             color: RUG_COLOR[t.rugRisk],
                             border: `1px solid ${RUG_COLOR[t.rugRisk]}33`,
                             padding: "1px 4px",
@@ -1347,11 +1342,12 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       )}
                     </div>
 
+                    {/* AI context */}
                     {isCeleb && t.aiContext && (
                       <div
                         style={{
                           fontSize: 9,
-                          color: "#ffd70055",
+                          color: "#ffd70066",
                           ...MONO,
                           marginBottom: 2,
                           maxWidth: 200,
@@ -1360,14 +1356,14 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                           whiteSpace: "nowrap" as const,
                         }}
                       >
-                        ⭐ {t.aiContext.slice(0, 50)}
+                        ⭐ {t.aiContext.slice(0, 55)}
                       </div>
                     )}
                     {!isCeleb && t.aiContext && (
                       <div
                         style={{
                           fontSize: 9,
-                          color: "#2e2e2e",
+                          color: "#555",
                           ...MONO,
                           maxWidth: 200,
                           overflow: "hidden",
@@ -1376,10 +1372,11 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                           marginBottom: 2,
                         }}
                       >
-                        ✦ {t.aiContext.slice(0, 50)}
+                        ✦ {t.aiContext.slice(0, 55)}
                       </div>
                     )}
 
+                    {/* Stats row */}
                     <div
                       style={{
                         display: "flex",
@@ -1391,7 +1388,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       {change1h && (
                         <span
                           style={{
-                            fontSize: 9,
+                            fontSize: 10,
                             color: change1h.color,
                             ...MONO,
                             fontWeight: 600,
@@ -1402,28 +1399,27 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       )}
                       {t.liquidity ? (
                         <span
-                          style={{ fontSize: 9, color: "#1f5a3a", ...MONO }}
+                          style={{ fontSize: 9, color: "#3a8a60", ...MONO }}
                         >
                           ${(t.liquidity / 1000).toFixed(0)}K liq
                         </span>
                       ) : null}
                       {t.mcap ? (
-                        <span
-                          style={{ fontSize: 9, color: "#2a2a2a", ...MONO }}
-                        >
+                        <span style={{ fontSize: 9, color: "#555", ...MONO }}>
                           mc $
                           {t.mcap >= 1000
                             ? (t.mcap / 1000).toFixed(0) + "K"
                             : t.mcap}
                         </span>
                       ) : null}
-                      <span style={{ fontSize: 7, color: "#1a1a1a", ...MONO }}>
+                      <span style={{ fontSize: 8, color: "#444", ...MONO }}>
                         {platformCount}src
                       </span>
                     </div>
                   </div>
                 </div>
 
+                {/* Right side — signal badge + score */}
                 <div
                   style={{
                     display: "flex",
@@ -1448,13 +1444,13 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                   >
                     {sig.label}
                   </span>
-                  <span style={{ color: "#1e1e1e", fontSize: 8, ...MONO }}>
+                  <span style={{ color: "#555", fontSize: 9, ...MONO }}>
                     {t.score.toLocaleString()}
                   </span>
                   <span
                     style={{
-                      color: isExpanded ? "#e8490f" : "#222",
-                      fontSize: 8,
+                      color: isExpanded ? "#e8490f" : "#444",
+                      fontSize: 9,
                       ...MONO,
                     }}
                   >
@@ -1469,10 +1465,11 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         })}
       </div>
 
+      {/* Footer */}
       {trends.length > 0 && (
         <div
           style={{
-            borderTop: "1px solid #0d0d0d",
+            borderTop: "1px solid #111",
             padding: "6px 16px",
             display: "flex",
             justifyContent: "space-between",
@@ -1484,23 +1481,23 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
           }}
         >
           <div style={{ display: "flex", gap: 10 }}>
-            <span style={{ color: "#ffd70044", fontSize: 8, ...MONO }}>
+            <span style={{ color: "#ffd70066", fontSize: 9, ...MONO }}>
               ⭐ {celebCount}
             </span>
-            <span style={{ color: "#00c47a44", fontSize: 8, ...MONO }}>
+            <span style={{ color: "#00c47a66", fontSize: 9, ...MONO }}>
               ⚡ {freshCount} fresh
             </span>
-            <span style={{ color: "#ff660044", fontSize: 8, ...MONO }}>
+            <span style={{ color: "#ff660066", fontSize: 9, ...MONO }}>
               🔥 {viralCount}
             </span>
-            <span style={{ color: "#00c47a33", fontSize: 8, ...MONO }}>
+            <span style={{ color: "#00c47a55", fontSize: 9, ...MONO }}>
               SAFE: {trends.filter((t) => t.rugRisk === "low").length}
             </span>
           </div>
           <span
             style={{
-              color: autoScan ? "#00c47a44" : "#222",
-              fontSize: 8,
+              color: autoScan ? "#00c47a66" : "#333",
+              fontSize: 9,
               ...MONO,
             }}
           >

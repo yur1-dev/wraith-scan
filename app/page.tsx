@@ -33,7 +33,7 @@ const HANDLE_W = 6;
 
 export default function Home() {
   const [selectedMeme, setSelectedMeme] = useState<MemeTrend | null>(null);
-  const [leftW, setLeftW] = useState(400);
+  const [leftW, setLeftW] = useState(420);
   const [rightW, setRightW] = useState(420);
 
   const containerRef = useRef<HTMLDivElement>(null);

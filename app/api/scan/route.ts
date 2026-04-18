@@ -1,70 +1,62 @@
 import { NextResponse } from "next/server";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// WRAITH SCANNER v5 — Real Signal Only
-// Sources:
-//   0. Telegram public channel previews (t.me/s/) — no bot token needed
-//   1. Twitter/X via syndication.twitter.com — no API key needed
-//   2. Pump.fun frontend API
-//   3. DexScreener new pairs + profiles + boosts
-//   4. CoinGecko trending + new listings
-//   5. Google Trends RSS
-//   6. Reddit
-//   7. CoinMarketCap new listings
-//   + Rugcheck.xyz per-token safety check (free, no key)
-//   + Hard quality filters: liquidity, age, price change sanity
+// WRAITH SCANNER v10 — Age-Aware, High-Signal
+//
+// KEY CHANGES FROM v9:
+//   • Age filter: >30 days = hard filtered. 7-30d = 80% score penalty.
+//   • Much more aggressive pump.fun scanning (more endpoints, more coins)
+//   • Win tracker: recordTokenSighting now saves ANY token with CA+mcap
+//   • Gemini forced to return real analysis (not just context echo)
+//   • DexScreener: raised liquidity floor to $5k, removed 24h age cap
+//     so newer coins with less data still appear
 // ═══════════════════════════════════════════════════════════════════════════
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-const HEADERS = { "User-Agent": UA, Accept: "application/json" };
+const HEADERS = { "User-Agent": UA, Accept: "*/*" };
 
-// ── Telegram public alpha channels (no auth, t.me/s/ is public HTML preview)
-const TELEGRAM_CHANNELS = [
-  "solanaalpha",
-  "pumpfunalpha",
-  "solana_memes_official",
-  "solanamemecoins",
-  "solfinder",
-  "solanagemhunters",
-  "newsolanatoken",
-  "pepeonsolana",
-  "solanadegen",
-  "pumpfunsnipers",
-  "solanaearlyalpha",
-  "cryptomoonshots",
-  "solgems100x",
-  "solana_100x_gems",
-  "degen_sol_alpha",
-  "pumpfunlaunch",
-  "solanacement",
-  "sollaunchpad",
-  "memecoinsniper",
-];
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-// ── Twitter search terms for Solana meme coins (syndication endpoint)
-const TWITTER_QUERIES = [
-  "pump.fun just launched",
-  "new solana meme coin",
-  "$sol low cap gem",
-  "buy on pump.fun",
-  "solana 1000x",
-  "new gem solana",
-  "solana microcap",
-  "pumpfun new launch",
-];
+const GOOGLE_TRENDS_GEOS = ["US", "GB", "PH", "IN", "AU", "BR", "KR", "JP"];
 
-// ── Reddit subs
 const REDDIT_SUBS = [
-  { name: "CryptoMoonShots", tier: 5 },
-  { name: "SatoshiStreetBets", tier: 5 },
-  { name: "memecoinsmoonshots", tier: 5 },
-  { name: "pumpfun", tier: 5 },
-  { name: "solana", tier: 4 },
-  { name: "CryptoCurrency", tier: 3 },
-  { name: "memes", tier: 3 },
-  { name: "dankmemes", tier: 3 },
+  { name: "CryptoMoonShots", tier: 6 },
+  { name: "SatoshiStreetBets", tier: 6 },
+  { name: "memecoinsmoonshots", tier: 6 },
+  { name: "pumpfun", tier: 6 },
+  { name: "solana", tier: 5 },
+  { name: "memes", tier: 5 },
+  { name: "dankmemes", tier: 4 },
+  { name: "funny", tier: 3 },
+  { name: "videos", tier: 3 },
+  { name: "MemeEconomy", tier: 5 },
+  { name: "OutOfTheLoop", tier: 4 },
+  { name: "CryptoCurrency", tier: 4 },
+  { name: "shitposting", tier: 3 },
+  { name: "reactiongifs", tier: 3 },
 ];
+
+const CELEB_WATCHLIST = [
+  "Elon Musk",
+  "Donald Trump",
+  "Vitalik Buterin",
+  "CZ Binance",
+  "Cathie Wood",
+  "Michael Saylor",
+  "Snoop Dogg",
+  "Mark Cuban",
+  "Kanye West",
+  "Kim Kardashian",
+  "Cardi B",
+  "Logan Paul",
+  "Mr Beast",
+];
+
+const MEME_SUFFIXES =
+  /\b([a-z]{2,10})(coin|inu|fi|dao|ai|doge|cat|pepe|frog|chad|moon|punk|swap|floki|shib|baby|mini|mega|super|god|king|papa|bear|bull|rat|dog|monkey|ape|wolf|tiger|dragon|panda)\b/gi;
 
 const BLACKLIST = new Set([
   "you",
@@ -157,7 +149,6 @@ const BLACKLIST = new Set([
   "men",
   "guy",
   "bro",
-  "irl",
   "one",
   "two",
   "three",
@@ -204,9 +195,6 @@ const BLACKLIST = new Set([
   "imo",
   "afk",
   "brb",
-  "ftw",
-  "tfw",
-  "mfw",
   "edit",
   "update",
   "removed",
@@ -273,83 +261,6 @@ const BLACKLIST = new Set([
   "hard",
   "soft",
   "free",
-  "jan",
-  "feb",
-  "mar",
-  "apr",
-  "jun",
-  "jul",
-  "aug",
-  "sep",
-  "oct",
-  "nov",
-  "dec",
-  "mon",
-  "tue",
-  "wed",
-  "thu",
-  "fri",
-  "sat",
-  "sun",
-  "year",
-  "month",
-  "week",
-  "hour",
-  "today",
-  "yesterday",
-  "tomorrow",
-  "people",
-  "thing",
-  "things",
-  "going",
-  "doing",
-  "think",
-  "want",
-  "need",
-  "look",
-  "feel",
-  "seen",
-  "here",
-  "there",
-  "still",
-  "same",
-  "another",
-  "every",
-  "never",
-  "always",
-  "already",
-  "nothing",
-  "something",
-  "everything",
-  "everyone",
-  "someone",
-  "anyone",
-  "using",
-  "making",
-  "being",
-  "having",
-  "getting",
-  "putting",
-  "trying",
-  "seeing",
-  "with",
-  "from",
-  "over",
-  "just",
-  "what",
-  "when",
-  "where",
-  "will",
-  "would",
-  "could",
-  "should",
-  "their",
-  "there",
-  "than",
-  "then",
-  "have",
-  "more",
-  "some",
   "usd",
   "sol",
   "eth",
@@ -379,35 +290,12 @@ const BLACKLIST = new Set([
   "bot",
   "api",
   "dev",
-  "src",
   "net",
   "org",
   "com",
   "gov",
   "edu",
   "pro",
-  "did",
-  "say",
-  "ask",
-  "saw",
-  "ago",
-  "sir",
-  "wow",
-  "nah",
-  "yep",
-  "nope",
-  "sure",
-  "okay",
-  "fine",
-  "cool",
-  "nice",
-  "bad",
-  "sad",
-  "mad",
-  "fun",
-  "red",
-  "blue",
-  "green",
   "post",
   "https",
   "http",
@@ -424,14 +312,11 @@ const BLACKLIST = new Set([
   "valid",
   "facts",
   "cap",
-  "lowkey",
-  "highkey",
   "vibe",
   "vibes",
   "cringe",
   "mid",
   "lit",
-  "goat",
   "bussin",
   "sus",
   "bet",
@@ -446,165 +331,34 @@ const BLACKLIST = new Set([
   "nvm",
   "smh",
   "ffs",
-  "damn",
-  "hell",
-  "crap",
-  "ass",
-  "shit",
-  "fuck",
-  "hate",
-  "love",
-  "life",
-  "dead",
-  "die",
-  "kill",
-  "born",
-  "went",
-  "come",
-  "came",
-  "left",
-  "stay",
-  "move",
-  "play",
-  "stop",
-  "start",
-  "help",
-  "show",
-  "tell",
-  "keep",
-  "hold",
-  "walk",
-  "talk",
-  "read",
-  "write",
-  "draw",
-  "pick",
-  "drop",
-  "push",
-  "pull",
-  "turn",
-  "send",
-  "find",
-  "lose",
-  "win",
-  "beat",
-  "cut",
-  "eat",
-  "drink",
-  "sleep",
-  "wake",
-  "wait",
-  "hear",
-  "watch",
-  "meet",
-  "pay",
-  "spend",
-  "save",
-  "own",
-  "seem",
-  "sound",
-  "smell",
-  "taste",
-  "believe",
-  "hope",
-  "wish",
-  "wonder",
-  "remember",
-  "forget",
-  "learn",
-  "teach",
-  "understand",
-  "explain",
-  "describe",
-  "mention",
-  "suggest",
-  "allow",
-  "prevent",
-  "cause",
-  "happen",
-  "change",
-  "create",
-  "destroy",
-  "build",
-  "break",
-  "fix",
-  "improve",
-  "develop",
-  "grow",
-  "shrink",
-  "increase",
-  "decrease",
   "launch",
   "launched",
   "launching",
-  "token",
-  "coin",
-  "gem",
   "alpha",
   "early",
-  "call",
-  "calls",
   "signal",
-  "next",
-  "up",
-  "down",
-  "side",
-  "back",
-  "into",
-  "send",
-  "mint",
-  "join",
-  "group",
-  "chat",
-  "channel",
-  "tg",
+  "signals",
   "telegram",
   "twitter",
   "discord",
-  "announcement",
+  "tg",
   "ann",
-  "pinned",
-  "message",
-  "click",
-  "link",
-  "here",
-  "check",
-  "see",
-  "look",
-  "watch",
-  "follow",
-  "share",
-  "like",
-  "comment",
-  "repost",
-  "retweet",
-  "rt",
-  "dm",
-  "dms",
-  "reply",
-  "thread",
   "news",
-  "update",
   "info",
   "soon",
   "live",
-  "now",
-  "today",
   "tonight",
   "morning",
   "night",
   "week",
   "month",
   "year",
-  "day",
-  "time",
   "hours",
   "mins",
   "minutes",
   "seconds",
   "ago",
   "later",
-  "next",
   "last",
   "first",
   "second",
@@ -614,54 +368,100 @@ const BLACKLIST = new Set([
   "always",
   "never",
   "maybe",
-  "yes",
-  "no",
-  "ok",
-  "okay",
   "sure",
   "fine",
   "great",
-  "good",
-  "bad",
   "best",
   "worst",
-  "right",
-  "wrong",
-  "true",
-  "false",
-  "real",
-  "fake",
-  "safe",
   "scam",
   "rug",
   "rugged",
+  "coin",
+  "gem",
+  "call",
+  "calls",
+  "group",
+  "chat",
+  "channel",
+  "join",
+  "send",
+  "mint",
+  "follow",
+  "share",
+  "repost",
+  "retweet",
+  "reply",
+  "click",
+  "check",
+  "watch",
+  "people",
+  "thing",
+  "things",
+  "going",
+  "doing",
+  "think",
+  "want",
+  "need",
+  "look",
+  "feel",
+  "seen",
+  "here",
+  "there",
+  "still",
+  "same",
+  "another",
+  "every",
+  "nothing",
+  "something",
+  "everything",
+  "everyone",
+  "someone",
+  "anyone",
+  "using",
+  "making",
+  "being",
+  "having",
+  "getting",
+  "putting",
+  "trying",
+  "seeing",
+  "with",
+  "from",
+  "over",
+  "have",
+  "usd",
+  "sol",
+  "eth",
+  "btc",
+  "usdc",
+  "usdt",
+  "bnb",
 ]);
 
-const TICKER_RE = /\$([a-zA-Z][a-zA-Z0-9]{1,11})\b/g;
-const WORD_RE = /\b([a-zA-Z][a-zA-Z0-9]{2,11})\b/g;
+function cleanTicker(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
-interface ScoreEntry {
-  socialScore: number;
-  onchainScore: number;
-  geckoScore: number;
-  twitterScore: number;
-  telegramScore: number;
-  posts: number;
-  hasTicker: boolean;
-  isNewCoin: boolean;
-  ageMinutes?: number;
-  sources: string[];
-  platforms: string[];
-  mcap?: number;
-  volume?: number;
-  liquidity?: number;
-  priceChange1h?: number;
-  priceChange24h?: number;
-  contractAddress?: string;
-  rugRisk?: "low" | "medium" | "high" | "unknown";
-  rugDetails?: string;
-  twitterMentions?: number;
-  telegramMentions?: number;
+function isValidKeyword(k: string): boolean {
+  if (!k || k.length < 2 || k.length > 16) return false;
+  if (BLACKLIST.has(k.toLowerCase())) return false;
+  if (/^\d+$/.test(k)) return false;
+  if (!/^[a-z][a-z0-9]*$/.test(k.toLowerCase())) return false;
+  return true;
+}
+
+// ── Age penalty multiplier
+// Returns a 0-1 multiplier. Fresh = 1.0, 30+ days = 0 (filtered out)
+function ageScoreMultiplier(ageMinutes: number | undefined): number {
+  if (ageMinutes === undefined) return 0.8; // unknown age: mild penalty
+  const days = ageMinutes / 1440;
+  if (days > 30) return 0; // hard filter: 30+ days → never show
+  if (days > 14) return 0.05; // 2-4 weeks: almost never show
+  if (days > 7) return 0.15; // 1-2 weeks: very deprioritized
+  if (days > 3) return 0.4; // 3-7 days: deprioritized
+  if (days > 1) return 0.75; // 1-3 days: slight penalty
+  if (days > 0.25) return 0.95; // 6h-24h: nearly full score
+  return 1.0; // <6h: full score, maximum freshness
 }
 
 async function safeFetch(
@@ -685,602 +485,575 @@ async function safeFetch(
   }
 }
 
-function cleanTicker(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+interface ScoreEntry {
+  viralScore: number;
+  socialScore: number;
+  onchainScore: number;
+  geckoScore: number;
+  aiScore: number;
+  celebScore: number;
+  posts: number;
+  hasTicker: boolean;
+  isNewCoin: boolean;
+  ageMinutes?: number;
+  sources: string[];
+  platforms: string[];
+  mcap?: number;
+  volume?: number;
+  liquidity?: number;
+  priceChange1h?: number;
+  priceChange24h?: number;
+  contractAddress?: string;
+  rugRisk?: "low" | "medium" | "high" | "unknown";
+  rugDetails?: string;
+  aiContext?: string;
+  viralContext?: string;
+  celebMention?: string;
 }
 
-function isValidKeyword(k: string): boolean {
-  if (!k || k.length < 2 || k.length > 14) return false;
-  if (BLACKLIST.has(k.toLowerCase())) return false;
-  if (/^\d+$/.test(k)) return false;
-  if (!/^[a-z][a-z0-9]*$/.test(k.toLowerCase())) return false;
-  return true;
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 0 — Gemini AI
+// ─────────────────────────────────────────────────────────────────────────────
+interface GeminiCoin {
+  ticker: string;
+  name?: string;
+  context: string;
+  platforms: string[];
+  score: number;
+  isViral?: boolean;
+  celebMention?: string;
+  estimatedAgeDays?: number; // NEW: ask Gemini to estimate how old the trend is
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 0 — Telegram public channel previews (t.me/s/CHANNELNAME)
-// Telegram shows recent posts as HTML on the /s/ endpoint — zero auth needed.
-// We scrape text content for $TICKER mentions and launch keywords.
-// ════════════════════════════════════════════════════════════════════════════
-async function scanTelegram(): Promise<{
-  results: {
-    keyword: string;
-    score: number;
-    mentions: number;
-    channels: string[];
-  }[];
-  channelsHit: number;
-  totalMessages: number;
+async function scanWithGemini(): Promise<{
+  coins: GeminiCoin[];
+  success: boolean;
+  error?: string;
 }> {
-  const tickerMap = new Map<string, { count: number; channels: Set<string> }>();
-  let channelsHit = 0;
-  let totalMessages = 0;
+  if (!GEMINI_API_KEY)
+    return { coins: [], success: false, error: "No GEMINI_API_KEY" };
 
-  const scrapeChannel = async (channel: string) => {
-    try {
-      const r = await safeFetch(
-        `https://t.me/s/${channel}`,
-        {
-          Accept: "text/html,application/xhtml+xml,*/*",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-        8000,
-      );
-      if (!r) return;
+  const prompt = `You are a real-time viral trend scanner for Solana meme coins. Search the web RIGHT NOW using Google Search.
 
-      const html = await r.text();
-      if (!html.includes("tgme_widget_message_text")) return;
+TODAY'S DATE: ${new Date().toUTCString()}
 
-      channelsHit++;
+TASK 1 — CELEBRITY & INFLUENCER POSTS (highest priority):
+Search for posts from the LAST 48 HOURS from: ${CELEB_WATCHLIST.join(", ")}
+Only include if the post is from the last 48 hours. Skip old news.
 
-      // Extract message text blocks
-      const msgBlocks =
-        html.match(
-          /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g,
-        ) || [];
-      totalMessages += msgBlocks.length;
+TASK 2 — VIRAL INTERNET MOMENTS (last 24-72 hours only):
+Search TikTok trending NOW, YouTube trending TODAY, Reddit front page TODAY
+Search Google Trends spikes from the last 24 hours
+Viral news events, memes, games, movies, animals trending RIGHT NOW
 
-      for (const block of msgBlocks) {
-        // Strip HTML tags
-        const text = block.replace(/<[^>]+>/g, " ").toLowerCase();
+TASK 3 — FRESH SOLANA MEME COINS (launched in the last 72 hours):
+New pump.fun launches with social buzz
+$TICKER mentions on r/CryptoMoonShots, r/SatoshiStreetBets from last 24h
+New coins trending on DexScreener Solana (under 72 hours old)
 
-        // $TICKER patterns — strongest signal
-        const tickerMatches = [...text.matchAll(TICKER_RE)];
-        for (const m of tickerMatches) {
-          const ticker = cleanTicker(m[1]);
-          if (isValidKeyword(ticker)) {
-            const existing = tickerMap.get(ticker) || {
-              count: 0,
-              channels: new Set(),
-            };
-            existing.count += 3; // $TICKER mention = 3 weight
-            existing.channels.add(channel);
-            tickerMap.set(ticker, existing);
-          }
-        }
+IMPORTANT: Skip anything older than 7 days. We want FRESH signals only.
 
-        // Launch keyword patterns — "just launched X", "new gem: X", "ca: ADDR"
-        const launchPatterns = [
-          /(?:just launched|new gem|launching now|fresh launch|early call)[:\s]+([a-z][a-z0-9]{1,11})\b/gi,
-          /(?:ticker|symbol)[:\s]+\$?([a-z][a-z0-9]{1,11})\b/gi,
-          /\b([a-z][a-z0-9]{2,11})\s+(?:just launched|on pump|on solana|pumpfun)\b/gi,
-        ];
-
-        for (const pattern of launchPatterns) {
-          const matches = [...text.matchAll(pattern)];
-          for (const m of matches) {
-            const word = cleanTicker(m[1] || m[0].split(/\s+/).pop() || "");
-            if (isValidKeyword(word)) {
-              const existing = tickerMap.get(word) || {
-                count: 0,
-                channels: new Set(),
-              };
-              existing.count += 5; // launch context = 5 weight
-              existing.channels.add(channel);
-              tickerMap.set(word, existing);
-            }
-          }
-        }
-      }
-    } catch {
-      // skip
-    }
-  };
-
-  // Scrape all channels in parallel batches of 5
-  for (let i = 0; i < TELEGRAM_CHANNELS.length; i += 5) {
-    await Promise.all(TELEGRAM_CHANNELS.slice(i, i + 5).map(scrapeChannel));
+Return ONLY valid JSON, no markdown:
+{"coins":[
+  {
+    "ticker":"WORD",
+    "name":"Full name",
+    "context":"Very specific reason with source and timing (e.g. 'Elon tweeted about WORD 2hrs ago' or 'TikTok sound WORD has 5M views since yesterday')",
+    "platforms":["twitter","tiktok","youtube","reddit","pumpfun"],
+    "score":85,
+    "isViral":true,
+    "celebMention":"Elon Musk",
+    "estimatedAgeDays":0.1
   }
+]}
 
-  const results = Array.from(tickerMap.entries()).map(
-    ([keyword, { count, channels }]) => ({
-      keyword,
-      score: count * 8000 * (channels.size > 1 ? 1.5 : 1.0), // multi-channel bonus
-      mentions: count,
-      channels: Array.from(channels),
-    }),
-  );
+Rules:
+- ticker: 2-12 chars, letters/numbers only
+- score: 1-100 (celebrity last 48h = 90+, fresh viral = 70+, coin buzz = 50+)
+- estimatedAgeDays: how old is the trend/coin in days (0.1 = few hours, 1 = yesterday, 7 = week old)
+- isViral: true if trend not yet a confirmed coin
+- celebMention: name of celeb (omit if none)
+- Max 30 items, freshest and hottest first
+- Be SPECIFIC in context — name the actual tweet/video/post and when it happened`;
 
-  return { results, channelsHit, totalMessages };
-}
+  try {
+    const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ googleSearch: {} }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 3000 },
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 1 — Twitter/X via syndication endpoint (no API key)
-// twitter.com/search?q=...&src=typed_query has a public syndication layer
-// that returns JSON without auth. This is what embeds use.
-// ════════════════════════════════════════════════════════════════════════════
-async function scanTwitter(): Promise<{
-  results: { keyword: string; score: number; tweetCount: number }[];
-  tweetsFound: number;
-  method: string;
-}> {
-  const tickerMap = new Map<string, number>();
-  let tweetsFound = 0;
-  let method = "none";
+    if (!res.ok) {
+      const err = await res.text();
+      return {
+        coins: [],
+        success: false,
+        error: `Gemini ${res.status}: ${err.slice(0, 150)}`,
+      };
+    }
 
-  // Method 1: Twitter syndication search (used by embed widgets)
-  const syndicationBase =
-    "https://syndication.twitter.com/srv/timeline-profile/screen-name";
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const clean = text
+      .replace(/```json\n?/g, "")
+      .replace(/```\n?/g, "")
+      .trim();
 
-  // Method 2: Twitter's public search timeline (works without login for basic searches)
-  const searchBase = "https://twitter.com/i/api/2/search/adaptive.json";
-
-  // Method 3: Scrape public search pages (fallback)
-  const scrapeTwitterSearch = async (query: string) => {
+    let parsed: { coins: GeminiCoin[] };
     try {
-      // Try the public syndication search endpoint
-      const encoded = encodeURIComponent(query);
-      const url = `https://syndication.twitter.com/search/embedded-timeline?query=${encoded}&lang=en`;
+      parsed = JSON.parse(clean);
+    } catch {
+      const m = clean.match(/\{[\s\S]*\}/);
+      if (!m)
+        return { coins: [], success: false, error: "Bad JSON from Gemini" };
+      parsed = JSON.parse(m[0]);
+    }
 
-      const r = await safeFetch(
-        url,
-        {
-          Accept: "application/json, text/javascript, */*",
-          Referer: "https://twitter.com/",
-          "X-Twitter-Active-User": "yes",
-        },
-        8000,
-      );
-
-      if (r) {
-        method = "syndication";
-        const text = await r.text();
-        // Extract $TICKER from the response HTML/JSON
-        const tickerMatches = [...text.matchAll(TICKER_RE)];
-        for (const m of tickerMatches) {
-          const ticker = cleanTicker(m[1]);
-          if (isValidKeyword(ticker)) {
-            tickerMap.set(ticker, (tickerMap.get(ticker) || 0) + 1);
-            tweetsFound++;
-          }
-        }
+    const coins = (parsed.coins || [])
+      .filter((c: GeminiCoin) => {
+        if (!c.ticker || !isValidKeyword(cleanTicker(c.ticker))) return false;
+        // Filter out anything Gemini estimates as older than 14 days
+        if (c.estimatedAgeDays !== undefined && c.estimatedAgeDays > 14)
+          return false;
         return true;
-      }
-    } catch {
-      /* continue */
-    }
-    return false;
-  };
+      })
+      .map((c: GeminiCoin) => ({
+        ...c,
+        ticker: cleanTicker(c.ticker),
+        score: Math.min(Math.max(c.score || 50, 1), 100),
+      }));
 
-  // Try public Nitter instances as fallback (try more obscure ones)
-  const NITTER_INSTANCES = [
-    "https://nitter.lucabased.xyz",
-    "https://nitter.privacydev.net",
-    "https://nitter.poast.org",
-    "https://nitter.1d4.us",
-    "https://nitter.cz",
-    "https://nitter.space",
-    "https://nitter.ca",
-  ];
-
-  let nitterWorking = "";
-  for (const instance of NITTER_INSTANCES) {
-    try {
-      const r = await safeFetch(
-        `${instance}/search/rss?q=pump.fun&f=tweets`,
-        { Accept: "application/rss+xml, text/xml, */*" },
-        4000,
-      );
-      if (r) {
-        const text = await r.text();
-        if (text.includes("<item>") || text.includes("<channel>")) {
-          nitterWorking = instance;
-          method = "nitter:" + instance.replace("https://", "");
-          break;
-        }
-      }
-    } catch {
-      /* next */
-    }
+    return { coins, success: true };
+  } catch (e) {
+    return { coins: [], success: false, error: String(e) };
   }
+}
 
-  if (nitterWorking) {
-    for (const query of TWITTER_QUERIES) {
+async function scanGeminiCryptoNews(): Promise<{
+  coins: GeminiCoin[];
+  success: boolean;
+}> {
+  if (!GEMINI_API_KEY) return { coins: [], success: false };
+
+  const prompt = `Search the web for RIGHT NOW (today ${new Date().toDateString()}):
+
+1. Breaking crypto news from last 24 hours driving new meme coin trends
+2. Viral animal videos, weird news, events that went viral TODAY
+3. Politician or government memes going viral in the last 48 hours
+4. New game, movie, show, pop culture moment trending TODAY
+5. Sports moments going viral (athlete celebrations, funny moments) from last 24h
+6. Any Solana ecosystem news from last 48 hours
+
+SKIP anything older than 7 days.
+
+Return ONLY valid JSON:
+{"coins":[{"ticker":"WORD","context":"Specific source/reason with timing","platforms":["reddit","twitter"],"score":70,"isViral":true,"estimatedAgeDays":0.5}]}
+
+Max 15 items. Freshest first. No preamble, no markdown.`;
+
+  try {
+    const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ googleSearch: {} }],
+        generationConfig: { temperature: 0.15, maxOutputTokens: 1500 },
+      }),
+      signal: AbortSignal.timeout(25000),
+    });
+
+    if (!res.ok) return { coins: [], success: false };
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const clean = text
+      .replace(/```json\n?/g, "")
+      .replace(/```\n?/g, "")
+      .trim();
+
+    let parsed: { coins: GeminiCoin[] };
+    try {
+      parsed = JSON.parse(clean);
+    } catch {
+      const m = clean.match(/\{[\s\S]*\}/);
+      if (!m) return { coins: [], success: false };
+      parsed = JSON.parse(m[0]);
+    }
+
+    const coins = (parsed.coins || [])
+      .filter((c: GeminiCoin) => {
+        if (!c.ticker || !isValidKeyword(cleanTicker(c.ticker))) return false;
+        if (c.estimatedAgeDays !== undefined && c.estimatedAgeDays > 14)
+          return false;
+        return true;
+      })
+      .map((c: GeminiCoin) => ({
+        ...c,
+        ticker: cleanTicker(c.ticker),
+        score: Math.min(Math.max(c.score || 50, 1), 100),
+      }));
+
+    return { coins, success: true };
+  } catch {
+    return { coins: [], success: false };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 1 — Google Trends (8 regions)
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanGoogleTrends(): Promise<{
+  results: { keyword: string; score: number }[];
+  count: number;
+}> {
+  const wordMap = new Map<string, number>();
+
+  await Promise.all(
+    GOOGLE_TRENDS_GEOS.map(async (geo) => {
       try {
         const r = await safeFetch(
-          `${nitterWorking}/search/rss?q=${encodeURIComponent(query)}&f=tweets`,
-          { Accept: "application/rss+xml, text/xml, */*" },
-          7000,
+          `https://trends.google.com/trending/rss?geo=${geo}`,
+          { Accept: "application/rss+xml, text/xml" },
+          8000,
         );
-        if (!r) continue;
+        if (!r) return;
         const xml = await r.text();
-        const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
-        tweetsFound += items.length;
-        for (const item of items) {
-          const titleM = item.match(
-            /<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/,
-          );
-          const descM = item.match(
-            /<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/,
-          );
-          const rawText = [titleM?.[1] || "", descM?.[1] || ""]
-            .join(" ")
-            .replace(/<[^>]+>/g, " ")
-            .toLowerCase();
+        const titleMatches =
+          xml.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/g) || [];
+        const trafficMatches =
+          xml.match(/<ht:approx_traffic>(.*?)<\/ht:approx_traffic>/g) || [];
 
-          const tickerMatches = [...rawText.matchAll(TICKER_RE)];
-          for (const m of tickerMatches) {
-            const ticker = cleanTicker(m[1]);
-            if (isValidKeyword(ticker)) {
-              tickerMap.set(ticker, (tickerMap.get(ticker) || 0) + 2);
+        for (let i = 0; i < titleMatches.length; i++) {
+          const title = titleMatches[i]
+            .replace(/<title><!\[CDATA\[/, "")
+            .replace(/\]\]><\/title>/, "")
+            .toLowerCase()
+            .trim();
+          const traffic =
+            parseInt(
+              (trafficMatches[i] || "")
+                .replace(/<[^>]*>/g, "")
+                .replace(/[^0-9]/g, ""),
+            ) || 5000;
+
+          const words = title.split(/[\s\-_,.()/!?'"]+/);
+          for (const w of words) {
+            const clean = cleanTicker(w);
+            if (isValidKeyword(clean))
+              wordMap.set(clean, (wordMap.get(clean) || 0) + traffic);
+          }
+          for (let j = 0; j < words.length - 1; j++) {
+            const compound = cleanTicker(words[j] + words[j + 1]);
+            if (
+              compound.length >= 4 &&
+              compound.length <= 16 &&
+              isValidKeyword(compound)
+            ) {
+              wordMap.set(
+                compound,
+                (wordMap.get(compound) || 0) + traffic * 1.5,
+              );
             }
           }
         }
       } catch {
         /* skip */
       }
-    }
-  } else {
-    // Try syndication as last resort
-    for (const query of TWITTER_QUERIES.slice(0, 4)) {
-      await scrapeTwitterSearch(query);
-    }
-  }
+    }),
+  );
 
-  const results = Array.from(tickerMap.entries()).map(([keyword, count]) => ({
+  const results = Array.from(wordMap.entries()).map(([keyword, traffic]) => ({
     keyword,
-    score: count * 11000,
-    tweetCount: count,
+    score: Math.min(traffic * 0.08, 60000),
   }));
-
-  return { results, tweetsFound, method };
+  return { results, count: results.length };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 2 — Pump.fun
-// ════════════════════════════════════════════════════════════════════════════
-async function scanPumpFun() {
-  const results: {
-    keyword: string;
-    score: number;
-    isNew: boolean;
-    ageMinutes: number;
-    mcap: number;
-    volume: number;
-    contractAddress?: string;
-  }[] = [];
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 2 — Google News RSS
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanGoogleNews(): Promise<{
+  results: { keyword: string; score: number; context: string }[];
+  count: number;
+}> {
+  const wordMap = new Map<string, { score: number; context: string }>();
 
-  const endpoints = [
-    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false",
-    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
-    "https://frontend-api.pump.fun/coins/king-of-the-hill?includeNsfw=false",
+  const queries = [
+    "solana meme coin",
+    "pump.fun new coin",
+    "viral meme coin 2025",
+    "crypto meme trending",
+    "new solana token launch",
+    "viral internet meme today",
+    "trending meme social media",
+    "Elon Musk meme tweet",
+    "Donald Trump viral post",
+    "celebrity meme coin",
+    "TikTok trending today",
+    "viral video trending",
+    "meme coin pump",
+    "solana new token trending",
+    "crypto twitter viral",
   ];
 
-  for (const url of endpoints) {
-    try {
-      const r = await safeFetch(url, {}, 10000);
-      if (!r) continue;
-      const data = await r.json();
-      const coins = Array.isArray(data) ? data : [data];
-      for (const coin of coins) {
-        const sym = cleanTicker(coin.symbol || "");
-        const mcap = coin.usd_market_cap || 0;
-        const replies = coin.reply_count || 0;
-        const ageMinutes = Math.floor(
-          (Date.now() - (coin.created_timestamp || Date.now())) / 60000,
+  await Promise.all(
+    queries.map(async (query) => {
+      try {
+        const r = await safeFetch(
+          `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`,
+          { Accept: "application/rss+xml, text/xml" },
+          8000,
         );
-        const volume = coin.volume || 0;
+        if (!r) return;
+        const xml = await r.text();
+        const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
 
-        // Quality filter: skip if too old or no activity
-        if (ageMinutes > 2880) continue; // skip > 2 days
-        if (mcap === 0 && replies === 0) continue;
+        for (const item of items.slice(0, 15)) {
+          const titleMatch = item.match(/<title>([\s\S]*?)<\/title>/);
+          const title = (titleMatch?.[1] || "")
+            .replace(/<!\[CDATA\[|\]\]>/g, "")
+            .replace(/<[^>]+>/g, "")
+            .toLowerCase();
 
-        const freshBonus =
-          ageMinutes < 30
-            ? 5.0
-            : ageMinutes < 120
-              ? 3.5
-              : ageMinutes < 360
-                ? 2.0
-                : ageMinutes < 1440
-                  ? 1.5
-                  : 1.0;
-        const activityScore =
-          (replies * 900 + Math.min(mcap, 100000) * 0.12 + volume * 0.05) *
-          freshBonus;
+          const isCelebQuery =
+            query.includes("Elon") ||
+            query.includes("Trump") ||
+            query.includes("celebrity");
+          const scoreMultiplier = isCelebQuery ? 2.5 : 1.0;
 
-        if (isValidKeyword(sym)) {
-          results.push({
-            keyword: sym,
-            score: activityScore,
-            isNew: ageMinutes < 1440,
-            ageMinutes,
-            mcap,
-            volume,
-            contractAddress: coin.mint,
-          });
+          const words = title.split(/[\s\-_,.()/!?'"]+/);
+          for (const w of words) {
+            const clean = cleanTicker(w);
+            if (isValidKeyword(clean)) {
+              const ex = wordMap.get(clean);
+              wordMap.set(clean, {
+                score: (ex?.score || 0) + 3000 * scoreMultiplier,
+                context: ex?.context || title.slice(0, 80),
+              });
+            }
+          }
+          for (let j = 0; j < words.length - 1; j++) {
+            const compound = cleanTicker(words[j] + words[j + 1]);
+            if (
+              compound.length >= 4 &&
+              compound.length <= 16 &&
+              isValidKeyword(compound)
+            ) {
+              const ex = wordMap.get(compound);
+              wordMap.set(compound, {
+                score: (ex?.score || 0) + 5000 * scoreMultiplier,
+                context: ex?.context || title.slice(0, 80),
+              });
+            }
+          }
+          for (const m of title.matchAll(/\$([a-zA-Z][a-zA-Z0-9]{1,11})\b/g)) {
+            const ticker = cleanTicker(m[1]);
+            if (isValidKeyword(ticker)) {
+              const ex = wordMap.get(ticker);
+              wordMap.set(ticker, {
+                score: (ex?.score || 0) + 12000 * scoreMultiplier,
+                context: ex?.context || title.slice(0, 80),
+              });
+            }
+          }
         }
+      } catch {
+        /* skip */
       }
-    } catch {
-      /* continue */
-    }
-  }
-  return results;
+    }),
+  );
+
+  const results = Array.from(wordMap.entries()).map(
+    ([keyword, { score, context }]) => ({
+      keyword,
+      score,
+      context,
+    }),
+  );
+  return { results, count: results.length };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 3 — DexScreener (with quality data: liquidity, price change)
-// ════════════════════════════════════════════════════════════════════════════
-async function scanDexScreener() {
-  const results: {
-    keyword: string;
-    score: number;
-    hasTicker: boolean;
-    mcap?: number;
-    liquidity?: number;
-    priceChange1h?: number;
-    priceChange24h?: number;
-    volume24h?: number;
-    ageMinutes?: number;
-    contractAddress?: string;
-  }[] = [];
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 3 — YouTube Trending
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanYouTubeTrending(): Promise<{
+  results: { keyword: string; score: number }[];
+  count: number;
+}> {
+  const wordMap = new Map<string, number>();
+  const feeds = [
+    "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=US&hl=en",
+    "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=GB&hl=en",
+    "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=PH&hl=en",
+    "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=BR&hl=en",
+  ];
 
-  // New Solana pairs < 24h
-  for (const q of ["solana meme", "pump fun solana", "new solana gem"]) {
-    try {
-      const r = await safeFetch(
-        `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`,
-      );
-      if (!r) continue;
-      const data = await r.json();
+  await Promise.all(
+    feeds.map(async (feed) => {
+      try {
+        const r = await safeFetch(
+          feed,
+          { Accept: "application/atom+xml, text/xml" },
+          8000,
+        );
+        if (!r) return;
+        const xml = await r.text();
+        const titleMatches = xml.match(/<title>([\s\S]*?)<\/title>/g) || [];
 
-      const pairs = (data?.pairs || []).filter(
-        (p: {
-          chainId: string;
-          fdv?: number;
-          pairCreatedAt?: number;
-          liquidity?: { usd?: number };
-        }) =>
-          p.chainId === "solana" &&
-          (p.fdv || 0) < 10_000_000 && // under $10M mcap
-          p.pairCreatedAt &&
-          Date.now() - p.pairCreatedAt < 86400000, // < 24h old
-      );
+        for (const titleTag of titleMatches.slice(1, 30)) {
+          const title = titleTag
+            .replace(/<\/?title>/g, "")
+            .replace(/<!\[CDATA\[|\]\]>/g, "")
+            .toLowerCase();
+          const words = title.split(/[\s\-_,.()/!?'"#@]+/);
 
-      for (const pair of pairs.slice(0, 25)) {
-        const sym = cleanTicker(pair.baseToken?.symbol || "");
-        const liq = pair.liquidity?.usd || 0;
-        const vol24h = pair.volume?.h24 || 0;
-        const change1h = pair.priceChange?.h1 || 0;
-        const change24h = pair.priceChange?.h24 || 0;
-        const ageMinutes = pair.pairCreatedAt
-          ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
-          : undefined;
+          for (const w of words) {
+            const clean = cleanTicker(w);
+            if (isValidKeyword(clean))
+              wordMap.set(clean, (wordMap.get(clean) || 0) + 8000);
+          }
+          for (let j = 0; j < words.length - 1; j++) {
+            const compound = cleanTicker(words[j] + words[j + 1]);
+            if (
+              compound.length >= 4 &&
+              compound.length <= 16 &&
+              isValidKeyword(compound)
+            ) {
+              wordMap.set(compound, (wordMap.get(compound) || 0) + 12000);
+            }
+          }
+        }
+      } catch {
+        /* skip */
+      }
+    }),
+  );
 
-        // Quality filters
-        if (liq < 3000) continue; // skip < $3K liquidity (unbuyable)
-        if (change1h > 500) continue; // skip if already 5x'd in last hour
-        if (!isValidKeyword(sym)) continue;
+  return {
+    results: Array.from(wordMap.entries()).map(([keyword, score]) => ({
+      keyword,
+      score,
+    })),
+    count: wordMap.size,
+  };
+}
 
-        const score = vol24h * 0.4 + liq * 0.3 + Math.max(change24h, 0) * 120;
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 4 — Know Your Meme
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanKnowYourMeme(): Promise<{
+  results: { keyword: string; score: number; context: string }[];
+  count: number;
+}> {
+  const results: { keyword: string; score: number; context: string }[] = [];
+  try {
+    const r = await safeFetch(
+      "https://knowyourmeme.com/memes/trending",
+      { Accept: "text/html,*/*" },
+      8000,
+    );
+    if (!r) return { results, count: 0 };
+    const html = await r.text();
+    const titleMatches =
+      html.match(
+        /class="entry-grid-body[^"]*"[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>/g,
+      ) || [];
+
+    for (const block of titleMatches.slice(0, 20)) {
+      const nameMatch = block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
+      if (!nameMatch) continue;
+      const name = nameMatch[1]
+        .replace(/<[^>]+>/g, "")
+        .trim()
+        .toLowerCase();
+      for (const w of name.split(/[\s\-_,.()/!?'"]+/)) {
+        const clean = cleanTicker(w);
+        if (isValidKeyword(clean))
+          results.push({
+            keyword: clean,
+            score: 25000,
+            context: `KYM trending: ${name}`,
+          });
+      }
+      const compound = cleanTicker(name.replace(/\s+/g, ""));
+      if (
+        compound.length >= 3 &&
+        compound.length <= 16 &&
+        isValidKeyword(compound)
+      ) {
         results.push({
-          keyword: sym,
-          score,
-          hasTicker: true,
-          mcap: pair.fdv,
-          liquidity: liq,
-          priceChange1h: change1h,
-          priceChange24h: change24h,
-          volume24h: vol24h,
-          ageMinutes,
-          contractAddress: pair.baseToken?.address,
+          keyword: compound,
+          score: 40000,
+          context: `KYM trending meme: ${name}`,
         });
       }
-    } catch {
-      /* continue */
-    }
-  }
-
-  // Latest token profiles
-  try {
-    const r = await safeFetch(
-      "https://api.dexscreener.com/token-profiles/latest/v1",
-    );
-    if (r) {
-      const data = await r.json();
-      for (const token of (data || []).slice(0, 30)) {
-        if (token.chainId !== "solana") continue;
-        const desc = (token.description || "").toLowerCase();
-        const tickerMatch = desc.match(/\$([a-z][a-z0-9]{1,11})\b/);
-        if (tickerMatch?.[1] && isValidKeyword(tickerMatch[1])) {
-          results.push({
-            keyword: tickerMatch[1],
-            score: 20000,
-            hasTicker: true,
-            contractAddress: token.tokenAddress,
-          });
-        }
-      }
     }
   } catch {
-    /* continue */
+    /* silent */
   }
-
-  // Top boosted
-  try {
-    const r = await safeFetch(
-      "https://api.dexscreener.com/token-boosts/top/v1",
-    );
-    if (r) {
-      const data = await r.json();
-      for (const token of (data || []).slice(0, 20)) {
-        if (token.chainId !== "solana") continue;
-        const desc = (token.description || "").toLowerCase();
-        const tickerMatch = desc.match(/\$([a-z][a-z0-9]{1,11})\b/);
-        if (tickerMatch?.[1] && isValidKeyword(tickerMatch[1])) {
-          results.push({
-            keyword: tickerMatch[1],
-            score: 15000 + (token.totalAmount || 0),
-            hasTicker: true,
-            contractAddress: token.tokenAddress,
-          });
-        }
-      }
-    }
-  } catch {
-    /* continue */
-  }
-
-  return results;
+  return { results, count: results.length };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 4 — Rugcheck.xyz (free, no key)
-// Checks: mint authority, freeze authority, LP locked, top holder concentration
-// ════════════════════════════════════════════════════════════════════════════
-async function checkRug(contractAddress: string): Promise<{
-  risk: "low" | "medium" | "high" | "unknown";
-  details: string;
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 5 — Hacker News
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanHackerNews(): Promise<{
+  results: { keyword: string; score: number; context: string }[];
+  count: number;
 }> {
+  const results: { keyword: string; score: number; context: string }[] = [];
   try {
     const r = await safeFetch(
-      `https://api.rugcheck.xyz/v1/tokens/${contractAddress}/report/summary`,
+      "https://hacker-news.firebaseio.com/v0/topstories.json",
       {},
       5000,
     );
-    if (!r) return { risk: "unknown", details: "rugcheck unavailable" };
-    const data = await r.json();
+    if (!r) return { results, count: 0 };
+    const ids: number[] = await r.json();
 
-    const score = data?.score || 0;
-    const risks = (data?.risks || []) as { name: string; level: string }[];
-    const highRisks = risks
-      .filter((r) => r.level === "danger")
-      .map((r) => r.name);
-    const medRisks = risks.filter((r) => r.level === "warn").map((r) => r.name);
-
-    if (highRisks.length > 0) {
-      return { risk: "high", details: highRisks.slice(0, 2).join(", ") };
-    }
-    if (score > 5000 || medRisks.length >= 3) {
-      return {
-        risk: "medium",
-        details: medRisks.slice(0, 2).join(", ") || "moderate risk",
-      };
-    }
-    if (score > 0) {
-      return { risk: "low", details: "passed rugcheck" };
-    }
-    return { risk: "unknown", details: "no data" };
-  } catch {
-    return { risk: "unknown", details: "check failed" };
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 5 — CoinGecko trending + new
-// ════════════════════════════════════════════════════════════════════════════
-async function scanCoinGecko() {
-  const results: { keyword: string; score: number; isNew: boolean }[] = [];
-  try {
-    const r = await safeFetch(
-      "https://api.coingecko.com/api/v3/search/trending",
+    const stories = await Promise.all(
+      ids.slice(0, 20).map(async (id) => {
+        const sr = await safeFetch(
+          `https://hacker-news.firebaseio.com/v0/item/${id}.json`,
+          {},
+          4000,
+        );
+        if (!sr) return null;
+        return sr.json();
+      }),
     );
-    if (r) {
-      const data = await r.json();
-      for (const { item } of data?.coins || []) {
-        const sym = cleanTicker(item.symbol || "");
-        if (isValidKeyword(sym)) {
-          results.push({
-            keyword: sym,
-            score: Math.max(40000 - (item.score ?? 10) * 3500, 3000),
-            isNew: false,
-          });
-        }
-      }
-    }
-  } catch {
-    /* continue */
-  }
-  try {
-    const r = await safeFetch(
-      "https://api.coingecko.com/api/v3/coins/list/new",
-    );
-    if (r) {
-      const data: { symbol: string; activated_at: number }[] = await r.json();
-      const now = Date.now() / 1000;
-      for (const coin of (data || []).slice(0, 50)) {
-        const sym = cleanTicker(coin.symbol || "");
-        const ageHours = (now - (coin.activated_at || now)) / 3600;
-        if (isValidKeyword(sym)) {
-          results.push({
-            keyword: sym,
-            score: 15000 * (ageHours < 24 ? 2.0 : 1.3),
-            isNew: ageHours < 72,
-          });
-        }
-      }
-    }
-  } catch {
-    /* continue */
-  }
-  return results;
-}
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 6 — Google Trends RSS
-// ════════════════════════════════════════════════════════════════════════════
-async function scanGoogleTrends() {
-  const results: { keyword: string; score: number }[] = [];
-  try {
-    const r = await safeFetch(
-      "https://trends.google.com/trending/rss?geo=US",
-      {
-        Accept: "application/rss+xml, text/xml",
-      },
-      8000,
-    );
-    if (!r) return results;
-    const xml = await r.text();
-    const titleMatches =
-      xml.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/g) || [];
-    const trafficMatches =
-      xml.match(/<ht:approx_traffic>(.*?)<\/ht:approx_traffic>/g) || [];
-    for (let i = 0; i < titleMatches.length; i++) {
-      const title = titleMatches[i]
-        .replace(/<title><!\[CDATA\[/, "")
-        .replace(/\]\]><\/title>/, "")
-        .toLowerCase();
-      const traffic =
-        parseInt(
-          (trafficMatches[i] || "")
-            .replace(/<[^>]*>/g, "")
-            .replace(/[^0-9]/g, ""),
-        ) || 10000;
-      for (const w of title.split(/[\s\-_,.()/]+/)) {
+    for (const story of stories) {
+      if (!story?.title) continue;
+      const title = story.title.toLowerCase();
+      const points = story.score || 0;
+      if (points < 100) continue;
+
+      for (const w of title.split(/[\s\-_,.()/!?'"]+/)) {
         const clean = cleanTicker(w);
-        if (isValidKeyword(clean))
-          results.push({ keyword: clean, score: traffic * 0.04 });
+        if (isValidKeyword(clean) && clean.length >= 4) {
+          results.push({
+            keyword: clean,
+            score: points * 20,
+            context: `HN trending: ${story.title.slice(0, 60)}`,
+          });
+        }
       }
     }
   } catch {
-    /* continue */
+    /* silent */
   }
-  return results;
+  return { results, count: results.length };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 7 — Reddit
-// ════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 6 — Reddit
+// ─────────────────────────────────────────────────────────────────────────────
 async function scanReddit(sub: string, tier: number) {
   const posts: {
     title: string;
@@ -1311,9 +1084,264 @@ async function scanReddit(sub: string, tier: number) {
   return { sub, tier, posts };
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 8 — CoinMarketCap new listings
-// ════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 7 — Pump.fun (more aggressive scanning)
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanPumpFun() {
+  const results: {
+    keyword: string;
+    score: number;
+    isNew: boolean;
+    ageMinutes: number;
+    mcap: number;
+    volume: number;
+    contractAddress?: string;
+  }[] = [];
+
+  // More endpoints including king-of-the-hill and graduated
+  const endpoints = [
+    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false",
+    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
+    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=reply_count&order=DESC&includeNsfw=false",
+    "https://frontend-api.pump.fun/coins/king-of-the-hill?includeNsfw=false",
+    // Slightly older page too for volume runners
+    "https://frontend-api.pump.fun/coins?offset=50&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false",
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const r = await safeFetch(url, {}, 10000);
+      if (!r) continue;
+      const data = await r.json();
+      const coins = Array.isArray(data) ? data : [data];
+
+      for (const coin of coins) {
+        const sym = cleanTicker(coin.symbol || "");
+        const mcap = coin.usd_market_cap || 0;
+        const replies = coin.reply_count || 0;
+        const ageMinutes = Math.floor(
+          (Date.now() - (coin.created_timestamp || Date.now())) / 60000,
+        );
+        const volume = coin.volume || 0;
+
+        // Extended window: allow up to 7 days (10080 min) but apply age penalty
+        if (ageMinutes > 10080) continue;
+        if (mcap === 0 && replies === 0) continue;
+
+        const ageMult = ageScoreMultiplier(ageMinutes);
+        if (ageMult === 0) continue;
+
+        const freshBonus =
+          ageMinutes < 30
+            ? 5.0
+            : ageMinutes < 120
+              ? 3.5
+              : ageMinutes < 360
+                ? 2.0
+                : ageMinutes < 1440
+                  ? 1.5
+                  : 1.0;
+
+        const activityScore =
+          (replies * 900 + Math.min(mcap, 100000) * 0.12 + volume * 0.05) *
+          freshBonus *
+          ageMult;
+
+        if (isValidKeyword(sym))
+          results.push({
+            keyword: sym,
+            score: activityScore,
+            isNew: ageMinutes < 1440,
+            ageMinutes,
+            mcap,
+            volume,
+            contractAddress: coin.mint,
+          });
+      }
+    } catch {
+      /* continue */
+    }
+  }
+  return results;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 8 — DexScreener (extended age window, lower floor)
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanDexScreener() {
+  const results: {
+    keyword: string;
+    score: number;
+    hasTicker: boolean;
+    mcap?: number;
+    liquidity?: number;
+    priceChange1h?: number;
+    priceChange24h?: number;
+    volume24h?: number;
+    ageMinutes?: number;
+    contractAddress?: string;
+  }[] = [];
+
+  for (const q of [
+    "solana meme",
+    "pump fun solana",
+    "new solana gem",
+    "solana viral",
+  ]) {
+    try {
+      const r = await safeFetch(
+        `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`,
+      );
+      if (!r) continue;
+      const data = await r.json();
+
+      // Extended to 7 days (604800000ms), removed 24h cap
+      const pairs = (data?.pairs || []).filter(
+        (p: { chainId: string; fdv?: number; pairCreatedAt?: number }) =>
+          p.chainId === "solana" &&
+          (p.fdv || 0) < 10_000_000 &&
+          p.pairCreatedAt &&
+          Date.now() - p.pairCreatedAt < 604800000, // 7 days
+      );
+
+      for (const pair of pairs.slice(0, 30)) {
+        const sym = cleanTicker(pair.baseToken?.symbol || "");
+        const liq = pair.liquidity?.usd || 0;
+        const vol24h = pair.volume?.h24 || 0;
+        const change1h = pair.priceChange?.h1 || 0;
+        const change24h = pair.priceChange?.h24 || 0;
+        const ageMinutes = pair.pairCreatedAt
+          ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
+          : undefined;
+
+        // Lowered liquidity floor to $5k, kept sanity checks
+        if (liq < 5000 || change1h > 500 || !isValidKeyword(sym)) continue;
+
+        const ageMult = ageScoreMultiplier(ageMinutes);
+        if (ageMult === 0) continue;
+
+        results.push({
+          keyword: sym,
+          score:
+            (vol24h * 0.4 + liq * 0.3 + Math.max(change24h, 0) * 120) * ageMult,
+          hasTicker: true,
+          mcap: pair.fdv,
+          liquidity: liq,
+          priceChange1h: change1h,
+          priceChange24h: change24h,
+          volume24h: vol24h,
+          ageMinutes,
+          contractAddress: pair.baseToken?.address,
+        });
+      }
+    } catch {
+      /* continue */
+    }
+  }
+
+  // Token profiles (boosted tokens)
+  try {
+    const r = await safeFetch(
+      "https://api.dexscreener.com/token-profiles/latest/v1",
+    );
+    if (r) {
+      const data = await r.json();
+      for (const token of (data || []).slice(0, 30)) {
+        if (token.chainId !== "solana") continue;
+        const m = (token.description || "")
+          .toLowerCase()
+          .match(/\$([a-z][a-z0-9]{1,11})\b/);
+        if (m?.[1] && isValidKeyword(m[1]))
+          results.push({
+            keyword: m[1],
+            score: 20000,
+            hasTicker: true,
+            contractAddress: token.tokenAddress,
+          });
+      }
+    }
+  } catch {
+    /* continue */
+  }
+
+  // Top boosted
+  try {
+    const r = await safeFetch(
+      "https://api.dexscreener.com/token-boosts/top/v1",
+    );
+    if (r) {
+      const data = await r.json();
+      for (const token of (data || []).slice(0, 20)) {
+        if (token.chainId !== "solana") continue;
+        const m = (token.description || "")
+          .toLowerCase()
+          .match(/\$([a-z][a-z0-9]{1,11})\b/);
+        if (m?.[1] && isValidKeyword(m[1]))
+          results.push({
+            keyword: m[1],
+            score: 15000 + (token.totalAmount || 0),
+            hasTicker: true,
+            contractAddress: token.tokenAddress,
+          });
+      }
+    }
+  } catch {
+    /* continue */
+  }
+
+  return results;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOURCE 9 — CoinGecko + CMC
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanCoinGecko() {
+  const results: { keyword: string; score: number; isNew: boolean }[] = [];
+  try {
+    const r = await safeFetch(
+      "https://api.coingecko.com/api/v3/search/trending",
+    );
+    if (r) {
+      const data = await r.json();
+      for (const { item } of data?.coins || []) {
+        const sym = cleanTicker(item.symbol || "");
+        if (isValidKeyword(sym))
+          results.push({
+            keyword: sym,
+            score: Math.max(40000 - (item.score ?? 10) * 3500, 3000),
+            isNew: false,
+          });
+      }
+    }
+  } catch {
+    /* continue */
+  }
+
+  try {
+    const r = await safeFetch(
+      "https://api.coingecko.com/api/v3/coins/list/new",
+    );
+    if (r) {
+      const data: { symbol: string; activated_at: number }[] = await r.json();
+      const now = Date.now() / 1000;
+      for (const coin of (data || []).slice(0, 50)) {
+        const sym = cleanTicker(coin.symbol || "");
+        const ageHours = (now - (coin.activated_at || now)) / 3600;
+        const ageMult = ageScoreMultiplier(ageHours * 60);
+        if (isValidKeyword(sym) && ageMult > 0)
+          results.push({
+            keyword: sym,
+            score: 15000 * (ageHours < 24 ? 2.0 : 1.3) * ageMult,
+            isNew: ageHours < 72,
+          });
+      }
+    }
+  } catch {
+    /* continue */
+  }
+  return results;
+}
+
 async function scanCMCNew() {
   const results: { keyword: string; score: number }[] = [];
   try {
@@ -1326,9 +1354,8 @@ async function scanCMCNew() {
     for (const coin of data?.data?.recentlyAdded || []) {
       const sym = cleanTicker(coin.symbol || "");
       const vol = coin.volume24h || coin.statistics?.volume24h || 0;
-      if (isValidKeyword(sym) && vol > 0) {
+      if (isValidKeyword(sym) && vol > 0)
         results.push({ keyword: sym, score: Math.min(vol * 0.001, 25000) });
-      }
     }
   } catch {
     /* continue */
@@ -1336,9 +1363,45 @@ async function scanCMCNew() {
   return results;
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// Rugcheck
+// ─────────────────────────────────────────────────────────────────────────────
+async function checkRug(contractAddress: string): Promise<{
+  risk: "low" | "medium" | "high" | "unknown";
+  details: string;
+}> {
+  try {
+    const r = await safeFetch(
+      `https://api.rugcheck.xyz/v1/tokens/${contractAddress}/report/summary`,
+      {},
+      5000,
+    );
+    if (!r) return { risk: "unknown", details: "unavailable" };
+    const data = await r.json();
+    const score = data?.score || 0;
+    const risks = (data?.risks || []) as { name: string; level: string }[];
+    const highRisks = risks
+      .filter((r) => r.level === "danger")
+      .map((r) => r.name);
+    const medRisks = risks.filter((r) => r.level === "warn").map((r) => r.name);
+
+    if (highRisks.length > 0)
+      return { risk: "high", details: highRisks.slice(0, 2).join(", ") };
+    if (score > 5000 || medRisks.length >= 3)
+      return {
+        risk: "medium",
+        details: medRisks.slice(0, 2).join(", ") || "moderate risk",
+      };
+    if (score > 0) return { risk: "low", details: "passed rugcheck" };
+    return { risk: "unknown", details: "no data" };
+  } catch {
+    return { risk: "unknown", details: "failed" };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN HANDLER
-// ════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
 export async function GET() {
   const scoreMap = new Map<string, ScoreEntry>();
   const logs: string[] = [];
@@ -1350,11 +1413,12 @@ export async function GET() {
     sourceLabel: string,
     field: keyof Pick<
       ScoreEntry,
+      | "viralScore"
       | "socialScore"
       | "onchainScore"
       | "geckoScore"
-      | "twitterScore"
-      | "telegramScore"
+      | "aiScore"
+      | "celebScore"
     >,
     opts: Partial<
       Pick<
@@ -1368,16 +1432,18 @@ export async function GET() {
         | "priceChange1h"
         | "priceChange24h"
         | "contractAddress"
+        | "aiContext"
+        | "viralContext"
+        | "celebMention"
       >
     > = {},
   ) => {
     const key = word.toLowerCase().trim();
-    if (!isValidKeyword(key)) return;
-    if (amount <= 0) return;
+    if (!isValidKeyword(key) || amount <= 0) return;
 
     const existing = scoreMap.get(key);
     if (existing) {
-      existing[field] = (existing[field] as number) + amount;
+      (existing[field] as number) += amount;
       existing.posts += 1;
       if (!existing.sources.includes(sourceLabel))
         existing.sources.push(sourceLabel);
@@ -1407,13 +1473,20 @@ export async function GET() {
         existing.priceChange24h = opts.priceChange24h;
       if (opts.contractAddress && !existing.contractAddress)
         existing.contractAddress = opts.contractAddress;
+      if (opts.aiContext && !existing.aiContext)
+        existing.aiContext = opts.aiContext;
+      if (opts.viralContext && !existing.viralContext)
+        existing.viralContext = opts.viralContext;
+      if (opts.celebMention && !existing.celebMention)
+        existing.celebMention = opts.celebMention;
     } else {
       const entry: ScoreEntry = {
+        viralScore: 0,
         socialScore: 0,
         onchainScore: 0,
         geckoScore: 0,
-        twitterScore: 0,
-        telegramScore: 0,
+        aiScore: 0,
+        celebScore: 0,
         posts: 1,
         hasTicker: opts.hasTicker || false,
         isNewCoin: opts.isNewCoin || false,
@@ -1426,64 +1499,136 @@ export async function GET() {
         priceChange1h: opts.priceChange1h,
         priceChange24h: opts.priceChange24h,
         contractAddress: opts.contractAddress,
+        aiContext: opts.aiContext,
+        viralContext: opts.viralContext,
+        celebMention: opts.celebMention,
       };
       (entry[field] as number) = amount;
       scoreMap.set(key, entry);
     }
   };
 
-  // ── Run all sources in parallel
+  // Fire all sources
   const [
-    telegramData,
-    twitterData,
+    geminiData,
+    geminiNewsData,
+    googleTrendsData,
+    googleNewsData,
+    youtubeTrendingData,
+    kymData,
+    hnData,
     pumpResults,
     dexResults,
     geckoResults,
-    googleResults,
     cmcResults,
     ...redditResults
   ] = await Promise.all([
-    scanTelegram(),
-    scanTwitter(),
+    scanWithGemini(),
+    scanGeminiCryptoNews(),
+    scanGoogleTrends(),
+    scanGoogleNews(),
+    scanYouTubeTrending(),
+    scanKnowYourMeme(),
+    scanHackerNews(),
     scanPumpFun(),
     scanDexScreener(),
     scanCoinGecko(),
-    scanGoogleTrends(),
     scanCMCNew(),
     ...REDDIT_SUBS.map((s) => scanReddit(s.name, s.tier)),
   ]);
 
-  // Process Telegram
-  for (const t of telegramData.results) {
-    upsert(
-      t.keyword,
-      t.score,
-      "telegram",
-      `TG(${t.channels.slice(0, 2).join(",")})`,
-      "telegramScore",
-      { hasTicker: true },
+  // Process Gemini
+  if (geminiData.success) {
+    for (const coin of geminiData.coins) {
+      const isCeleb = !!coin.celebMention;
+      // Apply age penalty from Gemini's estimate
+      const ageMult =
+        coin.estimatedAgeDays !== undefined
+          ? ageScoreMultiplier(coin.estimatedAgeDays * 1440)
+          : 0.9;
+      if (ageMult === 0) continue;
+
+      const baseScore = coin.score * (isCeleb ? 6000 : 4000) * ageMult;
+      const field = isCeleb ? "celebScore" : "aiScore";
+
+      upsert(
+        coin.ticker,
+        baseScore,
+        isCeleb ? "celebrity" : "ai",
+        isCeleb ? `Celebrity: ${coin.celebMention}` : "Gemini AI",
+        field,
+        {
+          hasTicker: !coin.isViral,
+          isNewCoin: coin.platforms?.includes("pumpfun"),
+          aiContext: coin.context,
+          viralContext: coin.isViral ? coin.context : undefined,
+          celebMention: coin.celebMention,
+        },
+      );
+
+      const entry = scoreMap.get(coin.ticker);
+      if (entry)
+        for (const plat of coin.platforms || []) {
+          if (!entry.platforms.includes(plat)) entry.platforms.push(plat);
+        }
+    }
+    const celebCount = geminiData.coins.filter((c) => c.celebMention).length;
+    logs.push(
+      `[Gemini AI] ✓ ${geminiData.coins.length} results — ${celebCount} celeb — ${geminiData.coins.filter((c) => c.isViral).length} viral`,
     );
-    const e = scoreMap.get(t.keyword);
-    if (e) e.telegramMentions = t.mentions;
+  } else {
+    logs.push(`[Gemini AI] ✗ ${geminiData.error}`);
   }
-  logs.push(
-    `[Telegram] ${telegramData.channelsHit}/${TELEGRAM_CHANNELS.length} channels hit — ${telegramData.totalMessages} msgs — ${telegramData.results.length} tickers`,
-  );
 
-  // Process Twitter
-  for (const t of twitterData.results) {
-    upsert(t.keyword, t.score, "twitter", "Twitter/X", "twitterScore", {
-      hasTicker: true,
+  if (geminiNewsData.success) {
+    for (const coin of geminiNewsData.coins) {
+      const ageMult =
+        coin.estimatedAgeDays !== undefined
+          ? ageScoreMultiplier(coin.estimatedAgeDays * 1440)
+          : 0.9;
+      if (ageMult === 0) continue;
+      upsert(
+        coin.ticker,
+        coin.score * 3500 * ageMult,
+        "ai",
+        "Gemini News",
+        "aiScore",
+        {
+          aiContext: coin.context,
+          viralContext: coin.isViral ? coin.context : undefined,
+        },
+      );
+    }
+    logs.push(`[Gemini News] ✓ ${geminiNewsData.coins.length} signals`);
+  }
+
+  for (const g of googleTrendsData.results)
+    upsert(g.keyword, g.score, "google-trends", "Google Trends", "viralScore");
+  logs.push(`[Google Trends] ${googleTrendsData.count} words`);
+
+  for (const g of googleNewsData.results)
+    upsert(g.keyword, g.score, "google-news", "Google News", "viralScore", {
+      viralContext: g.context,
     });
-    const e = scoreMap.get(t.keyword);
-    if (e) e.twitterMentions = t.tweetCount;
-  }
-  logs.push(
-    `[Twitter/X] method:${twitterData.method} — ${twitterData.tweetsFound} tweets — ${twitterData.results.length} tickers`,
-  );
+  logs.push(`[Google News] ${googleNewsData.count} keywords`);
 
-  // Process Pump.fun
-  for (const p of pumpResults) {
+  for (const y of youtubeTrendingData.results)
+    upsert(y.keyword, y.score, "youtube", "YouTube Trending", "viralScore");
+  logs.push(`[YouTube] ${youtubeTrendingData.count} keywords`);
+
+  for (const k of kymData.results)
+    upsert(k.keyword, k.score, "kym", "Know Your Meme", "viralScore", {
+      viralContext: k.context,
+    });
+  logs.push(`[KYM] ${kymData.count} memes`);
+
+  for (const h of hnData.results)
+    upsert(h.keyword, h.score, "hackernews", "Hacker News", "viralScore", {
+      viralContext: h.context,
+    });
+  logs.push(`[HN] ${hnData.count} keywords`);
+
+  for (const p of pumpResults)
     upsert(p.keyword, p.score, "pumpfun", "Pump.fun", "onchainScore", {
       hasTicker: true,
       isNewCoin: p.isNew,
@@ -1492,11 +1637,9 @@ export async function GET() {
       volume: p.volume,
       contractAddress: p.contractAddress,
     });
-  }
   logs.push(`[Pump.fun] ${pumpResults.length} signals`);
 
-  // Process DexScreener
-  for (const d of dexResults) {
+  for (const d of dexResults)
     upsert(d.keyword, d.score, "dexscreener", "DexScreener", "onchainScore", {
       hasTicker: d.hasTicker,
       isNewCoin: true,
@@ -1508,39 +1651,28 @@ export async function GET() {
       contractAddress: d.contractAddress,
       ageMinutes: d.ageMinutes,
     });
-  }
-  logs.push(`[DexScreener] ${dexResults.length} signals`);
+  logs.push(`[DexScreener] ${dexResults.length} pairs`);
 
-  // Process CoinGecko
-  for (const g of geckoResults) {
+  for (const g of geckoResults)
     upsert(g.keyword, g.score, "coingecko", "CoinGecko", "geckoScore", {
       hasTicker: true,
       isNewCoin: g.isNew,
     });
-  }
   logs.push(`[CoinGecko] ${geckoResults.length} signals`);
 
-  // Process Google Trends
-  for (const g of googleResults) {
-    upsert(g.keyword, g.score, "google", "Google Trends", "socialScore");
-  }
-  logs.push(`[Google] ${googleResults.length} trend words`);
-
-  // Process CMC
-  for (const c of cmcResults) {
+  for (const c of cmcResults)
     upsert(c.keyword, c.score, "cmc", "CMC New", "geckoScore", {
       hasTicker: true,
       isNewCoin: true,
     });
-  }
-  logs.push(`[CMC] ${cmcResults.length} new listings`);
+  logs.push(`[CMC] ${cmcResults.length} listings`);
 
-  // Process Reddit
   let totalRedditTickers = 0;
   for (const { sub, tier, posts } of redditResults) {
     for (const { title, score: upvotes, flair, comments } of posts) {
       const heat = Math.max(upvotes, 1) + comments * 2;
       const full = `${title} ${flair}`.toLowerCase();
+
       for (const m of full.match(/\$([a-z][a-z0-9]{1,11})\b/g) || []) {
         const ticker = cleanTicker(m.replace("$", ""));
         if (isValidKeyword(ticker)) {
@@ -1550,11 +1682,9 @@ export async function GET() {
           totalRedditTickers++;
         }
       }
-      for (const m of full.match(
-        /\b([a-z]{2,10})(coin|inu|token|fi|dao|ai|doge|cat|pepe|frog|chad)\b/g,
-      ) || []) {
-        const compound = m.replace(/\s+/g, "").replace(/[^a-z0-9]/g, "");
-        if (isValidKeyword(compound)) {
+      for (const m of full.match(MEME_SUFFIXES) || []) {
+        const compound = cleanTicker(m);
+        if (isValidKeyword(compound))
           upsert(
             compound,
             heat * 4 * tier,
@@ -1562,13 +1692,27 @@ export async function GET() {
             `r/${sub}`,
             "socialScore",
           );
+      }
+      if (upvotes > 5000) {
+        for (const w of full.split(/[\s\-_,.()/!?'"#@]+/)) {
+          const clean = cleanTicker(w);
+          if (isValidKeyword(clean) && clean.length >= 4)
+            upsert(
+              clean,
+              heat * 1.5 * tier,
+              "reddit",
+              `r/${sub}`,
+              "socialScore",
+            );
         }
       }
     }
   }
-  logs.push(`[Reddit] $TICKER mentions: ${totalRedditTickers}`);
+  logs.push(
+    `[Reddit] ${REDDIT_SUBS.length} subs — ${totalRedditTickers} $TICKER mentions`,
+  );
 
-  // ── Rugcheck top on-chain results (parallel, max 15 checks)
+  // Rugcheck top onchain tokens
   const onchainWithCA = Array.from(scoreMap.entries())
     .filter(
       ([, v]) =>
@@ -1581,45 +1725,61 @@ export async function GET() {
 
   const rugChecks = await Promise.all(
     onchainWithCA.map(async ([key, v]) => {
-      const result = await checkRug(v.contractAddress!);
-      return { key, ...result };
+      const r = await checkRug(v.contractAddress!);
+      return { key, ...r };
     }),
   );
-
   for (const { key, risk, details } of rugChecks) {
-    const entry = scoreMap.get(key);
-    if (entry) {
-      entry.rugRisk = risk;
-      entry.rugDetails = details;
+    const e = scoreMap.get(key);
+    if (e) {
+      e.rugRisk = risk;
+      e.rugDetails = details;
     }
   }
-  logs.push(`[Rugcheck] checked ${rugChecks.length} tokens`);
+  logs.push(`[Rugcheck] ${rugChecks.length} tokens checked`);
 
-  // ── Final scoring & sort
-  const MIN_SCORE = 300;
-
+  // Final scoring with age penalty baked into onchain scores already
   const results = Array.from(scoreMap.entries())
     .map(([keyword, v]) => {
       const platformCount = v.platforms.length;
       const crossBonus =
         platformCount >= 5
-          ? 3.2
+          ? 3.5
           : platformCount >= 4
-            ? 2.4
+            ? 2.6
             : platformCount >= 3
-              ? 1.7
+              ? 1.8
               : platformCount >= 2
-                ? 1.25
+                ? 1.3
                 : 1.0;
       const tickerBonus = v.hasTicker ? 3.5 : 1.0;
       const newCoinBonus = v.isNewCoin ? 2.2 : 1.0;
-      const twitterBonus = v.twitterScore > 0 ? 2.0 : 1.0;
-      const telegramBonus = v.telegramScore > 0 ? 2.2 : 1.0;
+      const aiBonus = v.aiScore > 0 ? 2.5 : 1.0;
+      const celebBonus = v.celebScore > 0 ? 8.0 : 1.0;
+
+      const viralPlatforms = v.platforms.filter((p) =>
+        [
+          "google-trends",
+          "google-news",
+          "youtube",
+          "kym",
+          "tiktok",
+          "celebrity",
+        ].includes(p),
+      ).length;
+      const viralBonus =
+        viralPlatforms >= 3
+          ? 4.0
+          : viralPlatforms >= 2
+            ? 2.5
+            : viralPlatforms >= 1
+              ? 1.5
+              : 1.0;
+
       const rugPenalty =
         v.rugRisk === "high" ? 0.1 : v.rugRisk === "medium" ? 0.6 : 1.0;
-      const mentionWeight = Math.log2(v.posts + 2);
 
-      // Liquidity quality bonus — real buyable liquidity
+      const mentionWeight = Math.log2(v.posts + 2);
       const liqBonus = v.liquidity
         ? v.liquidity > 50000
           ? 1.5
@@ -1630,12 +1790,16 @@ export async function GET() {
               : 0.7
         : 1.0;
 
+      // Apply age penalty at final scoring level too (belt+suspenders)
+      const globalAgeMult = ageScoreMultiplier(v.ageMinutes);
+
       const raw =
-        v.socialScore * 1.2 +
+        v.viralScore * 2.0 +
+        v.socialScore * 1.5 +
         v.onchainScore * 2.8 +
         v.geckoScore * 2.0 +
-        v.twitterScore * 3.5 +
-        v.telegramScore * 4.0; // Telegram weighted highest — most direct alpha
+        v.aiScore * 4.5 +
+        v.celebScore * 7.0;
 
       const final = Math.round(
         raw *
@@ -1643,20 +1807,25 @@ export async function GET() {
           tickerBonus *
           crossBonus *
           newCoinBonus *
-          twitterBonus *
-          telegramBonus *
+          aiBonus *
+          celebBonus *
+          viralBonus *
           rugPenalty *
-          liqBonus,
+          liqBonus *
+          globalAgeMult,
       );
 
       let ageLabel: string | undefined;
       if (v.ageMinutes !== undefined) {
+        const days = v.ageMinutes / 1440;
         ageLabel =
           v.ageMinutes < 60
             ? `${v.ageMinutes}m old`
             : v.ageMinutes < 1440
               ? `${Math.floor(v.ageMinutes / 60)}h old`
-              : `${Math.floor(v.ageMinutes / 1440)}d old`;
+              : days < 7
+                ? `${Math.floor(days)}d old`
+                : `${Math.floor(days)}d old ⚠`; // warn if old
       }
 
       return {
@@ -1672,6 +1841,7 @@ export async function GET() {
         crossPlatforms: platformCount,
         platforms: v.platforms,
         ageLabel,
+        ageMinutes: v.ageMinutes,
         mcap: v.mcap,
         volume: v.volume,
         liquidity: v.liquidity,
@@ -1680,37 +1850,78 @@ export async function GET() {
         contractAddress: v.contractAddress,
         rugRisk: v.rugRisk,
         rugDetails: v.rugDetails,
-        twitterMentions: v.twitterMentions,
-        telegramMentions: v.telegramMentions,
-        onTwitter: v.platforms.includes("twitter"),
+        aiContext: v.aiContext || v.viralContext,
+        celebMention: v.celebMention,
+        onAI: v.platforms.includes("ai"),
+        onCeleb: v.platforms.includes("celebrity"),
+        onTwitter:
+          v.platforms.includes("twitter") ||
+          v.platforms.includes("google-news"),
         onTelegram: v.platforms.includes("telegram"),
         onDex:
           v.platforms.includes("dexscreener") ||
           v.platforms.includes("pumpfun"),
+        isViralTrend: viralPlatforms >= 1,
+        ageDays: v.ageMinutes !== undefined ? v.ageMinutes / 1440 : undefined,
       };
     })
-    // Hard quality filters
     .filter((r) => {
-      if (r.score < MIN_SCORE && !r.hasTicker) return false;
-      if (r.rugRisk === "high") return false; // never show confirmed rugs
-      if (r.priceChange1h !== undefined && r.priceChange1h > 800) return false; // already pumped 8x this hour
-      return true;
+      // Hard age filter: never show 30+ day tokens
+      if (r.ageDays !== undefined && r.ageDays > 30) return false;
+      // Hard rug filter
+      if (r.rugRisk === "high") return false;
+      if (r.priceChange1h !== undefined && r.priceChange1h > 800) return false;
+
+      const hasCeleb = r.onCeleb;
+      const hasRealAI = r.onAI && r.aiContext && r.aiContext.length > 20;
+      const hasMultiSource = r.crossPlatforms >= 3;
+      const hasOnchainPlusSocial =
+        r.onDex &&
+        (r.platforms || []).some((p: string) =>
+          [
+            "reddit",
+            "google-trends",
+            "youtube",
+            "kym",
+            "twitter",
+            "google-news",
+          ].includes(p),
+        );
+      const hasOnchainPlusAI = r.onDex && r.onAI;
+      const isHighScore = r.score >= 500000;
+
+      // Single-source DEX-only: block unless celeb
+      if (r.onDex && r.crossPlatforms === 1 && !hasCeleb) return false;
+      // Pure viral with no onchain AND no AI: block
+      if (!r.onDex && !hasCeleb && !hasRealAI) return false;
+
+      return (
+        hasCeleb ||
+        hasRealAI ||
+        hasMultiSource ||
+        hasOnchainPlusSocial ||
+        hasOnchainPlusAI ||
+        isHighScore
+      );
     })
     .sort((a, b) => {
       const aBoost =
-        (a.onTelegram ? 1.8 : 1) *
-        (a.onTwitter ? 1.5 : 1) *
+        (a.onCeleb ? 5.0 : 1) *
+        (a.onAI ? 2.0 : 1) *
+        (a.isViralTrend && a.onDex ? 3.0 : 1) *
         (a.isNewCoin && a.crossPlatforms >= 2 ? 1.4 : 1);
       const bBoost =
-        (b.onTelegram ? 1.8 : 1) *
-        (b.onTwitter ? 1.5 : 1) *
+        (b.onCeleb ? 5.0 : 1) *
+        (b.onAI ? 2.0 : 1) *
+        (b.isViralTrend && b.onDex ? 3.0 : 1) *
         (b.isNewCoin && b.crossPlatforms >= 2 ? 1.4 : 1);
       return b.score * bBoost - a.score * aBoost;
     })
     .slice(0, 60);
 
+  const celebCount = results.filter((r) => r.onCeleb).length;
   logs.push(
-    `[Done] ${results.length} results — ${results.filter((r) => r.onTelegram).length} from Telegram — ${results.filter((r) => r.onTwitter).length} from Twitter`,
+    `[Done] ${results.length} results — ${celebCount} celeb — ${results.filter((r) => r.isViralTrend).length} viral — ${results.filter((r) => r.onDex).length} on-chain`,
   );
 
   return NextResponse.json({

@@ -6,7 +6,7 @@ import Image from "next/image";
 import WalletModal from "./WalletModal";
 
 const MONO = {
-  fontFamily: "'JetBrains Mono', 'Fira Mono', monospace" as const,
+  fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
 
 function trimAddress(addr: string) {

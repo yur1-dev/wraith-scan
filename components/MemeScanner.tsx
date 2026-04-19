@@ -150,7 +150,7 @@ function isGarbageKeyword(kw: string): boolean {
 }
 
 // Lowered thresholds so more tokens get tracked
-const MIN_TRACK_SCORE = 100_000;
+const MIN_TRACK_SCORE = 500_000;
 const MIN_TRACK_MCAP = 1_000;
 
 export function recordTokenSighting(result: ScanResult) {
@@ -158,6 +158,7 @@ export function recordTokenSighting(result: ScanResult) {
   if (isGarbageKeyword(result.keyword)) return;
   if ((result.score || 0) < MIN_TRACK_SCORE && !result.celebMention) return;
   if ((result.mcap || 0) > 0 && (result.mcap || 0) < MIN_TRACK_MCAP) return;
+  if ((result.mcap || 0) > 500_000) return;
 
   const h = loadHistory();
   const key = result.keyword;
@@ -263,7 +264,7 @@ function getAgeDisplay(ageMinutes: number | undefined) {
 }
 
 const MONO = {
-  fontFamily: "'JetBrains Mono', 'Fira Mono', monospace" as const,
+  fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
 
 const PLATFORM_META: Record<string, { label: string; color: string }> = {

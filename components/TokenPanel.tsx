@@ -53,7 +53,7 @@ interface Props {
 }
 
 const MONO = {
-  fontFamily: "'JetBrains Mono', 'Fira Mono', 'Courier New', monospace",
+  fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
 
 const RUG_COLOR: Record<string, string> = {
@@ -1640,25 +1640,33 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   </button>
                 ))}
               </div>
+              {/* // 1. Change type="number" to type="text" and add inputMode for
+              mobile numeric keyboard */}
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={buyAmount}
-                onChange={(e) => setBuyAmount(e.target.value)}
-                min="0.01"
-                step="0.01"
-                style={{
-                  width: "100%",
-                  marginTop: 6,
-                  background: C.bg,
-                  border: `1px solid ${C.border}`,
-                  color: "#e0e0e0",
-                  fontSize: 12,
-                  ...MONO,
-                  padding: "8px 10px",
-                  borderRadius: 4,
-                  outline: "none",
-                  boxSizing: "border-box" as const,
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (/^\d*\.?\d*$/.test(val)) setBuyAmount(val);
                 }}
+                style={
+                  {
+                    width: "100%",
+                    marginTop: 6,
+                    background: C.bg,
+                    border: `1px solid ${C.border}`,
+                    color: "#e0e0e0",
+                    fontSize: 12,
+                    ...MONO,
+                    padding: "8px 10px",
+                    borderRadius: 4,
+                    outline: "none",
+                    boxSizing: "border-box" as const,
+                    // remove spinners just in case
+                    MozAppearance: "textfield",
+                  } as React.CSSProperties
+                }
                 placeholder="Custom amount..."
               />
             </div>

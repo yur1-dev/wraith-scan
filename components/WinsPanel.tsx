@@ -36,19 +36,18 @@ interface Props {
 }
 
 const MONO = {
-  fontFamily:
-    "'JetBrains Mono', 'Fira Mono', 'Courier New', monospace" as const,
+  fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
 const AUTO_REFRESH_MS = 60_000;
 const UNDO_TIMEOUT_MS = 10_000;
+const BOUGHT_KEY = "wraith_bought_keys";
 
-// Readable colors — minimum contrast on dark bg
 const C = {
-  primary: "#f0f0f0", // headings, tickers
-  secondary: "#aaaaaa", // body text
-  muted: "#777777", // secondary labels (still readable)
-  dim: "#555555", // timestamps, faint labels
-  label: "#666666", // section labels
+  primary: "#f0f0f0",
+  secondary: "#aaaaaa",
+  muted: "#777777",
+  dim: "#555555",
+  label: "#666666",
   orange: "#e8490f",
   green: "#00c47a",
   yellow: "#ffd700",
@@ -116,6 +115,20 @@ function loadSafeHistory(): Record<string, HistoryEntry> {
   } catch {
     return {};
   }
+}
+function loadBoughtKeys(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    return new Set(JSON.parse(localStorage.getItem(BOUGHT_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+function saveBoughtKeys(keys: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(BOUGHT_KEY, JSON.stringify([...keys]));
+  } catch {}
 }
 function isGarbage(kw: string): boolean {
   if (kw.length > 14) return true;
@@ -332,6 +345,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
   const [lastAt, setLastAt] = useState<string | null>(null);
   const [updating, setUpdating] = useState<Set<string>>(new Set());
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [boughtKeys, setBoughtKeys] = useState<Set<string>>(new Set());
   const [undoSnap, setUndoSnap] = useState<Record<string, HistoryEntry> | null>(
     null,
   );
@@ -342,6 +356,11 @@ export default function WinsPanel({ onSelectMeme }: Props) {
   const undoCD_ref = useRef<ReturnType<typeof setInterval> | null>(null);
   const rfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load bought keys on mount
+  useEffect(() => {
+    setBoughtKeys(loadBoughtKeys());
+  }, []);
 
   useEffect(() => {
     const h = loadSafeHistory();
@@ -390,6 +409,23 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     return () => window.removeEventListener("keydown", h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [undoSnap]);
+
+  // ── Bought / Sold tracking
+  const markBought = (kw: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = new Set([...boughtKeys, kw]);
+    setBoughtKeys(next);
+    saveBoughtKeys(next);
+  };
+
+  const markSold = (kw: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Remove from bought, add to dismissed so TP banner goes away
+    const next = new Set([...boughtKeys].filter((k) => k !== kw));
+    setBoughtKeys(next);
+    saveBoughtKeys(next);
+    setDismissed((p) => new Set([...p, kw]));
+  };
 
   const doUndo = () => {
     if (!undoSnap) return;
@@ -539,9 +575,13 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     0,
   );
   const bestTok = list.find((e) => calcX(e.initialMcap, e.peakMcap) === bestX);
+
+  // TP alerts only for tokens you've actually bought
   const tpAlerts = list.filter(
     (e) =>
-      calcX(e.initialMcap, e.currentMcap) >= 2 && !dismissed.has(e.keyword),
+      calcX(e.initialMcap, e.currentMcap) >= 2 &&
+      boughtKeys.has(e.keyword) &&
+      !dismissed.has(e.keyword),
   );
 
   return (
@@ -559,11 +599,13 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       <style>{`
         @keyframes dpulse{0%,100%{opacity:1}50%{opacity:.4}}
         @keyframes aglow{0%,100%{box-shadow:0 0 8px #ffd70022}50%{box-shadow:0 0 18px #ffd70055}}
+        @keyframes bglow{0%,100%{box-shadow:0 0 8px #00b4d822}50%{box-shadow:0 0 18px #00b4d855}}
         .wc{cursor:pointer;transition:background .1s;position:relative}
         .wc:hover{background:#0a0a0a!important}
         .wdel{opacity:0;transition:opacity .12s}
         .wc:hover .wdel{opacity:1}
         .tpb{animation:aglow 2s ease-in-out infinite}
+        .bpb{animation:bglow 2s ease-in-out infinite}
       `}</style>
 
       {/* HEADER */}
@@ -878,8 +920,20 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           const hasDumped = xNow < 0.7 && xPeak >= 1.5;
           const isCeleb = !!entry.celebMention;
           const isUpd = updating.has(entry.keyword);
-          const showTP = xNow >= 2 && !dismissed.has(entry.keyword);
           const isSel = selKey === entry.keyword;
+          const hasBought = boughtKeys.has(entry.keyword);
+
+          // TAKE PROFIT: only show if you actually marked it as bought
+          const showTP =
+            xNow >= 2 && hasBought && !dismissed.has(entry.keyword);
+
+          // BUY PROMPT: spotted but not bought yet, still low mcap
+          const showBuyPrompt =
+            !hasBought &&
+            !dismissed.has(entry.keyword) &&
+            (entry.currentMcap || 0) > 0 &&
+            (entry.currentMcap || 0) < 500_000;
+
           const accent = isMega
             ? C.yellow
             : isWin
@@ -913,7 +967,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 background: isSel ? "#0d0300" : C.bg,
               }}
             >
-              {/* TAKE PROFIT BANNER */}
+              {/* ── TAKE PROFIT BANNER (only if you bought it) */}
               {showTP && (
                 <div
                   style={{
@@ -949,7 +1003,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         marginTop: 2,
                       }}
                     >
-                      spotted {fmtMcap(entry.initialMcap)} → now{" "}
+                      bought at ~{fmtMcap(entry.initialMcap)} → now{" "}
                       {fmtMcap(entry.currentMcap)}
                     </div>
                   </div>
@@ -963,6 +1017,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         style={{ textDecoration: "none" }}
                       >
                         <button
+                          onClick={(e) => markSold(entry.keyword, e)}
                           style={{
                             background: C.green,
                             border: "none",
@@ -989,6 +1044,109 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         background: "transparent",
                         border: `1px solid ${C.yellow}22`,
                         color: `${C.yellow}77`,
+                        fontSize: 9,
+                        ...MONO,
+                        padding: "5px 8px",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── BUY PROMPT BANNER (spotted, not bought yet) */}
+              {showBuyPrompt && (
+                <div
+                  className="bpb"
+                  style={{
+                    borderBottom: `1px solid ${C.blue}22`,
+                    padding: "7px 14px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    background: "#03090e",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        color: C.blue,
+                        fontSize: 9,
+                        fontWeight: 900,
+                        letterSpacing: "0.12em",
+                        ...MONO,
+                      }}
+                    >
+                      ⚡ SPOTTED — {fmtMcap(entry.currentMcap)}
+                    </div>
+                    <div
+                      style={{
+                        color: `${C.blue}77`,
+                        fontSize: 8,
+                        ...MONO,
+                        marginTop: 2,
+                      }}
+                    >
+                      tap BOUGHT to start tracking profit
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                    {entry.contractAddress && (
+                      <a
+                        href={`https://dexscreener.com/solana/${entry.contractAddress}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <button
+                          style={{
+                            background: "transparent",
+                            border: `1px solid ${C.blue}44`,
+                            color: C.blue,
+                            fontSize: 9,
+                            fontWeight: 700,
+                            ...MONO,
+                            padding: "5px 9px",
+                            borderRadius: 3,
+                            cursor: "pointer",
+                            letterSpacing: "0.08em",
+                          }}
+                        >
+                          VIEW↗
+                        </button>
+                      </a>
+                    )}
+                    <button
+                      onClick={(e) => markBought(entry.keyword, e)}
+                      style={{
+                        background: C.orange,
+                        border: "none",
+                        color: "#fff",
+                        fontSize: 9,
+                        fontWeight: 900,
+                        ...MONO,
+                        padding: "5px 10px",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      ✓ BOUGHT
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDismissed((p) => new Set([...p, entry.keyword]));
+                      }}
+                      style={{
+                        background: "transparent",
+                        border: `1px solid ${C.border}`,
+                        color: C.dim,
                         fontSize: 9,
                         ...MONO,
                         padding: "5px 8px",
@@ -1065,6 +1223,22 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           {dispName}
                         </span>
                       )}
+                      {/* Bought badge */}
+                      {hasBought && (
+                        <span
+                          style={{
+                            fontSize: 8,
+                            color: C.green,
+                            border: `1px solid ${C.green}33`,
+                            padding: "2px 5px",
+                            borderRadius: 2,
+                            ...MONO,
+                            background: `${C.green}0f`,
+                          }}
+                        >
+                          ✓ IN
+                        </span>
+                      )}
                       {isMega && (
                         <span
                           style={{
@@ -1138,7 +1312,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       )}
                     </div>
 
-                    {/* AI context — NOW READABLE */}
+                    {/* AI context */}
                     {entry.aiContext && (
                       <div
                         style={{
@@ -1167,7 +1341,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     >
                       {[
                         {
-                          label: "IN",
+                          label: hasBought ? "BOUGHT" : "SPOTTED",
                           value: fmtMcap(entry.initialMcap),
                           color: C.muted,
                         },
@@ -1278,18 +1452,21 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 5 }}
                   >
-                    <span
-                      style={{
-                        color: xNow >= 1 ? `${C.green}77` : `${C.red}77`,
-                        fontSize: 9,
-                        fontWeight: 700,
-                        ...MONO,
-                      }}
-                    >
-                      {xNow >= 1
-                        ? `+${((xNow - 1) * 100).toFixed(0)}%`
-                        : `-${((1 - xNow) * 100).toFixed(0)}%`}
-                    </span>
+                    {/* P&L — only meaningful if bought */}
+                    {hasBought && (
+                      <span
+                        style={{
+                          color: xNow >= 1 ? `${C.green}aa` : `${C.red}aa`,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          ...MONO,
+                        }}
+                      >
+                        {xNow >= 1
+                          ? `+${((xNow - 1) * 100).toFixed(0)}%`
+                          : `-${((1 - xNow) * 100).toFixed(0)}%`}
+                      </span>
+                    )}
                     {entry.contractAddress && (
                       <>
                         <a
@@ -1328,6 +1505,29 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         </a>
                       </>
                     )}
+                    {/* BUY / IN toggle */}
+                    <button
+                      onClick={(e) =>
+                        hasBought
+                          ? markSold(entry.keyword, e)
+                          : markBought(entry.keyword, e)
+                      }
+                      style={{
+                        background: hasBought ? `${C.green}15` : "transparent",
+                        border: `1px solid ${hasBought ? C.green + "44" : C.border}`,
+                        color: hasBought ? C.green : C.dim,
+                        fontSize: 8,
+                        ...MONO,
+                        padding: "2px 7px",
+                        borderRadius: 2,
+                        cursor: "pointer",
+                        flexShrink: 0,
+                        fontWeight: hasBought ? 700 : 400,
+                      }}
+                      title={hasBought ? "Mark as sold" : "Mark as bought"}
+                    >
+                      {hasBought ? "✓ IN" : "BUY?"}
+                    </button>
                     <button
                       className="wdel"
                       onClick={(e) => delToken(entry.keyword, e)}

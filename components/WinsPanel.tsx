@@ -42,6 +42,11 @@ const AUTO_REFRESH_MS = 60_000;
 const UNDO_TIMEOUT_MS = 10_000;
 const BOUGHT_KEY = "wraith_bought_keys";
 
+// ─── DEAD TOKEN PURGE CONSTANTS ───────────────────────────────────────────────
+const DEAD_THRESHOLD = 0.1; // lost 90%+ from initial = dead
+const DEAD_MIN_AGE_MS = 2 * 60 * 60 * 1000; // must be at least 2h old to purge
+const MAX_HISTORY_AGE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days max
+
 const C = {
   primary: "#f0f0f0",
   secondary: "#aaaaaa",
@@ -137,6 +142,20 @@ function isGarbage(kw: string): boolean {
   if (kw.length >= 8 && (kw.match(/[aeiou]/gi) || []).length === 0) return true;
   return false;
 }
+
+// ─── DEAD TOKEN CHECK ─────────────────────────────────────────────────────────
+function isDeadEntry(e: HistoryEntry, nowMs: number): boolean {
+  const age = nowMs - e.seenAt;
+  // Too old
+  if (age > MAX_HISTORY_AGE_MS) return true;
+  // Lost 90%+ and been around for at least 2h
+  if (e.initialMcap > 0 && age > DEAD_MIN_AGE_MS) {
+    const xNow = e.currentMcap / e.initialMcap;
+    if (xNow < DEAD_THRESHOLD) return true;
+  }
+  return false;
+}
+
 function fmtMcap(n: number): string {
   if (!n) return "—";
   if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
@@ -362,14 +381,19 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     setBoughtKeys(loadBoughtKeys());
   }, []);
 
+  // ── LOAD + AUTO-PURGE DEAD TOKENS ON MOUNT ────────────────────────────────
   useEffect(() => {
     const h = loadSafeHistory();
     const clean: Record<string, HistoryEntry> = {};
+    const now = Date.now();
+
     for (const [k, e] of Object.entries(h)) {
       if (isGarbage(k)) continue;
       if (!e.contractAddress && e.initialMcap === 0) continue;
       if (e.initialMcap === 0 && e.currentMcap === 0 && e.peakMcap === 0)
         continue;
+      // FIX: auto-purge dead/stale tokens on load
+      if (isDeadEntry(e, now)) continue;
       clean[k] = e;
     }
     if (Object.keys(clean).length !== Object.keys(h).length) saveHistory(clean);
@@ -420,7 +444,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
 
   const markSold = (kw: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    // Remove from bought, add to dismissed so TP banner goes away
     const next = new Set([...boughtKeys].filter((k) => k !== kw));
     setBoughtKeys(next);
     saveBoughtKeys(next);
@@ -533,6 +556,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         }
       }),
     );
+
+    // FIX: auto-purge dead tokens after refresh cycle
+    const nowMs = Date.now();
+    for (const [k, e] of Object.entries(upd)) {
+      if (isDeadEntry(e, nowMs)) {
+        delete upd[k];
+      }
+    }
+
     saveHistory(upd);
     setHistory({ ...upd });
     setRefreshing(false);
@@ -967,7 +999,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 background: isSel ? "#0d0300" : C.bg,
               }}
             >
-              {/* ── TAKE PROFIT BANNER (only if you bought it) */}
+              {/* ── TAKE PROFIT BANNER */}
               {showTP && (
                 <div
                   style={{
@@ -1057,7 +1089,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 </div>
               )}
 
-              {/* ── BUY PROMPT BANNER (spotted, not bought yet) */}
+              {/* ── BUY PROMPT BANNER */}
               {showBuyPrompt && (
                 <div
                   className="bpb"
@@ -1223,7 +1255,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           {dispName}
                         </span>
                       )}
-                      {/* Bought badge */}
                       {hasBought && (
                         <span
                           style={{
@@ -1452,7 +1483,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 5 }}
                   >
-                    {/* P&L — only meaningful if bought */}
                     {hasBought && (
                       <span
                         style={{
@@ -1505,7 +1535,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         </a>
                       </>
                     )}
-                    {/* BUY / IN toggle */}
                     <button
                       onClick={(e) =>
                         hasBought

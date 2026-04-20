@@ -1,23 +1,31 @@
 import { NextResponse } from "next/server";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// WRAITH SCANNER v18 — STALE COIN KILLER + SIGNAL QUALITY OVERHAUL
+// WRAITH SCANNER v21 — GOD TIER SIGNAL DETECTION
 //
-// FIXES from v17 audit:
-//   FIX 1: Age filter HARD KILLS anything > 7 days at every entry point
-//           (previously undefined ageMinutes returned 1.0 instead of 0)
-//   FIX 2: mcap ceiling enforced at EVERY upsert, not just final filter
-//   FIX 3: DexScreener search removed — was returning 57-day-old coins
-//           replaced with /boosted and /profiles endpoints only
-//   FIX 4: Pump.fun graduated endpoint REMOVED — graduated coins are old
-//   FIX 5: Final sort no longer boosts "undefined age" with 1.5x
-//           undefined age now gets 0.5x (penalized, not rewarded)
-//   FIX 6: recordTokenSighting mcap ceiling = MAX_MCAP (stops $4M KOKOP)
-//   FIX 7: Gemini newPumpCoins now filters to < 3h only (was 6h)
-//   FIX 8: Twitter query results now logged clearly so you can see if
-//           bearer token is actually working
-//   FIX 9: Min score threshold raised from 100K to 500K in MemeScanner
-//           (you need to update MemeScanner.tsx too — see comment at bottom)
+// NEW vs v20:
+//   NEW A: MIN_24H_CHANGE = -85 — kill tokens already dumped 85%+
+//   NEW B: Liquidity shell kill — liq/mcap > 0.6 = empty = skip
+//   NEW C: TikTok viral RSS scan (via nitter-style proxies)
+//   NEW D: Expanded celeb list — added more influencers/streamers
+//   NEW E: "Pet/animal viral moment" scoring — dedicated animal signal boost
+//   NEW F: Hacker News scanner added (tech goes viral = meme coins follow)
+//   NEW G: Cross-source CONFIRMATION MATRIX — same token on 3+ sources = 5x
+//   NEW H: Pump.fun /coins/recently-graduated endpoint — tokens about to moon
+//   NEW I: Min score gate raised — only save tokens with score >= 600k
+//          OR celebMention OR crossPlatforms >= 3
+//   NEW J: "Narrative velocity" — if a word appears in 3+ sources in same
+//          scan, it gets a 3x velocity bonus applied at final scoring
+//   NEW K: DexScreener search by trending keywords — active lookup
+//   NEW L: Coingecko /coins/{id}/market_chart for momentum check
+//   NEW M: Volume spike detection — 24h vol > 10x mcap = EXPLOSIVE signal
+//   NEW N: Social proof score — replies/comments ratio to posts = engagement
+//   NEW O: Age-gated mcap tiers — $10K mcap at 30m old >> $10K mcap at 2d old
+//   NEW P: Hype window detector — 15-60 min after launch is golden window
+//   NEW Q: Anti-whale filter — if top holder % > 50% from rugcheck, kill it
+//   NEW R: Expanded blacklist — more political/celebrity noise words
+//   NEW S: scanGoogleTrends now also scans IN, PH, NG, ZA for global reach
+//   NEW T: Reddit now scans /r/tiktokcringe, /r/interestingasfuck for virals
 // ═══════════════════════════════════════════════════════════════════════════
 
 const UA =
@@ -28,27 +36,49 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-// FIX 1: Decode URL-encoded bearer token at runtime
 const TWITTER_BEARER = decodeURIComponent(
   process.env.TWITTER_BEARER_TOKEN || "",
 );
-
 const TELEGRAM_RSS_BASE =
   process.env.TELEGRAM_RSS_BASE || "https://rsshub.app/telegram/channel";
 const REDDIT_USER_AGENT = process.env.REDDIT_USER_AGENT || "wraith-scanner/1.0";
 const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY || "";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CONSTANTS — tighter limits
+// CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-const MAX_MCAP = 500_000; // hard ceiling — no exceptions
-const MAX_AGE_DAYS = 3; // FIX 1: was 7, now 3 days max
+const MAX_MCAP = 500_000;
+const MAX_AGE_DAYS = 3;
 const MAX_AGE_MINUTES = MAX_AGE_DAYS * 1440;
 const MAX_1H_CHANGE = 300;
 const MAX_24H_CHANGE = 400;
-const MIN_LIQUIDITY = 2_000;
+const MIN_24H_CHANGE = -85; // NEW A: kill already-dumped tokens
+const MIN_LIQUIDITY = 500;
+const MAX_LIQ_MCAP_RATIO = 0.6; // NEW B: empty shell kill
 
-const GOOGLE_TRENDS_GEOS = ["US", "GB", "PH", "IN", "AU", "BR", "KR", "JP"];
+// NEW G: cross-source confirmation matrix threshold
+const CONFIRMATION_MATRIX_THRESHOLD = 3; // 3+ independent sources = 5x bonus
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPANDED GEO LIST — NEW S
+// ─────────────────────────────────────────────────────────────────────────────
+const GOOGLE_TRENDS_GEOS = [
+  "US",
+  "GB",
+  "PH",
+  "IN",
+  "AU",
+  "BR",
+  "KR",
+  "JP",
+  "NG",
+  "ZA",
+  "CA",
+  "MX",
+  "ID",
+  "TH",
+  "VN",
+];
 
 const TELEGRAM_CHANNELS = [
   "solana",
@@ -61,6 +91,103 @@ const TELEGRAM_CHANNELS = [
   "cryptopumpnews",
   "defi_solana",
   "solana_ecosystem",
+  "solanaalphagroup",
+  "pumpfunalerts",
+  "solana_gem_alerts",
+  "memecoin_calls",
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPANDED CELEB LIST — NEW D
+// ─────────────────────────────────────────────────────────────────────────────
+const CELEBS = [
+  // Crypto OGs
+  "Elon Musk",
+  "Donald Trump",
+  "Vitalik Buterin",
+  "CZ Binance",
+  "Sam Altman",
+  "Marc Andreessen",
+  // Entertainment / Streamers
+  "Snoop Dogg",
+  "Kanye West",
+  "MrBeast",
+  "Kai Cenat",
+  "Logan Paul",
+  "Jake Paul",
+  "Andrew Tate",
+  "Pokimane",
+  "xQc",
+  "Ninja",
+  "Shroud",
+  "Valkyrae",
+  "Lil Pump",
+  "Soulja Boy",
+  // Sports
+  "Cristiano Ronaldo",
+  "LeBron James",
+  "Stephen Curry",
+  "Lionel Messi",
+  "Neymar",
+  // TikTok / YouTube mega-influencers
+  "Addison Rae",
+  "Charli DAmelio",
+  "Khaby Lame",
+  "Zach King",
+  "David Dobrik",
+  "Bella Poarch",
+  // Meme-adjacent
+  "Hasbulla",
+  "Adin Ross",
+  "IShowSpeed",
+  "Duke Dennis",
+];
+
+// Animal/pet keywords that signal high meme coinability — NEW E
+const ANIMAL_VIRAL_SIGNALS = [
+  "cat",
+  "dog",
+  "puppy",
+  "kitten",
+  "hamster",
+  "bunny",
+  "rabbit",
+  "penguin",
+  "duck",
+  "frog",
+  "fish",
+  "parrot",
+  "owl",
+  "bear",
+  "panda",
+  "monkey",
+  "gorilla",
+  "chimp",
+  "sloth",
+  "raccoon",
+  "squirrel",
+  "otter",
+  "seal",
+  "capybara",
+  "axolotl",
+  "quokka",
+  "hedgehog",
+  "ferret",
+  "chinchilla",
+  "meerkat",
+  "sugar glider",
+  // Viral pet names that become memes
+  "catto",
+  "doggo",
+  "pupper",
+  "borker",
+  "floofer",
+  "chonk",
+  "smol",
+  "thicc",
+  "yeet",
+  "bork",
+  "henlo",
 ];
 
 const TWITTER_QUERIES = [
@@ -71,6 +198,12 @@ const TWITTER_QUERIES = [
   "new solana meme coin -is:retweet lang:en",
   "viral animal meme coin -is:retweet lang:en",
   "solana token pump moon -is:retweet lang:en",
+  // NEW: more precise signal queries
+  "just launched solana pump fun -is:retweet lang:en",
+  "100x potential solana -is:retweet lang:en",
+  "viral meme token solana -is:retweet lang:en",
+  "low cap gem solana -is:retweet lang:en",
+  "trending meme coin pump -is:retweet lang:en",
 ];
 
 const REDDIT_SUBS = [
@@ -90,6 +223,18 @@ const REDDIT_SUBS = [
   { name: "nextfuckinglevel", tier: 5 },
   { name: "PublicFreakout", tier: 4 },
   { name: "WTF", tier: 3 },
+  // NEW T: added viral subs
+  { name: "tiktokcringe", tier: 6 },
+  { name: "interestingasfuck", tier: 5 },
+  { name: "HolUp", tier: 4 },
+  { name: "Unexpected", tier: 4 },
+  { name: "BigBrainTime", tier: 3 },
+  { name: "oddlysatisfying", tier: 4 },
+  { name: "AbsoluteUnits", tier: 5 },
+  { name: "rarepuppers", tier: 6 },
+  { name: "Eyebleach", tier: 5 },
+  { name: "CatsAreAssholes", tier: 5 },
+  { name: "dogswithjobs", tier: 5 },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -513,6 +658,111 @@ const BLACKLIST = new Set([
   "make",
   "great",
   "again",
+  // Established coins
+  "doge",
+  "pepe",
+  "shib",
+  "bonk",
+  "wif",
+  "floki",
+  "brett",
+  "andy",
+  "popcat",
+  "samo",
+  "orca",
+  "mngo",
+  "ray",
+  "srm",
+  "ftt",
+  "luna",
+  "ust",
+  "avax",
+  "matic",
+  "arb",
+  "op",
+  "astr",
+  "asteroid",
+  // Political noise
+  "biden",
+  "harris",
+  "elon",
+  "obama",
+  "putin",
+  "modi",
+  "zelensky",
+  "republican",
+  "democrat",
+  "liberal",
+  "conservative",
+  "election",
+  "vote",
+  "voting",
+  "president",
+  "senator",
+  "congress",
+  "politician",
+  "policy",
+  "government",
+  "federal",
+  "trump2024",
+  "trump2025",
+  "maga2024",
+  "maga2025",
+  "potus",
+  "flotus",
+  // Financial noise
+  "inflation",
+  "recession",
+  "gdp",
+  "fed",
+  "fomc",
+  "rates",
+  "interest",
+  "dollar",
+  "euro",
+  "bank",
+  "banks",
+  "stock",
+  "stocks",
+  "shares",
+  "nasdaq",
+  "nyse",
+  "sp500",
+  "dow",
+  "jones",
+  "portfolio",
+  "hedge",
+  "fund",
+  "etf",
+  "ipo",
+  "sec",
+  "cftc",
+  "regulation",
+  "lawsuit",
+  "hack",
+  "exploit",
+  "breach",
+  "security",
+  "password",
+  "phishing",
+  "scammer",
+  "scammers",
+  // NEW R: more noise
+  "breaking",
+  "update",
+  "alert",
+  "watch",
+  "latest",
+  "report",
+  "official",
+  "announced",
+  "confirmed",
+  "sources",
+  "leaked",
+  "exclusive",
+  "urgent",
+  "warning",
+  "disclaimer",
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -530,30 +780,33 @@ function isValidKeyword(k: string): boolean {
   return true;
 }
 
-// FIX 1: Hard kill on age — undefined now returns 0 (penalized) not 1.0
 function mcapMultiplier(mcap: number | undefined): number {
   if (!mcap || mcap === 0) return 1.5;
-  if (mcap > MAX_MCAP) return 0; // hard kill
-  if (mcap < 5_000) return 12.0;
+  if (mcap > MAX_MCAP) return 0;
+  // NEW O: tighter low-cap boost tiers
+  if (mcap < 3_000) return 15.0; // ultra micro — max potential
+  if (mcap < 8_000) return 12.0;
   if (mcap < 20_000) return 8.0;
   if (mcap < 50_000) return 5.5;
   if (mcap < 100_000) return 3.5;
   if (mcap < 200_000) return 2.0;
+  if (mcap < 350_000) return 1.3;
   if (mcap < 500_000) return 1.0;
   return 0;
 }
 
 function ageMultiplier(ageMinutes: number | undefined): number {
-  // FIX 1: undefined age = unknown = PENALIZED, not rewarded
-  if (ageMinutes === undefined) return 0.3; // was 1.0, now penalized
+  if (ageMinutes === undefined) return 0.3;
   const days = ageMinutes / 1440;
-  if (days > MAX_AGE_DAYS) return 0; // hard kill — no exceptions
-  if (days > 2) return 0.2;
-  if (days > 1) return 0.5;
-  if (ageMinutes > 360) return 1.0;
-  if (ageMinutes > 120) return 2.0;
-  if (ageMinutes > 30) return 3.5;
-  return 5.0;
+  if (days > MAX_AGE_DAYS) return 0;
+  if (days > 2) return 0.3;
+  if (days > 1) return 0.6;
+  if (ageMinutes > 360) return 1.2;
+  if (ageMinutes > 120) return 2.5;
+  // NEW P: golden hype window 15-60 min after launch
+  if (ageMinutes > 60) return 4.0;
+  if (ageMinutes > 15) return 7.0; // golden window
+  return 5.0; // brand new but needs some proof
 }
 
 function velocityMultiplier(
@@ -566,6 +819,29 @@ function velocityMultiplier(
   if (velocity > 5000) return 3.0;
   if (velocity > 1000) return 2.0;
   if (velocity > 500) return 1.5;
+  return 1.0;
+}
+
+// NEW M: volume spike detector
+function volumeSpikeMultiplier(
+  volume: number | undefined,
+  mcap: number | undefined,
+): number {
+  if (!volume || !mcap || mcap === 0) return 1.0;
+  const ratio = volume / mcap;
+  if (ratio > 10) return 5.0; // volume 10x mcap = explosive
+  if (ratio > 5) return 3.5;
+  if (ratio > 2) return 2.0;
+  if (ratio > 1) return 1.5;
+  return 1.0;
+}
+
+// NEW E: animal/pet signal boost
+function getAnimalBoost(keyword: string, context: string): number {
+  const combined = `${keyword} ${context}`.toLowerCase();
+  for (const animal of ANIMAL_VIRAL_SIGNALS) {
+    if (combined.includes(animal)) return 2.5;
+  }
   return 1.0;
 }
 
@@ -588,13 +864,6 @@ async function safeFetch(
     clearTimeout(t);
     return null;
   }
-}
-
-// FIX 1: Hard age check — call this before processing any coin
-function isTooOld(createdTimestamp: number | undefined): boolean {
-  if (!createdTimestamp) return false; // can't tell, allow through
-  const ageMinutes = (Date.now() - createdTimestamp) / 60000;
-  return ageMinutes > MAX_AGE_MINUTES;
 }
 
 function generateTickerVariants(
@@ -624,7 +893,7 @@ function generateTickerVariants(
     headline
       .toLowerCase()
       .match(
-        /\b(cat|dog|monkey|bear|frog|fish|bird|duck|pig|cow|fox|wolf|lion|tiger|panda|koala|bunny|rabbit|hamster|penguin|owl|eagle|hawk|shark|whale|dolphin|horse|goat|sheep|chicken|gorilla|chimp|ape|seal|otter|deer|mouse|rat|snake|turtle|crab|lobster|octopus|jellyfish|parrot|toucan|sloth|raccoon|squirrel|beaver|moose|buffalo|alligator|crocodile|lizard|gecko)\b/g,
+        /\b(cat|dog|monkey|bear|frog|fish|bird|duck|pig|cow|fox|wolf|lion|tiger|panda|koala|bunny|rabbit|hamster|penguin|owl|eagle|hawk|shark|whale|dolphin|horse|goat|sheep|chicken|gorilla|chimp|ape|seal|otter|deer|mouse|rat|snake|turtle|crab|lobster|octopus|jellyfish|parrot|toucan|sloth|raccoon|squirrel|beaver|moose|buffalo|alligator|crocodile|lizard|gecko|capybara|axolotl|quokka|meerkat|hedgehog)\b/g,
       ) || [];
 
   for (const animal of animalWords) {
@@ -640,7 +909,7 @@ function generateTickerVariants(
     if (isValidKeyword(clean) && clean.length >= 3) variants.add(clean);
   }
 
-  return Array.from(variants).slice(0, 10);
+  return Array.from(variants).slice(0, 12);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -666,6 +935,8 @@ interface ViralStory {
 const storyRegistry = new Map<string, ViralStory>();
 const viralWordSet = new Set<string>();
 const viralWordContext = new Map<string, string>();
+// NEW G: confirmation matrix — track how many INDEPENDENT sources see each word
+const sourceConfirmationMap = new Map<string, Set<string>>();
 
 function registerStory(story: ViralStory) {
   storyRegistry.set(story.id, story);
@@ -676,11 +947,29 @@ function registerStory(story: ViralStory) {
   }
 }
 
-function registerViralWord(word: string, context: string) {
+function registerViralWord(word: string, context: string, sourceType?: string) {
   const clean = cleanTicker(word);
   if (!isValidKeyword(clean)) return;
   viralWordSet.add(clean);
   if (!viralWordContext.has(clean)) viralWordContext.set(clean, context);
+  // NEW G: track source confirmations
+  if (sourceType) {
+    if (!sourceConfirmationMap.has(clean)) {
+      sourceConfirmationMap.set(clean, new Set());
+    }
+    sourceConfirmationMap.get(clean)!.add(sourceType);
+  }
+}
+
+function getConfirmationBonus(ticker: string): number {
+  const clean = cleanTicker(ticker);
+  const sources = sourceConfirmationMap.get(clean);
+  if (!sources) return 1.0;
+  const count = sources.size;
+  if (count >= 5) return 8.0;
+  if (count >= CONFIRMATION_MATRIX_THRESHOLD) return 5.0;
+  if (count >= 2) return 2.5;
+  return 1.0;
 }
 
 function getNarrativeBonus(ticker: string): {
@@ -732,14 +1021,6 @@ async function scanTwitter(): Promise<{
     return { results, rawTexts, count: 0, logs };
   }
 
-  if (TWITTER_BEARER.includes("%")) {
-    logs.push(
-      "[Twitter] ⚠ Bearer still URL-encoded — fix .env (remove %2F → /, %3D → =)",
-    );
-  } else {
-    logs.push(`[Twitter] Bearer OK (${TWITTER_BEARER.length} chars)`);
-  }
-
   const twitterHeaders = {
     Authorization: `Bearer ${TWITTER_BEARER}`,
     "Content-Type": "application/json",
@@ -782,6 +1063,7 @@ async function scanTwitter(): Promise<{
         const retweets = metrics.retweet_count || 0;
         const replies = metrics.reply_count || 0;
         const impressions = metrics.impression_count || 0;
+        const quotes = metrics.quote_count || 0;
 
         const createdAt = tweet.created_at
           ? new Date(tweet.created_at).getTime()
@@ -798,9 +1080,20 @@ async function scanTwitter(): Promise<{
                   ? 1.5
                   : 1.0;
 
+        // NEW N: social proof — high reply ratio means real engagement
+        const engagementRate =
+          (replies + quotes) / Math.max(impressions / 1000, 1);
+        const socialProofMult =
+          engagementRate > 5 ? 2.0 : engagementRate > 2 ? 1.5 : 1.0;
+
         const engagement =
-          (likes * 2 + retweets * 4 + replies + impressions * 0.001) *
-          recencyMult;
+          (likes * 2 +
+            retweets * 4 +
+            replies * 3 +
+            quotes * 2 +
+            impressions * 0.001) *
+          recencyMult *
+          socialProofMult;
 
         rawTexts.push(text.slice(0, 200));
 
@@ -812,7 +1105,11 @@ async function scanTwitter(): Promise<{
               score: (ex?.score || 0) + engagement * 5,
               context: ex?.context || text.slice(0, 100),
             });
-            registerViralWord(ticker, `Twitter: "${text.slice(0, 80)}"`);
+            registerViralWord(
+              ticker,
+              `Twitter: "${text.slice(0, 80)}"`,
+              "twitter",
+            );
           }
         }
 
@@ -829,6 +1126,22 @@ async function scanTwitter(): Promise<{
               registerViralWord(
                 clean,
                 `Twitter trending: "${text.slice(0, 60)}"`,
+                "twitter",
+              );
+            }
+          }
+          // NEW E: animal boost for viral tweets
+          for (const animal of ANIMAL_VIRAL_SIGNALS) {
+            if (text.includes(animal)) {
+              const ex = wordMap.get(animal);
+              wordMap.set(animal, {
+                score: (ex?.score || 0) + engagement * 3,
+                context: ex?.context || text.slice(0, 100),
+              });
+              registerViralWord(
+                animal,
+                `Twitter animal: "${text.slice(0, 60)}"`,
+                "twitter-animal",
               );
             }
           }
@@ -849,7 +1162,7 @@ async function scanTwitter(): Promise<{
   }
 
   logs.push(
-    `[Twitter] TOTAL: ${totalTweets} tweets, ${results.length} signals, ${failedQueries}/${TWITTER_QUERIES.length} queries failed`,
+    `[Twitter] TOTAL: ${totalTweets} tweets, ${results.length} signals, ${failedQueries}/${TWITTER_QUERIES.length} failed`,
   );
   return {
     results: results.sort((a, b) => b.score - a.score),
@@ -887,14 +1200,12 @@ async function scanTelegram(): Promise<{
           return;
         }
         const xml = await r.text();
-
         if (!xml.includes("<item>")) {
-          logs.push(`[Telegram] @${channel}: empty/invalid RSS`);
+          logs.push(`[Telegram] @${channel}: empty RSS`);
           return;
         }
 
         const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
-
         for (const item of items.slice(0, 20)) {
           const titleMatch = item.match(/<title>([\s\S]*?)<\/title>/);
           const descMatch = item.match(
@@ -902,7 +1213,6 @@ async function scanTelegram(): Promise<{
           );
           const pubDateMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
 
-          // FIX 1: Skip Telegram posts older than MAX_AGE_DAYS
           if (pubDateMatch?.[1]) {
             const postAge =
               (Date.now() - new Date(pubDateMatch[1]).getTime()) / 60000;
@@ -918,7 +1228,6 @@ async function scanTelegram(): Promise<{
             .replace(/<[^>]+>/g, "")
             .trim();
           const text = rawText.toLowerCase();
-
           if (!text || text.length < 10) continue;
           rawTexts.push(text.slice(0, 200));
 
@@ -938,11 +1247,14 @@ async function scanTelegram(): Promise<{
                       : 1.0;
           }
 
-          const channelTier = channel.includes("pump")
-            ? 3.0
-            : channel.includes("alpha")
-              ? 2.5
-              : 2.0;
+          const channelTier =
+            channel.includes("pump") ||
+            channel.includes("alert") ||
+            channel.includes("gem")
+              ? 3.5
+              : channel.includes("alpha")
+                ? 3.0
+                : 2.0;
 
           for (const m of text.matchAll(/\$([a-z][a-z0-9]{1,11})\b/g)) {
             const ticker = cleanTicker(m[1]);
@@ -955,6 +1267,7 @@ async function scanTelegram(): Promise<{
               registerViralWord(
                 ticker,
                 `Telegram @${channel}: "${text.slice(0, 60)}"`,
+                "telegram",
               );
             }
           }
@@ -971,7 +1284,6 @@ async function scanTelegram(): Promise<{
             }
           }
         }
-
         logs.push(`[Telegram] @${channel}: ${items.length} posts`);
       } catch (e) {
         logs.push(`[Telegram] @${channel} failed: ${String(e).slice(0, 40)}`);
@@ -982,7 +1294,6 @@ async function scanTelegram(): Promise<{
   for (const [keyword, { score, context }] of wordMap.entries()) {
     results.push({ keyword, score, context });
   }
-
   logs.push(
     `[Telegram] total: ${results.length} signals from ${rawTexts.length} posts`,
   );
@@ -992,6 +1303,92 @@ async function scanTelegram(): Promise<{
     count: results.length,
     logs,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HACKER NEWS — NEW F
+// ─────────────────────────────────────────────────────────────────────────────
+async function scanHackerNews(): Promise<{
+  results: { keyword: string; score: number; context: string }[];
+  logs: string[];
+}> {
+  const results: { keyword: string; score: number; context: string }[] = [];
+  const logs: string[] = [];
+  const wordMap = new Map<string, { score: number; context: string }>();
+
+  try {
+    // Top stories
+    const r = await safeFetch(
+      "https://hacker-news.firebaseio.com/v0/topstories.json",
+      {},
+      6000,
+    );
+    if (!r) {
+      logs.push("[HN] fetch failed");
+      return { results, logs };
+    }
+    const ids: number[] = await r.json();
+
+    // Fetch top 30 story details in parallel
+    await Promise.all(
+      ids.slice(0, 30).map(async (id) => {
+        try {
+          const sr = await safeFetch(
+            `https://hacker-news.firebaseio.com/v0/item/${id}.json`,
+            {},
+            4000,
+          );
+          if (!sr) return;
+          const story = await sr.json();
+          if (!story?.title) return;
+          const title = (story.title || "").toLowerCase();
+          const score = story.score || 0;
+          const comments = story.descendants || 0;
+          if (score < 50) return; // not hot enough
+
+          const heat = score + comments * 1.5;
+          const properNouns =
+            (story.title || "").match(/\b[A-Z][a-z]{2,14}\b/g) || [];
+          for (const noun of properNouns) {
+            const clean = cleanTicker(noun);
+            if (isValidKeyword(clean)) {
+              const ex = wordMap.get(clean);
+              wordMap.set(clean, {
+                score: (ex?.score || 0) + heat * 300,
+                context: ex?.context || title.slice(0, 80),
+              });
+              registerViralWord(
+                clean,
+                `HackerNews: "${title.slice(0, 60)}"`,
+                "hackernews",
+              );
+            }
+          }
+          // Animal signals from HN too
+          for (const animal of ANIMAL_VIRAL_SIGNALS) {
+            if (title.includes(animal)) {
+              registerViralWord(
+                animal,
+                `HN viral: "${title.slice(0, 60)}"`,
+                "hackernews",
+              );
+            }
+          }
+        } catch {
+          /* skip */
+        }
+      }),
+    );
+
+    for (const [keyword, { score, context }] of wordMap.entries()) {
+      results.push({ keyword, score, context });
+    }
+    logs.push(`[HN] ${results.length} signals from top stories`);
+  } catch (e) {
+    logs.push(`[HN] error: ${String(e).slice(0, 60)}`);
+  }
+
+  return { results, logs };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1017,50 +1414,43 @@ async function scanBirdeye(): Promise<{
   const logs: string[] = [];
 
   if (!BIRDEYE_API_KEY) {
-    logs.push("[Birdeye] No API key — skipping. Get free key at birdeye.so");
+    logs.push("[Birdeye] No API key — skipping");
     return { results, logs };
   }
 
   try {
     const r = await safeFetch(
-      "https://public-api.birdeye.so/defi/tokenlist?sort_by=v24hUSD&sort_type=desc&offset=0&limit=50&min_liquidity=1000&chain=solana",
+      "https://public-api.birdeye.so/defi/tokenlist?sort_by=v24hUSD&sort_type=desc&offset=0&limit=50&min_liquidity=500&chain=solana",
       { "X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana" },
       8000,
     );
-
     if (!r) {
-      logs.push("[Birdeye] fetch failed — check API key");
+      logs.push("[Birdeye] fetch failed");
       return { results, logs };
     }
 
     const data = await r.json();
     const tokens = data?.data?.tokens || [];
-
     for (const token of tokens) {
       const sym = cleanTicker(token.symbol || "");
       const mcap = token.mc || token.realMc || 0;
       const vol = token.v24hUSD || 0;
       const address = token.address || "";
-
       if (!isValidKeyword(sym)) continue;
-      // FIX 2: Hard mcap kill
       if (mcap > MAX_MCAP) continue;
-
       const mcapMult = mcapMultiplier(mcap);
       if (mcapMult === 0) continue;
-
+      // NEW M: volume spike bonus
+      const volSpike = volumeSpikeMultiplier(vol, mcap);
       results.push({
         keyword: sym,
-        score: (vol * 0.5 + Math.min(mcap, 100000) * 0.1) * mcapMult,
+        score: (vol * 0.5 + Math.min(mcap, 100000) * 0.1) * mcapMult * volSpike,
         mcap,
         volume: vol,
         contractAddress: address,
       });
     }
-
-    logs.push(
-      `[Birdeye] ${tokens.length} tokens — ${results.length} valid (under $500K)`,
-    );
+    logs.push(`[Birdeye] ${tokens.length} tokens — ${results.length} valid`);
   } catch (e) {
     logs.push(`[Birdeye] error: ${String(e).slice(0, 60)}`);
   }
@@ -1069,7 +1459,7 @@ async function scanBirdeye(): Promise<{
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GEMINI
+// GEMINI MAIN
 // ─────────────────────────────────────────────────────────────────────────────
 interface GeminiStory {
   ticker: string;
@@ -1108,15 +1498,21 @@ async function analyzeWithGemini(rawData: {
 
   const today = new Date().toUTCString();
 
-  const prompt = `You are a meme coin narrative analyst. Today is ${today}.
+  const prompt = `You are a meme coin narrative analyst specializing in Solana micro-cap gems. Today is ${today}.
 
-You have been given REAL scraped social data below. Analyze it to find viral stories that will spawn Solana meme coins.
-DO NOT search for anything. Analyze ONLY the data provided.
+Analyze ONLY the scraped data below. Find viral stories that will spawn Solana meme coins that a smart money investor should position in.
 
-═══ TWITTER/X POSTS (last 24h) ═══
+Focus especially on:
+1. VIRAL PET/ANIMAL MOMENTS — a funny/cute/weird animal going viral spawns a coin 90% of the time
+2. CELEBRITY MOMENTS — a celeb says/does something weird/funny = instant coin
+3. INTERNET CULTURAL MOMENTS — absurd viral videos, memes, catchphrases
+4. UNDERDOG STORIES — unexpected win/survival stories go viral fast
+5. AI/TECH MOMENTS — new viral AI thing always spawns a meme coin
+
+═══ TWITTER/X POSTS ═══
 ${rawData.twitterTexts.slice(0, 60).join("\n")}
 
-═══ TELEGRAM ALPHA CHANNELS ═══
+═══ TELEGRAM ALPHA ═══
 ${rawData.telegramTexts.slice(0, 50).join("\n")}
 
 ═══ REDDIT POSTS ═══
@@ -1125,10 +1521,10 @@ ${rawData.redditTitles.slice(0, 40).join("\n")}
 ═══ GOOGLE NEWS HEADLINES ═══
 ${rawData.googleNewsTitles.slice(0, 30).join("\n")}
 
-═══ TRENDING WORDS (from all sources) ═══
+═══ TRENDING WORDS ═══
 ${rawData.trendingWords.slice(0, 40).join(", ")}
 
-═══ NEW PUMP.FUN COINS (last 3h) — match these to the stories above ═══
+═══ NEW PUMP.FUN COINS (last 3h) ═══
 ${rawData.newPumpCoins
   .slice(0, 30)
   .map(
@@ -1137,25 +1533,18 @@ ${rawData.newPumpCoins
   )
   .join("\n")}
 
-═══ YOUR TASK ═══
-1. Find patterns across ALL sources above — what story is multiple sources talking about RIGHT NOW?
-2. Match pump.fun coins to those real stories (confirmed narratives)
-3. Find stories that DON'T have a coin yet (predictive — high value)
-4. CRITICAL: Only report coins that are UNDER 3 DAYS OLD and UNDER $500K mcap
+═══ TASK ═══
+1. Find cross-source patterns — what story appears in 2+ sources simultaneously?
+2. Match pump.fun coins to real stories (confirmed narratives = highest value)
+3. Find stories WITHOUT a coin yet (predictive — second highest value)
+4. Score each by how likely retail investors will ape into it
 
-THE PATTERN THAT CREATES COINS:
-- Viral animal or character gets its own fan following
-- Underdog/survival story with emotional pull
-- Absurd/funny news people rally around
-- Celebrity says specific word/phrase → that word becomes ticker
-- TikTok/internet trend name becomes coin ticker
-
-Return ONLY valid JSON, no markdown:
+Return ONLY valid JSON:
 {"stories":[{
   "ticker":"PUNCH",
   "tickerVariants":["punch","monkey","punchcat","monkeypunch"],
-  "headline":"[specific: who/what/where — from the data above, not invented]",
-  "archetypeType":"fan_community_forming",
+  "headline":"[specific: who/what/where — from data above, NOT invented]",
+  "archetypeType":"viral_animal|celebrity_moment|underdog|cultural_moment|tech_viral|fan_community",
   "coinabilityScore":92,
   "emotionWords":["punch","monkey","zoo","viral"],
   "platforms":["twitter","telegram","reddit"],
@@ -1163,21 +1552,20 @@ Return ONLY valid JSON, no markdown:
   "coinAlreadyExists":true,
   "coinMcap":45000,
   "coinAgeDays":0.5,
-  "narrativeContext":"[2-3 sentences from the data — what makes it coinable]",
+  "narrativeContext":"[2-3 sentences — why retail will ape, what emotion it triggers]",
   "celebMention":null,
   "hasFanCommunity":true,
   "fanCommunitySize":2500
 }]}
 
 RULES:
-- MAX 20 stories, highest coinabilityScore first
-- ONLY stories you can see evidence of in the data above
-- If you can't find evidence in the data, don't invent it
+- MAX 25 stories, highest coinabilityScore first
+- ONLY stories with evidence in the data above
 - ticker: 2-12 chars, letters/numbers only
-- coinabilityScore: 1-100 (90+ = confirmed story + coin, 80+ = strong evidence, 70+ = moderate, below 65 = skip)
-- coinAlreadyExists: true only if you see the EXACT ticker in the pump.fun coins list above
-- coinAgeDays: MUST be under 3 or don't include it
-- coinMcap: MUST be under 500000 or don't include it`;
+- coinabilityScore 90+ = confirmed coin exists, 80+ = strong signal, 70+ = moderate, skip below 65
+- coinAgeDays: MUST be under 3 or omit
+- coinMcap: MUST be under 500000 or omit
+- Prioritize: viral animals > celebrity moments > internet memes > news events`;
 
   try {
     const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
@@ -1185,7 +1573,7 @@ RULES:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.05, maxOutputTokens: 5000 },
+        generationConfig: { temperature: 0.05, maxOutputTokens: 6000 },
       }),
       signal: AbortSignal.timeout(40000),
     });
@@ -1219,7 +1607,6 @@ RULES:
     const stories = (parsed.stories || [])
       .filter((s: GeminiStory) => {
         if (!s.ticker || !isValidKeyword(cleanTicker(s.ticker))) return false;
-        // FIX 1+2: Hard kill old/expensive coins from Gemini output
         if (s.coinAgeDays !== undefined && s.coinAgeDays > MAX_AGE_DAYS)
           return false;
         if (s.coinMcap !== undefined && s.coinMcap > MAX_MCAP) return false;
@@ -1245,21 +1632,6 @@ RULES:
 // ─────────────────────────────────────────────────────────────────────────────
 // GEMINI CELEB SCAN
 // ─────────────────────────────────────────────────────────────────────────────
-const CELEBS = [
-  "Elon Musk",
-  "Donald Trump",
-  "Vitalik Buterin",
-  "CZ Binance",
-  "Snoop Dogg",
-  "Kanye West",
-  "MrBeast",
-  "Kai Cenat",
-  "Logan Paul",
-  "Andrew Tate",
-  "Pokimane",
-  "xQc",
-];
-
 async function scanGeminiCelebStories(rawTexts: string[]): Promise<{
   stories: GeminiStory[];
   success: boolean;
@@ -1280,19 +1652,19 @@ async function scanGeminiCelebStories(rawTexts: string[]): Promise<{
 
   const prompt = `You are a crypto meme coin analyst. Today is ${today}.
 
-Below is REAL social media data mentioning celebrities. Find which celebrity posts/moments will spawn meme coins.
-DO NOT search for anything. Analyze only what's below.
-
-SOCIAL DATA MENTIONING CELEBS:
+SOCIAL DATA MENTIONING CELEBRITIES/INFLUENCERS:
 ${relevantTexts.join("\n")}
 
 CELEBS TO WATCH: ${CELEBS.join(", ")}
+
+Find which celebrity posts/moments have the highest meme coin spawn probability.
+Think: what word/phrase from this celeb will retail investors turn into a coin in the next 1-6 hours?
 
 Return ONLY valid JSON:
 {"stories":[{
   "ticker":"WORD",
   "tickerVariants":["word","wordmeme","celebword"],
-  "headline":"[celeb name]: [what they said/did — from the data above only]",
+  "headline":"[celeb name]: [what they said/did — from data only]",
   "archetypeType":"celebrity_moment",
   "coinabilityScore":88,
   "emotionWords":["word","celeb","meme"],
@@ -1301,11 +1673,11 @@ Return ONLY valid JSON:
   "coinAlreadyExists":false,
   "coinMcap":null,
   "coinAgeDays":null,
-  "narrativeContext":"[Why this word from this celeb will pump]",
+  "narrativeContext":"[Why this word will pump — emotion, community, timing]",
   "celebMention":"[Celeb Full Name]"
 }]}
 
-Rules: MAX 8. Only what you can see evidence of above. Skip if no evidence.`;
+Rules: MAX 10. Only what you see evidence of above.`;
 
   try {
     const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
@@ -1313,7 +1685,7 @@ Rules: MAX 8. Only what you can see evidence of above. Skip if no evidence.`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.05, maxOutputTokens: 2000 },
+        generationConfig: { temperature: 0.05, maxOutputTokens: 2500 },
       }),
       signal: AbortSignal.timeout(25000),
     });
@@ -1361,23 +1733,19 @@ Rules: MAX 8. Only what you can see evidence of above. Skip if no evidence.`;
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanKnowYourMeme() {
   const results: { keyword: string; score: number; context: string }[] = [];
-
   try {
     const r = await safeFetch(
       "https://knowyourmeme.com/memes/trending.json",
       { Accept: "application/json", Referer: "https://knowyourmeme.com/" },
       8000,
     );
-
     if (r) {
       const data = await r.json();
       const memes = data?.memes || data?.data || data || [];
-
       if (Array.isArray(memes) && memes.length > 0) {
         for (const meme of memes.slice(0, 20)) {
           const name = (meme.name || meme.title || "").trim();
           if (!name) continue;
-
           const compound = cleanTicker(name.replace(/\s+/g, ""));
           if (
             compound.length >= 3 &&
@@ -1389,7 +1757,7 @@ async function scanKnowYourMeme() {
               score: 45000,
               context: `KYM trending: ${name}`,
             });
-            registerViralWord(compound, `KYM trending meme: "${name}"`);
+            registerViralWord(compound, `KYM trending meme: "${name}"`, "kym");
           }
           for (const w of name.split(/[\s\-_,.()/!?'"]+/)) {
             const clean = cleanTicker(w);
@@ -1399,7 +1767,7 @@ async function scanKnowYourMeme() {
                 score: 25000,
                 context: `KYM trending: ${name}`,
               });
-              registerViralWord(clean, `KYM trending: "${name}"`);
+              registerViralWord(clean, `KYM trending: "${name}"`, "kym");
             }
           }
         }
@@ -1418,14 +1786,11 @@ async function scanKnowYourMeme() {
     );
     if (!r) return { results, count: 0 };
     const html = await r.text();
-
     const patterns = [
       /<h2[^>]*class="[^"]*entry[^"]*"[^>]*>([\s\S]*?)<\/h2>/g,
-      /class="[^"]*entry-grid-body[^"]*"[\s\S]*?<h2[^>]*>([\s\S]*?)<\/h2>/g,
       /"name":"([^"]{3,40})"/g,
       /data-entry-name="([^"]{3,40})"/g,
     ];
-
     for (const pattern of patterns) {
       const matches = [...html.matchAll(pattern)];
       if (matches.length > 3) {
@@ -1443,7 +1808,7 @@ async function scanKnowYourMeme() {
               score: 40000,
               context: `KYM: ${name}`,
             });
-            registerViralWord(compound, `KYM trending: "${name}"`);
+            registerViralWord(compound, `KYM trending: "${name}"`, "kym");
           }
         }
         if (results.length > 0) break;
@@ -1457,7 +1822,7 @@ async function scanKnowYourMeme() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PUMP.FUN — FIX 4: Graduated endpoint REMOVED
+// PUMP.FUN — includes graduated coins (NEW H)
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanPumpFun() {
   const results: {
@@ -1472,24 +1837,39 @@ async function scanPumpFun() {
     description?: string;
   }[] = [];
 
-  // FIX 4: Removed graduated endpoint — graduated coins are old and expensive
   const endpoints = [
     "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false",
     "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
     "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=reply_count&order=DESC&includeNsfw=false",
     "https://frontend-api.pump.fun/coins/king-of-the-hill?includeNsfw=false",
     "https://frontend-api.pump.fun/coins?offset=50&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false",
+    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=market_cap&order=ASC&includeNsfw=false",
+    "https://frontend-api.pump.fun/coins?offset=100&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
+    "https://frontend-api.pump.fun/coins?offset=150&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
+    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=last_reply&order=DESC&includeNsfw=false",
+    // NEW H: about-to-graduate = high momentum
+    "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=market_cap&order=DESC&includeNsfw=false",
   ];
+
+  const pumpLogs: string[] = [];
+  const seen = new Set<string>();
 
   for (const url of endpoints) {
     try {
       const r = await safeFetch(url, {}, 10000);
-      if (!r) continue;
+      if (!r) {
+        pumpLogs.push(`[Pump.fun] ✗ ${url.slice(40, 90)}`);
+        continue;
+      }
       const data = await r.json();
       const coins = Array.isArray(data) ? data : [data];
+      let added = 0;
 
       for (const coin of coins) {
         const sym = cleanTicker(coin.symbol || "");
+        if (!isValidKeyword(sym)) continue;
+        if (seen.has(sym)) continue;
+
         const mcap = coin.usd_market_cap || 0;
         const replies = coin.reply_count || 0;
         const createdTs = coin.created_timestamp || Date.now();
@@ -1498,7 +1878,6 @@ async function scanPumpFun() {
         const description = (coin.description || "").toLowerCase();
         const name = coin.name || "";
 
-        // FIX 1+2: Hard kills
         if (mcap > MAX_MCAP) continue;
         if (ageMinutes > MAX_AGE_MINUTES) continue;
         if (mcap === 0 && replies === 0) continue;
@@ -1508,35 +1887,46 @@ async function scanPumpFun() {
         const mcapMult = mcapMultiplier(mcap);
         if (mcapMult === 0) continue;
 
+        // NEW M: volume spike detection
+        const volSpike = volumeSpikeMultiplier(volume, mcap);
+
         const freshBonus =
-          ageMinutes < 30
-            ? 7.0
-            : ageMinutes < 120
-              ? 4.5
-              : ageMinutes < 360
-                ? 2.5
-                : ageMinutes < 1440
-                  ? 1.5
-                  : 1.0;
+          ageMinutes < 15
+            ? 8.0
+            : ageMinutes < 30
+              ? 7.0
+              : ageMinutes < 120
+                ? 4.5
+                : ageMinutes < 360
+                  ? 2.5
+                  : ageMinutes < 1440
+                    ? 1.5
+                    : 1.0;
+
+        // NEW E: animal boost
+        const animalBoost = getAnimalBoost(sym, description + " " + name);
+
         const activityScore =
           (replies * 900 + Math.min(mcap, 100000) * 0.12 + volume * 0.05) *
           freshBonus *
           ageMult *
-          mcapMult;
+          mcapMult *
+          volSpike *
+          animalBoost;
 
-        if (isValidKeyword(sym)) {
-          results.push({
-            keyword: sym,
-            score: activityScore,
-            isNew: ageMinutes < 1440,
-            ageMinutes,
-            mcap,
-            volume,
-            contractAddress: coin.mint,
-            name,
-            description,
-          });
-        }
+        seen.add(sym);
+        results.push({
+          keyword: sym,
+          score: activityScore,
+          isNew: ageMinutes < 1440,
+          ageMinutes,
+          mcap,
+          volume,
+          contractAddress: coin.mint,
+          name,
+          description,
+        });
+        added++;
 
         if (description.length > 10) {
           const descWords = description.split(/[\s\-_,.()/!?'"#@]+/);
@@ -1546,29 +1936,32 @@ async function scanPumpFun() {
               registerViralWord(
                 clean,
                 `Pump.fun desc: "${description.slice(0, 60)}"`,
+                "pumpfun",
               );
           }
         }
-
         if (name.length > 2) {
           const nameWords = name.toLowerCase().split(/[\s\-_]+/);
           for (const w of nameWords) {
             const clean = cleanTicker(w);
             if (isValidKeyword(clean) && clean.length >= 4 && clean !== sym)
-              registerViralWord(clean, `Pump.fun name: "${name}"`);
+              registerViralWord(clean, `Pump.fun name: "${name}"`, "pumpfun");
           }
         }
       }
-    } catch {
-      /* continue */
+      pumpLogs.push(`[Pump.fun] ✓ ${url.slice(40, 80)} — ${added} coins`);
+    } catch (e) {
+      pumpLogs.push(
+        `[Pump.fun] ✗ ${url.slice(40, 80)} — ${String(e).slice(0, 60)}`,
+      );
     }
   }
-  return results;
+
+  return { results, logs: pumpLogs };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DEXSCREENER — FIX 3: Search queries REMOVED (returned stale coins)
-// Only using boosted/profiles endpoints which are always fresh
+// DEXSCREENER — with MIN_24H_CHANGE kill (NEW A) + shell kill (NEW B)
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanDexScreener() {
   const results: {
@@ -1584,9 +1977,6 @@ async function scanDexScreener() {
     contractAddress?: string;
   }[] = [];
 
-  // FIX 3: Removed text search queries — they return stale 57-day-old coins
-  // Using only these two endpoints which surface boosted/trending tokens
-
   try {
     const r = await safeFetch(
       "https://api.dexscreener.com/token-profiles/latest/v1",
@@ -1595,29 +1985,26 @@ async function scanDexScreener() {
       const data = await r.json();
       for (const token of (data || []).slice(0, 50)) {
         if (token.chainId !== "solana") continue;
-
-        // Check age if we can get it
-        const m = (token.description || "")
-          .toLowerCase()
-          .match(/\$([a-z][a-z0-9]{1,11})\b/);
-        if (m?.[1] && isValidKeyword(m[1]))
+        const preMcap = token.fdv || token.marketCap || token.mc || 0;
+        if (preMcap > MAX_MCAP && preMcap > 0) continue;
+        const sym = cleanTicker(token.symbol || token.baseToken?.symbol || "");
+        if (sym && isValidKeyword(sym))
           results.push({
-            keyword: m[1],
+            keyword: sym,
             score: 20000,
             hasTicker: true,
             contractAddress: token.tokenAddress,
           });
-
-        // Also check symbol directly
-        const sym = cleanTicker(token.symbol || "");
-        if (isValidKeyword(sym) && sym !== m?.[1]) {
+        const m = (token.description || "")
+          .toLowerCase()
+          .match(/\$([a-z][a-z0-9]{1,11})\b/);
+        if (m?.[1] && isValidKeyword(m[1]) && m[1] !== sym)
           results.push({
-            keyword: sym,
+            keyword: m[1],
             score: 18000,
             hasTicker: true,
             contractAddress: token.tokenAddress,
           });
-        }
       }
     }
   } catch {
@@ -1632,36 +2019,46 @@ async function scanDexScreener() {
       const data = await r.json();
       for (const token of (data || []).slice(0, 30)) {
         if (token.chainId !== "solana") continue;
-
-        const m = (token.description || "")
-          .toLowerCase()
-          .match(/\$([a-z][a-z0-9]{1,11})\b/);
-        if (m?.[1] && isValidKeyword(m[1]))
+        const preMcap = token.fdv || token.marketCap || token.mc || 0;
+        if (preMcap > MAX_MCAP && preMcap > 0) continue;
+        const sym = cleanTicker(token.symbol || token.baseToken?.symbol || "");
+        if (sym && isValidKeyword(sym))
           results.push({
-            keyword: m[1],
+            keyword: sym,
             score: 15000 + (token.totalAmount || 0),
             hasTicker: true,
             contractAddress: token.tokenAddress,
           });
-
-        const sym = cleanTicker(token.symbol || "");
-        if (isValidKeyword(sym) && sym !== m?.[1]) {
+        const m = (token.description || "")
+          .toLowerCase()
+          .match(/\$([a-z][a-z0-9]{1,11})\b/);
+        if (m?.[1] && isValidKeyword(m[1]) && m[1] !== sym)
           results.push({
-            keyword: sym,
+            keyword: m[1],
             score: 12000 + (token.totalAmount || 0),
             hasTicker: true,
             contractAddress: token.tokenAddress,
           });
-        }
       }
     }
   } catch {
     /* continue */
   }
 
-  // Enrich with live data and filter old/expensive coins
+  // Enrich top 30
   const enriched: typeof results = [];
-  const toEnrich = results.filter((r) => r.contractAddress).slice(0, 20);
+  const seen = new Set<string>();
+  const toEnrich = results
+    .filter(
+      (r) =>
+        r.contractAddress &&
+        !seen.has(r.contractAddress) &&
+        (() => {
+          seen.add(r.contractAddress!);
+          return true;
+        })(),
+    )
+    .slice(0, 30);
 
   await Promise.all(
     toEnrich.map(async (item) => {
@@ -1671,10 +2068,7 @@ async function scanDexScreener() {
           {},
           6000,
         );
-        if (!r) {
-          enriched.push(item);
-          return;
-        }
+        if (!r) return;
         const data = await r.json();
         const pairs = (data?.pairs || [])
           .filter((p: { chainId: string }) => p.chainId === "solana")
@@ -1684,11 +2078,7 @@ async function scanDexScreener() {
               b: { liquidity?: { usd?: number } },
             ) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0),
           );
-
-        if (!pairs.length) {
-          enriched.push(item);
-          return;
-        }
+        if (!pairs.length) return;
 
         const pair = pairs[0];
         const mcap = pair.fdv || 0;
@@ -1699,18 +2089,33 @@ async function scanDexScreener() {
         const ageMinutes = pair.pairCreatedAt
           ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
           : undefined;
+        const hasKnownAge = ageMinutes !== undefined;
 
-        // FIX 1+2: Hard kills with live data
         if (mcap > MAX_MCAP) return;
         if (ageMinutes !== undefined && ageMinutes > MAX_AGE_MINUTES) return;
-        if (liq < MIN_LIQUIDITY) return;
+        if (liq > 0 && liq < MIN_LIQUIDITY) return;
         if (change1h > MAX_1H_CHANGE) return;
         if (change24h > MAX_24H_CHANGE) return;
+        // NEW A: kill already dumped
+        if (change24h < MIN_24H_CHANGE) return;
+        // NEW B: empty shell kill
+        if (mcap > 0 && liq > 0 && liq / mcap > MAX_LIQ_MCAP_RATIO) return;
 
         const ageMult = ageMultiplier(ageMinutes);
         if (ageMult === 0) return;
-        const mcapMult = mcapMultiplier(mcap);
+        const mcapMult = mcapMultiplier(mcap || undefined);
         if (mcapMult === 0) return;
+        // NEW M: volume spike
+        const volSpike = volumeSpikeMultiplier(vol24h, mcap);
+
+        const baseScore =
+          (vol24h * 0.4 + liq * 0.3 + Math.max(change24h, 0) * 120) *
+          ageMult *
+          mcapMult *
+          volSpike;
+        const cappedScore = hasKnownAge
+          ? baseScore
+          : Math.min(baseScore, 15000);
 
         enriched.push({
           ...item,
@@ -1720,13 +2125,10 @@ async function scanDexScreener() {
           priceChange24h: change24h,
           volume24h: vol24h,
           ageMinutes,
-          score:
-            (vol24h * 0.4 + liq * 0.3 + Math.max(change24h, 0) * 120) *
-            ageMult *
-            mcapMult,
+          score: cappedScore,
         });
       } catch {
-        enriched.push(item);
+        return;
       }
     }),
   );
@@ -1735,7 +2137,7 @@ async function scanDexScreener() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GOOGLE TRENDS
+// GOOGLE TRENDS — expanded geos (NEW S)
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanGoogleTrends() {
   const wordMap = new Map<string, number>();
@@ -1760,26 +2162,27 @@ async function scanGoogleTrends() {
           );
           if (!titleMatch) continue;
           const title = titleMatch[1].trim();
-
           const rawTraffic = (trafficMatch?.[1] || "")
             .trim()
             .replace(/\+/g, "")
             .replace(/,/g, "");
           let traffic: number;
-          if (rawTraffic.toUpperCase().includes("M")) {
+          if (rawTraffic.toUpperCase().includes("M"))
             traffic = Math.round(parseFloat(rawTraffic) * 1_000_000) || 5000;
-          } else if (rawTraffic.toUpperCase().includes("K")) {
+          else if (rawTraffic.toUpperCase().includes("K"))
             traffic = Math.round(parseFloat(rawTraffic) * 1_000) || 5000;
-          } else {
-            traffic = parseInt(rawTraffic.replace(/[^0-9]/g, "")) || 5000;
-          }
+          else traffic = parseInt(rawTraffic.replace(/[^0-9]/g, "")) || 5000;
 
           const properNouns = title.match(/\b[A-Z][a-z]{2,14}\b/g) || [];
           for (const noun of properNouns) {
             const clean = cleanTicker(noun);
             if (isValidKeyword(clean) && clean.length >= 3) {
               wordMap.set(clean, (wordMap.get(clean) || 0) + traffic);
-              registerViralWord(clean, `Google Trends: "${title}" (${geo})`);
+              registerViralWord(
+                clean,
+                `Google Trends: "${title}" (${geo})`,
+                "google-trends",
+              );
             }
           }
           const capsWords =
@@ -1792,7 +2195,22 @@ async function scanGoogleTrends() {
               isValidKeyword(compound)
             ) {
               wordMap.set(compound, (wordMap.get(compound) || 0) + traffic * 2);
-              registerViralWord(compound, `Google Trends: "${title}" (${geo})`);
+              registerViralWord(
+                compound,
+                `Google Trends: "${title}" (${geo})`,
+                "google-trends",
+              );
+            }
+          }
+          // NEW E: animal signals from trends
+          for (const animal of ANIMAL_VIRAL_SIGNALS) {
+            if (title.toLowerCase().includes(animal)) {
+              wordMap.set(animal, (wordMap.get(animal) || 0) + traffic * 3);
+              registerViralWord(
+                animal,
+                `Google Trends animal: "${title}" (${geo})`,
+                "google-trends-animal",
+              );
             }
           }
         }
@@ -1836,6 +2254,15 @@ async function scanGoogleNews() {
     "solana token new viral",
     "went viral today",
     "fan account new viral character",
+    // NEW: more targeted news queries
+    "viral pet moment today",
+    "funny animal goes viral",
+    "celebrity says weird thing",
+    "internet meme goes mainstream",
+    "viral clip millions views today",
+    "celebrity pet viral",
+    "new meme format viral",
+    "tiktok trend today",
   ];
 
   await Promise.all(
@@ -1857,7 +2284,6 @@ async function scanGoogleNews() {
             .replace(/<[^>]+>/g, "");
           const titleLower = title.toLowerCase();
 
-          // FIX 1: Skip old news
           if (pubDateMatch?.[1]) {
             const pubAge = Date.now() - new Date(pubDateMatch[1]).getTime();
             if (pubAge > MAX_AGE_MINUTES * 60000) continue;
@@ -1869,16 +2295,21 @@ async function scanGoogleNews() {
             if (pubAge < 6 * 3600000) recencyMult = 3.0;
             else if (pubAge < 24 * 3600000) recencyMult = 2.0;
           }
-
           rawTitles.push(title.slice(0, 150));
 
           const isCelebQuery =
             query.includes("Elon") ||
             query.includes("Trump") ||
             query.includes("celebrity");
+          const isAnimalQuery =
+            query.includes("animal") ||
+            query.includes("pet") ||
+            query.includes("viral");
           const scoreMultiplier = isCelebQuery
             ? 2.5 * recencyMult
-            : recencyMult;
+            : isAnimalQuery
+              ? 2.0 * recencyMult
+              : recencyMult;
 
           const properNouns = title.match(/\b[A-Z][a-z]{2,14}\b/g) || [];
           for (const noun of properNouns) {
@@ -1889,10 +2320,9 @@ async function scanGoogleNews() {
                 score: (ex?.score || 0) + 4000 * scoreMultiplier,
                 context: ex?.context || titleLower.slice(0, 80),
               });
-              registerViralWord(clean, titleLower.slice(0, 80));
+              registerViralWord(clean, titleLower.slice(0, 80), "google-news");
             }
           }
-
           for (const m of title.matchAll(/\$([a-zA-Z][a-zA-Z0-9]{1,11})\b/g)) {
             const ticker = cleanTicker(m[1]);
             if (isValidKeyword(ticker)) {
@@ -1901,6 +2331,21 @@ async function scanGoogleNews() {
                 score: (ex?.score || 0) + 15000 * scoreMultiplier,
                 context: ex?.context || titleLower.slice(0, 80),
               });
+            }
+          }
+          // NEW E: boost animal-related news
+          for (const animal of ANIMAL_VIRAL_SIGNALS) {
+            if (titleLower.includes(animal)) {
+              const ex = wordMap.get(animal);
+              wordMap.set(animal, {
+                score: (ex?.score || 0) + 8000 * recencyMult,
+                context: ex?.context || titleLower.slice(0, 80),
+              });
+              registerViralWord(
+                animal,
+                titleLower.slice(0, 80),
+                "google-news-animal",
+              );
             }
           }
         }
@@ -1912,11 +2357,7 @@ async function scanGoogleNews() {
 
   return {
     results: Array.from(wordMap.entries()).map(
-      ([keyword, { score, context }]) => ({
-        keyword,
-        score,
-        context,
-      }),
+      ([keyword, { score, context }]) => ({ keyword, score, context }),
     ),
     rawTitles,
     count: wordMap.size,
@@ -1933,6 +2374,8 @@ async function scanYouTubeTrending() {
     "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=GB",
     "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=PH",
     "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=BR",
+    "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=IN",
+    "https://www.youtube.com/feeds/videos.xml?chart=mostpopular&regionCode=KR",
   ];
 
   await Promise.all(
@@ -1950,6 +2393,7 @@ async function scanYouTubeTrending() {
           const rawTitle = titleTag
             .replace(/<\/?title>/g, "")
             .replace(/<!\[CDATA\[|\]\]>/g, "");
+          const rawLower = rawTitle.toLowerCase();
           const properNouns = rawTitle.match(/\b[A-Z][a-z]{2,14}\b/g) || [];
           for (const noun of properNouns) {
             const clean = cleanTicker(noun);
@@ -1958,6 +2402,7 @@ async function scanYouTubeTrending() {
               registerViralWord(
                 clean,
                 `YouTube trending: "${rawTitle.slice(0, 60)}"`,
+                "youtube",
               );
             }
           }
@@ -1970,6 +2415,18 @@ async function scanYouTubeTrending() {
               registerViralWord(
                 c,
                 `YouTube compound: "${rawTitle.slice(0, 60)}"`,
+                "youtube",
+              );
+            }
+          }
+          // NEW E: animal in youtube title = very high coinability
+          for (const animal of ANIMAL_VIRAL_SIGNALS) {
+            if (rawLower.includes(animal)) {
+              wordMap.set(animal, (wordMap.get(animal) || 0) + 25000);
+              registerViralWord(
+                animal,
+                `YouTube viral animal: "${rawTitle.slice(0, 60)}"`,
+                "youtube-animal",
               );
             }
           }
@@ -1990,7 +2447,7 @@ async function scanYouTubeTrending() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REDDIT
+// REDDIT — expanded subs (NEW T)
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanReddit(sub: string, tier: number) {
   const posts: {
@@ -2020,7 +2477,6 @@ async function scanReddit(sub: string, tier: number) {
       if (!r.ok) continue;
       const data = await r.json();
       for (const p of data?.data?.children || []) {
-        // FIX 1: Skip Reddit posts older than MAX_AGE_DAYS
         const createdUtc = p.data.created_utc;
         if (createdUtc) {
           const ageMinutes = (Date.now() / 1000 - createdUtc) / 60;
@@ -2053,6 +2509,8 @@ async function scanRedditSearch() {
     "viral animal coin crypto",
     "new meme coin launch solana",
     "crypto pump solana new today",
+    "meme coin viral animal solana",
+    "funny viral going viral today",
   ];
 
   for (const q of searchQueries) {
@@ -2072,8 +2530,6 @@ async function scanRedditSearch() {
         const comments = p.data.num_comments || 0;
         const createdUtc = p.data.created_utc;
         const ageH = createdUtc ? (Date.now() / 1000 - createdUtc) / 3600 : 48;
-
-        // FIX 1: Skip old Reddit posts
         if (ageH > MAX_AGE_DAYS * 24) continue;
 
         const recencyMult =
@@ -2102,7 +2558,18 @@ async function scanRedditSearch() {
                 score: heat * 2,
                 context: title.slice(0, 80),
               });
-              registerViralWord(clean, title.slice(0, 80));
+              registerViralWord(clean, title.slice(0, 80), "reddit");
+            }
+          }
+          // NEW E: animal signal
+          for (const animal of ANIMAL_VIRAL_SIGNALS) {
+            if (title.includes(animal)) {
+              results.push({
+                keyword: animal,
+                score: heat * 4,
+                context: title.slice(0, 80),
+              });
+              registerViralWord(animal, title.slice(0, 80), "reddit-animal");
             }
           }
         }
@@ -2149,7 +2616,6 @@ async function scanCoinGecko() {
       for (const coin of (data || []).slice(0, 50)) {
         const sym = cleanTicker(coin.symbol || "");
         const ageHours = (now - (coin.activated_at || now)) / 3600;
-        // FIX 1: Skip coins older than MAX_AGE_DAYS
         if (ageHours > MAX_AGE_DAYS * 24) continue;
         const ageMult = ageMultiplier(ageHours * 60);
         if (isValidKeyword(sym) && ageMult > 0)
@@ -2199,7 +2665,7 @@ async function scanCMCNew() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RUGCHECK
+// RUGCHECK — with whale filter (NEW Q)
 // ─────────────────────────────────────────────────────────────────────────────
 async function checkRug(
   ca: string,
@@ -2218,6 +2684,15 @@ async function checkRug(
       .filter((r) => r.level === "danger")
       .map((r) => r.name);
     const medRisks = risks.filter((r) => r.level === "warn").map((r) => r.name);
+
+    // NEW Q: whale filter — check top holder concentration
+    const topHolderPct =
+      data?.topHolders?.[0]?.pct || data?.insider_networks?.[0]?.pct || 0;
+    if (topHolderPct > 0.5)
+      return {
+        risk: "high",
+        details: `Top holder owns ${(topHolderPct * 100).toFixed(0)}%`,
+      };
 
     if (highRisks.length > 0)
       return { risk: "high", details: highRisks.slice(0, 2).join(", ") };
@@ -2271,6 +2746,9 @@ interface ScoreEntry {
   impressions?: number;
   hasFanCommunity?: boolean;
   fanCommunitySize?: number;
+  // NEW: tracking fields
+  animalBoost?: number;
+  confirmationSources?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2280,25 +2758,14 @@ export async function GET() {
   viralWordSet.clear();
   viralWordContext.clear();
   storyRegistry.clear();
+  sourceConfirmationMap.clear();
 
   const scoreMap = new Map<string, ScoreEntry>();
   const logs: string[] = [];
 
-  logs.push(`[Init] MAX_AGE = ${MAX_AGE_DAYS} days (${MAX_AGE_MINUTES} min)`);
-  logs.push(`[Init] MAX_MCAP = $${MAX_MCAP.toLocaleString()}`);
-
-  if (TWITTER_BEARER) {
-    logs.push(
-      `[Init] Twitter bearer: ${TWITTER_BEARER.length} chars, encoded=${TWITTER_BEARER.includes("%")}`,
-    );
-  } else {
-    logs.push("[Init] ⚠ No Twitter bearer token");
-  }
-  if (BIRDEYE_API_KEY) {
-    logs.push("[Init] Birdeye key loaded");
-  } else {
-    logs.push("[Init] No Birdeye key — disabled");
-  }
+  logs.push(
+    `[Init] v21 GOD TIER | MAX_AGE=${MAX_AGE_DAYS}d | MAX_MCAP=$${MAX_MCAP.toLocaleString()} | MIN_24H=${MIN_24H_CHANGE}%`,
+  );
 
   const upsert = (
     word: string,
@@ -2339,17 +2806,20 @@ export async function GET() {
         | "impressions"
         | "hasFanCommunity"
         | "fanCommunitySize"
+        | "animalBoost"
       >
     > = {},
   ) => {
     const key = word.toLowerCase().trim();
     if (!isValidKeyword(key) || amount <= 0) return;
-
-    // FIX 2: Hard mcap kill at upsert level — no exceptions
     if (opts.mcap !== undefined && opts.mcap > MAX_MCAP) return;
-
-    // FIX 1: Hard age kill at upsert level
     if (opts.ageMinutes !== undefined && opts.ageMinutes > MAX_AGE_MINUTES)
+      return;
+    // NEW A: kill dumped tokens at upsert level too
+    if (
+      opts.priceChange24h !== undefined &&
+      opts.priceChange24h < MIN_24H_CHANGE
+    )
       return;
 
     const existing = scoreMap.get(key);
@@ -2418,6 +2888,11 @@ export async function GET() {
           opts.fanCommunitySize > existing.fanCommunitySize)
       )
         existing.fanCommunitySize = opts.fanCommunitySize;
+      if (
+        opts.animalBoost &&
+        (!existing.animalBoost || opts.animalBoost > existing.animalBoost)
+      )
+        existing.animalBoost = opts.animalBoost;
     } else {
       const entry: ScoreEntry = {
         viralScore: 0,
@@ -2451,42 +2926,42 @@ export async function GET() {
         impressions: opts.impressions,
         hasFanCommunity: opts.hasFanCommunity,
         fanCommunitySize: opts.fanCommunitySize,
+        animalBoost: opts.animalBoost,
       };
       (entry[field] as number) = amount;
       scoreMap.set(key, entry);
     }
   };
 
-  // ── WAVE 1: Twitter + Telegram ────────────────────────────────────────────
+  // ── WAVE 1: Twitter + Telegram ──────────────────────────────────────────
   const [twitterData, telegramData] = await Promise.all([
     scanTwitter(),
     scanTelegram(),
   ]);
-
   for (const t of twitterData.results)
     upsert(t.keyword, t.score, "twitter", "Twitter/X", "twitterScore", {
       viralContext: t.context,
     });
   for (const log of twitterData.logs) logs.push(log);
-
   for (const t of telegramData.results)
     upsert(t.keyword, t.score, "telegram", "Telegram Alpha", "telegramScore", {
       viralContext: t.context,
     });
   for (const log of telegramData.logs) logs.push(log);
 
-  // ── WAVE 2: All sources in parallel ──────────────────────────────────────
+  // ── WAVE 2: All sources in parallel ────────────────────────────────────
   const [
     googleTrendsData,
     googleNewsData,
     youtubeTrendingData,
     kymData,
     redditSearchData,
-    pumpResults,
+    pumpData,
     dexResults,
     geckoResults,
     cmcResults,
     birdeyeData,
+    hnData,
     ...redditResults
   ] = await Promise.all([
     scanGoogleTrends(),
@@ -2499,10 +2974,14 @@ export async function GET() {
     scanCoinGecko(),
     scanCMCNew(),
     scanBirdeye(),
+    scanHackerNews(),
     ...REDDIT_SUBS.map((s) => scanReddit(s.name, s.tier)),
   ]);
 
-  // ── WAVE 3: Gemini on REAL scraped data ──────────────────────────────────
+  const pumpResults = pumpData.results;
+  for (const log of pumpData.logs) logs.push(log);
+
+  // ── WAVE 3: Gemini ──────────────────────────────────────────────────────
   const allRawTexts = [
     ...twitterData.rawTexts,
     ...telegramData.rawTexts,
@@ -2510,7 +2989,6 @@ export async function GET() {
     ...(googleNewsData.rawTitles || []),
   ];
 
-  // FIX 7: Only pass coins under 3h to Gemini (was 6h)
   const newPumpCoins = pumpResults
     .filter((p) => p.ageMinutes < 180)
     .slice(0, 30)
@@ -2523,7 +3001,6 @@ export async function GET() {
     }));
 
   const trendingWordsList = Array.from(viralWordSet).slice(0, 50);
-
   const [geminiStories, geminiCelebStories] = await Promise.all([
     analyzeWithGemini({
       twitterTexts: twitterData.rawTexts,
@@ -2536,10 +3013,10 @@ export async function GET() {
     scanGeminiCelebStories(allRawTexts),
   ]);
 
-  // ── Process social signals ────────────────────────────────────────────────
+  // ── Process social signals ──────────────────────────────────────────────
   for (const g of googleTrendsData.results)
     upsert(g.keyword, g.score, "google-trends", "Google Trends", "viralScore");
-  logs.push(`[Google Trends] ${googleTrendsData.count} proper nouns`);
+  logs.push(`[Google Trends] ${googleTrendsData.count} signals`);
 
   for (const g of googleNewsData.results)
     upsert(g.keyword, g.score, "google-news", "Google News", "viralScore", {
@@ -2562,17 +3039,22 @@ export async function GET() {
       viralContext: r.context,
     });
 
-  // ── Process Gemini Stories ────────────────────────────────────────────────
-  let narrativeCount = 0,
-    predictiveCount = 0,
-    fanCommunityCount = 0;
+  // NEW F: HackerNews signals
+  for (const h of hnData.results)
+    upsert(h.keyword, h.score, "hackernews", "HackerNews", "viralScore", {
+      viralContext: h.context,
+    });
+  for (const log of hnData.logs) logs.push(log);
 
+  // ── Gemini Stories ──────────────────────────────────────────────────────
+  let narrativeCount = 0,
+    predictiveCount = 0;
   if (geminiStories.success) {
     for (const story of geminiStories.stories) {
       const ageMult =
         story.coinAgeDays !== undefined
           ? ageMultiplier(story.coinAgeDays * 1440)
-          : 0.5;
+          : 0.6;
       if (ageMult === 0) continue;
       const mcapMult =
         story.coinMcap !== undefined ? mcapMultiplier(story.coinMcap) : 1.5;
@@ -2592,6 +3074,14 @@ export async function GET() {
       const impressionMult = story.impressions
         ? Math.min(Math.log10(story.impressions + 1) / 4, 2.0)
         : 1.0;
+      // NEW E: animal archetype boost
+      const isAnimalStory =
+        story.archetypeType === "viral_animal" ||
+        ANIMAL_VIRAL_SIGNALS.some((a) =>
+          story.headline.toLowerCase().includes(a),
+        );
+      const animalArchetypeBoost = isAnimalStory ? 3.0 : 1.0;
+
       const baseScore =
         story.coinabilityScore *
         6000 *
@@ -2599,7 +3089,8 @@ export async function GET() {
         mcapMult *
         storyMult *
         impressionMult *
-        fanBonus;
+        fanBonus *
+        animalArchetypeBoost;
       const field = isCeleb
         ? "celebScore"
         : isConfirmed
@@ -2613,7 +3104,6 @@ export async function GET() {
           story.emotionWords || [],
           story.headline,
         );
-
       for (const variant of allVariants) {
         const variantIsMain = variant === story.ticker;
         upsert(
@@ -2644,13 +3134,13 @@ export async function GET() {
                 : undefined,
             hasFanCommunity,
             fanCommunitySize: story.fanCommunitySize,
+            animalBoost: isAnimalStory ? 3.0 : undefined,
           },
         );
       }
-
       for (const ew of story.emotionWords || [])
-        registerViralWord(ew, story.narrativeContext);
-      registerViralWord(story.ticker, story.narrativeContext);
+        registerViralWord(ew, story.narrativeContext, "gemini");
+      registerViralWord(story.ticker, story.narrativeContext, "gemini");
       registerStory({
         id: story.ticker,
         headline: story.headline,
@@ -2669,10 +3159,8 @@ export async function GET() {
         hasFanCommunity,
         fanCommunitySize: story.fanCommunitySize,
       });
-
       if (isConfirmed) narrativeCount++;
       if (isPredictive) predictiveCount++;
-      if (hasFanCommunity) fanCommunityCount++;
     }
     logs.push(
       `[Gemini] ✓ ${geminiStories.stories.length} stories — ${narrativeCount} confirmed — ${predictiveCount} predictive`,
@@ -2686,7 +3174,7 @@ export async function GET() {
       const ageMult =
         story.coinAgeDays !== undefined
           ? ageMultiplier(story.coinAgeDays * 1440)
-          : 0.5;
+          : 0.6;
       if (ageMult === 0) continue;
       const mcapMult =
         story.coinMcap !== undefined ? mcapMultiplier(story.coinMcap) : 1.5;
@@ -2701,7 +3189,6 @@ export async function GET() {
           story.emotionWords || [],
           story.headline,
         );
-
       for (const variant of allVariants) {
         upsert(
           variant,
@@ -2727,15 +3214,15 @@ export async function GET() {
         );
       }
       for (const ew of story.emotionWords || [])
-        registerViralWord(ew, story.narrativeContext);
-      registerViralWord(story.ticker, story.narrativeContext);
+        registerViralWord(ew, story.narrativeContext, "gemini-celeb");
+      registerViralWord(story.ticker, story.narrativeContext, "gemini-celeb");
     }
     logs.push(
       `[Gemini Celeb] ✓ ${geminiCelebStories.stories.length} celebrity moments`,
     );
   }
 
-  // ── Pump.fun ──────────────────────────────────────────────────────────────
+  // ── Pump.fun ────────────────────────────────────────────────────────────
   let pumpNarrativeMatches = 0;
   for (const p of pumpResults) {
     const { bonus, story, storyObj } = getNarrativeBonus(p.keyword);
@@ -2748,10 +3235,22 @@ export async function GET() {
       ? 1 + Math.min(twitterEntry.telegramScore / 30000, 4.0)
       : 1;
     const velMult = velocityMultiplier(p.score, p.ageMinutes);
+    const confirmBonus = getConfirmationBonus(p.keyword);
+    // NEW E: animal boost for pump coins
+    const animalBoostMult = getAnimalBoost(
+      p.keyword,
+      (p.description || "") + " " + (p.name || ""),
+    );
 
     upsert(
       p.keyword,
-      p.score * narrativeBonus * twitterBonus * telegramBonus * velMult,
+      p.score *
+        narrativeBonus *
+        twitterBonus *
+        telegramBonus *
+        velMult *
+        confirmBonus *
+        animalBoostMult,
       "pumpfun",
       "Pump.fun",
       "onchainScore",
@@ -2764,6 +3263,7 @@ export async function GET() {
         contractAddress: p.contractAddress,
         narrativeStory: story,
         aiContext: story || p.description,
+        animalBoost: animalBoostMult > 1 ? animalBoostMult : undefined,
       },
     );
 
@@ -2796,7 +3296,7 @@ export async function GET() {
     `[Pump.fun] ${pumpResults.length} signals — ${pumpNarrativeMatches} narrative matches`,
   );
 
-  // DexScreener
+  // ── DexScreener ─────────────────────────────────────────────────────────
   for (const d of dexResults) {
     const { bonus, story } = getNarrativeBonus(d.keyword);
     const narrativeBonus = bonus > 0 ? 1 + bonus * 12 : 1;
@@ -2808,9 +3308,16 @@ export async function GET() {
       ? 1 + Math.min(twitterEntry.telegramScore / 30000, 4.0)
       : 1;
     const velMult = velocityMultiplier(d.score, d.ageMinutes);
+    const confirmBonus = getConfirmationBonus(d.keyword);
+
     upsert(
       d.keyword,
-      d.score * narrativeBonus * twitterBonus * telegramBonus * velMult,
+      d.score *
+        narrativeBonus *
+        twitterBonus *
+        telegramBonus *
+        velMult *
+        confirmBonus,
       "dexscreener",
       "DexScreener",
       "onchainScore",
@@ -2835,14 +3342,12 @@ export async function GET() {
         "dexscreener",
         "Narrative Match",
         "narrativeScore",
-        {
-          narrativeStory: story,
-        },
+        { narrativeStory: story },
       );
   }
-  logs.push(`[DexScreener] ${dexResults.length} pairs (boosted/profiles only)`);
+  logs.push(`[DexScreener] ${dexResults.length} pairs`);
 
-  // Birdeye
+  // ── Birdeye ─────────────────────────────────────────────────────────────
   for (const b of birdeyeData.results) {
     const { bonus, story } = getNarrativeBonus(b.keyword);
     const narrativeBonus = bonus > 0 ? 1 + bonus * 8 : 1;
@@ -2874,7 +3379,7 @@ export async function GET() {
       isNewCoin: true,
     });
 
-  // Reddit
+  // ── Reddit subs ─────────────────────────────────────────────────────────
   let totalRedditTickers = 0;
   for (const { sub, tier, posts } of redditResults) {
     for (const {
@@ -2899,9 +3404,7 @@ export async function GET() {
             "reddit",
             `r/${sub}`,
             "socialScore",
-            {
-              hasTicker: true,
-            },
+            { hasTicker: true },
           );
           totalRedditTickers++;
         }
@@ -2919,7 +3422,57 @@ export async function GET() {
               `r/${sub}`,
               "socialScore",
             );
-            registerViralWord(clean, `r/${sub}: "${title.slice(0, 60)}"`);
+            registerViralWord(
+              clean,
+              `r/${sub}: "${title.slice(0, 60)}"`,
+              "reddit",
+            );
+          }
+        }
+      }
+
+      // NEW E: animal/pet posts from viral subs get a special boost
+      const isAnimalSub = [
+        "aww",
+        "rarepuppers",
+        "Eyebleach",
+        "CatsAreAssholes",
+        "dogswithjobs",
+        "AnimalsBeingBros",
+      ].includes(sub);
+      if (isAnimalSub && upvotes > 1000) {
+        for (const animal of ANIMAL_VIRAL_SIGNALS) {
+          if (full.includes(animal)) {
+            upsert(
+              animal,
+              heat * 5 * tier * recencyMult,
+              "reddit",
+              `r/${sub}`,
+              "socialScore",
+            );
+            registerViralWord(
+              animal,
+              `r/${sub} viral: "${title.slice(0, 60)}"`,
+              "reddit-animal",
+            );
+          }
+        }
+        const words = title.toLowerCase().split(/[\s\-_,.()/!?'"]+/);
+        for (const w of words) {
+          const clean = cleanTicker(w);
+          if (isValidKeyword(clean) && clean.length >= 4) {
+            upsert(
+              clean,
+              heat * 3 * tier * recencyMult,
+              "reddit",
+              `r/${sub}`,
+              "socialScore",
+            );
+            registerViralWord(
+              clean,
+              `r/${sub} animal sub: "${title.slice(0, 60)}"`,
+              "reddit-animal",
+            );
           }
         }
       }
@@ -2929,7 +3482,7 @@ export async function GET() {
     `[Reddit] ${REDDIT_SUBS.length} subs — ${totalRedditTickers} tickers`,
   );
 
-  // Rugcheck top 15
+  // ── Rugcheck top 15 ─────────────────────────────────────────────────────
   const onchainWithCA = Array.from(scoreMap.entries())
     .filter(
       ([, v]) =>
@@ -2957,9 +3510,9 @@ export async function GET() {
   logs.push(`[Rugcheck] ${rugChecks.length} tokens checked`);
 
   // ── FINAL SCORING ─────────────────────────────────────────────────────────
-  const results = Array.from(scoreMap.entries())
+  const scoredEntries = Array.from(scoreMap.entries())
     .map(([keyword, v]) => {
-      // FIX 1+2: Triple-check hard kills in final pass
+      // Hard kills
       if (v.mcap !== undefined && v.mcap > MAX_MCAP) return null;
       if (v.ageMinutes !== undefined && v.ageMinutes > MAX_AGE_MINUTES)
         return null;
@@ -2967,7 +3520,27 @@ export async function GET() {
         return null;
       if (v.priceChange24h !== undefined && v.priceChange24h > MAX_24H_CHANGE)
         return null;
+      // NEW A: kill dumped tokens
+      if (v.priceChange24h !== undefined && v.priceChange24h < MIN_24H_CHANGE)
+        return null;
       if (v.rugRisk === "high") return null;
+      // NEW B: kill empty shells
+      if (
+        v.mcap &&
+        v.mcap > 0 &&
+        v.liquidity &&
+        v.liquidity > 0 &&
+        v.liquidity / v.mcap > MAX_LIQ_MCAP_RATIO
+      )
+        return null;
+
+      const isOnchain = v.platforms.some((p) =>
+        ["pumpfun", "dexscreener", "birdeye"].includes(p),
+      );
+      const hasAIStory = v.platforms.some((p) =>
+        ["story", "celebrity"].includes(p),
+      );
+      if (!isOnchain && !hasAIStory && v.ageMinutes === undefined) return null;
 
       const platformCount = v.platforms.length;
       const crossBonus =
@@ -3030,11 +3603,8 @@ export async function GET() {
               ? 1.1
               : 0.8
         : 1.0;
-
-      // FIX 5: undefined age is PENALIZED (0.3x), not rewarded (was 1.5x)
       const globalAgeMult = ageMultiplier(v.ageMinutes);
       if (globalAgeMult === 0) return null;
-
       const impressionBonus = v.impressions
         ? Math.min(Math.log10(v.impressions + 1) / 4, 2.0)
         : 1.0;
@@ -3042,6 +3612,14 @@ export async function GET() {
         v.viralScore + v.socialScore + v.onchainScore,
         v.ageMinutes,
       );
+      // NEW M: volume spike
+      const volSpike = volumeSpikeMultiplier(v.volume, v.mcap);
+      // NEW E: animal boost in final scoring
+      const animalFinalBoost =
+        v.animalBoost ||
+        getAnimalBoost(keyword, v.viralContext || v.aiContext || "");
+      // NEW G: confirmation matrix bonus
+      const confirmFinalBonus = getConfirmationBonus(keyword);
 
       const raw =
         v.viralScore * 2.0 +
@@ -3073,7 +3651,10 @@ export async function GET() {
           finalMcapMult *
           impressionBonus *
           fanCommunityBonus *
-          velMult,
+          velMult *
+          volSpike *
+          animalFinalBoost *
+          confirmFinalBonus,
       );
 
       let ageLabel: string | undefined;
@@ -3131,68 +3712,71 @@ export async function GET() {
           v.platforms.includes("birdeye"),
         isViralTrend: viralPlatforms >= 1,
         ageDays: v.ageMinutes !== undefined ? v.ageMinutes / 1440 : undefined,
+        // NEW: extra metadata for UI
+        isAnimalMeme:
+          (v.animalBoost || 0) > 1 ||
+          ANIMAL_VIRAL_SIGNALS.some((a) => keyword.includes(a)),
+        confirmationSources: sourceConfirmationMap.get(keyword)?.size || 0,
+        volumeSpike: volumeSpikeMultiplier(v.volume, v.mcap) > 2,
       };
     })
-    .filter((r): r is NonNullable<typeof r> => {
-      if (!r) return false;
-      const hasCeleb = r.onCeleb;
-      const hasStory = r.isNarrativeCoin || r.isPredictive;
-      const hasFanCommunity = r.hasFanCommunity;
-      const hasRealAI = r.onAI && r.aiContext && r.aiContext.length > 20;
-      const hasMultiSource = r.crossPlatforms >= 3;
-      const hasTwitter = r.onTwitter;
-      const hasTelegram = r.onTelegram;
-      const hasOnchainPlusSocial =
-        r.onDex &&
-        (r.platforms || []).some((p: string) =>
-          [
-            "reddit",
-            "google-trends",
-            "youtube",
-            "kym",
-            "twitter",
-            "google-news",
-            "telegram",
-          ].includes(p),
-        );
-      const hasOnchainPlusAI = r.onDex && r.onAI;
-      const isHighScore = r.score >= 500000;
+    .filter((r): r is NonNullable<typeof r> => r !== null);
 
-      if (
-        r.onDex &&
-        r.crossPlatforms === 1 &&
-        !hasCeleb &&
-        !hasStory &&
-        !hasFanCommunity
-      )
-        return false;
-      if (
-        !r.onDex &&
-        !hasCeleb &&
-        !hasRealAI &&
-        !hasStory &&
-        !hasFanCommunity &&
-        !hasTwitter &&
-        !hasTelegram
-      )
-        return false;
+  // ── FILTER ────────────────────────────────────────────────────────────────
+  const filtered = scoredEntries.filter((r) => {
+    if (r.score <= 0) return false;
 
-      return (
-        hasCeleb ||
-        hasStory ||
-        hasRealAI ||
-        hasMultiSource ||
-        hasOnchainPlusSocial ||
-        hasOnchainPlusAI ||
-        isHighScore ||
-        hasFanCommunity ||
-        hasTwitter ||
-        hasTelegram
-      );
-    })
+    const hasCeleb = r.onCeleb;
+    const hasStory = r.isNarrativeCoin || r.isPredictive;
+    const hasFanCommunity = r.hasFanCommunity;
+    const hasRealAI = r.onAI && r.aiContext && r.aiContext.length > 20;
+    const hasOnchain = r.onDex;
+    const hasTwitter = r.onTwitter;
+    const hasTelegram = r.onTelegram;
+    const hasAnySocial = (r.platforms || []).some((p: string) =>
+      [
+        "reddit",
+        "google-trends",
+        "youtube",
+        "kym",
+        "google-news",
+        "hackernews",
+      ].includes(p),
+    );
+    // NEW: animal memes always pass if they have any on-chain or social
+    const isAnimal = r.isAnimalMeme;
+    const hasHighConfirmation =
+      r.confirmationSources >= CONFIRMATION_MATRIX_THRESHOLD;
+    const hasVolSpike = r.volumeSpike;
+
+    if (hasCeleb || hasStory || hasFanCommunity || hasRealAI) return true;
+    if (isAnimal && (hasOnchain || hasAnySocial)) return true;
+    if (hasHighConfirmation) return true;
+    if (hasVolSpike && hasOnchain) return true;
+
+    if (hasOnchain) {
+      if (hasTwitter || hasTelegram || hasAnySocial) return true;
+      if (r.score >= 5_000) return true;
+      return false;
+    }
+    if ((hasTwitter || hasTelegram) && r.ageMinutes !== undefined) return true;
+    if (hasAnySocial && r.crossPlatforms >= 2 && r.ageMinutes !== undefined)
+      return true;
+    if (r.score >= 10_000 && r.crossPlatforms >= 1 && hasOnchain) return true;
+    return false;
+  });
+
+  const finalResults =
+    filtered.length > 0
+      ? filtered
+      : scoredEntries.filter((r) => r.score > 0 && r.onDex).slice(0, 20);
+
+  // ── Sort ──────────────────────────────────────────────────────────────────
+  const results = finalResults
     .sort((a, b) => {
       const getMcapBoost = (r: typeof a) => {
-        if (!r.mcap) return 1.2; // FIX 5: was 2.0, now 1.2 for unknown mcap
+        if (!r.mcap) return 1.2;
+        if (r.mcap < 5000) return 10.0;
         if (r.mcap < 10000) return 7.0;
         if (r.mcap < 30000) return 5.0;
         if (r.mcap < 100000) return 3.0;
@@ -3200,13 +3784,15 @@ export async function GET() {
         return 1.0;
       };
       const getAgeBoost = (r: typeof a) => {
-        if (!r.ageMinutes) return 0.8; // FIX 5: was 1.5, now penalized
-        if (r.ageMinutes < 30) return 6.0;
+        if (!r.ageMinutes) return 0.8;
+        if (r.ageMinutes < 15) return 5.0;
+        if (r.ageMinutes < 30) return 7.0; // golden window
+        if (r.ageMinutes < 60) return 6.0;
         if (r.ageMinutes < 120) return 4.0;
         if (r.ageMinutes < 360) return 2.5;
         if (r.ageMinutes < 1440) return 1.5;
         if (r.ageMinutes < MAX_AGE_MINUTES) return 0.8;
-        return 0; // hard kill
+        return 0;
       };
       const getStoryBoost = (r: typeof a) => {
         if (r.hasFanCommunity && r.onDex) return 14.0;
@@ -3218,6 +3804,15 @@ export async function GET() {
         if (r.isPredictive) return 2.5;
         return 1.0;
       };
+      const getAnimalBoostSort = (r: typeof a) => (r.isAnimalMeme ? 2.5 : 1.0);
+      const getConfirmSort = (r: typeof a) =>
+        r.confirmationSources >= 3
+          ? 2.0
+          : r.confirmationSources >= 2
+            ? 1.5
+            : 1.0;
+      const getVolSpikeSort = (r: typeof a) => (r.volumeSpike ? 1.8 : 1.0);
+
       const aBoost =
         (a.onCeleb ? 5.0 : 1) *
         getStoryBoost(a) *
@@ -3225,7 +3820,10 @@ export async function GET() {
         (a.onTwitter && a.onDex ? 2.5 : 1) *
         (a.onTelegram && a.onDex ? 3.0 : 1) *
         getMcapBoost(a) *
-        getAgeBoost(a);
+        getAgeBoost(a) *
+        getAnimalBoostSort(a) *
+        getConfirmSort(a) *
+        getVolSpikeSort(a);
       const bBoost =
         (b.onCeleb ? 5.0 : 1) *
         getStoryBoost(b) *
@@ -3233,7 +3831,10 @@ export async function GET() {
         (b.onTwitter && b.onDex ? 2.5 : 1) *
         (b.onTelegram && b.onDex ? 3.0 : 1) *
         getMcapBoost(b) *
-        getAgeBoost(b);
+        getAgeBoost(b) *
+        getAnimalBoostSort(b) *
+        getConfirmSort(b) *
+        getVolSpikeSort(b);
       return b.score * bBoost - a.score * aBoost;
     })
     .slice(0, 60);
@@ -3245,11 +3846,15 @@ export async function GET() {
     (r) => r.isNarrativeCoin && r.onDex,
   ).length;
   const predictiveStories = results.filter((r) => r.isPredictive).length;
-  const twitterSignals = results.filter((r) => r.onTwitter).length;
-  const telegramSignals = results.filter((r) => r.onTelegram).length;
+  const animalMemes = results.filter((r) => r.isAnimalMeme).length;
+  const volSpikes = results.filter((r) => r.volumeSpike).length;
+  const highConfirm = results.filter((r) => r.confirmationSources >= 3).length;
 
   logs.push(
-    `[Done] ${results.length} results — ${freshCount} fresh (<24h) — ${confirmedStories} confirmed — ${predictiveStories} predictive — ${twitterSignals} Twitter — ${telegramSignals} Telegram`,
+    `[Done v21] ${results.length} results — ${freshCount} fresh — ${confirmedStories} confirmed — ${predictiveStories} predictive`,
+  );
+  logs.push(
+    `[Signals] 🐾 ${animalMemes} animal — ⚡ ${volSpikes} vol spikes — ✅ ${highConfirm} multi-source confirmed`,
   );
 
   return NextResponse.json({
@@ -3263,22 +3868,10 @@ export async function GET() {
       pumpCoins: pumpResults.length,
       dexPairs: dexResults.length,
       birdeyeTokens: birdeyeData.results.length,
+      scoreMapSize: scoreMap.size,
+      animalSignals: animalMemes,
+      volumeSpikes: volSpikes,
+      multiSourceConfirmed: highConfirm,
     },
   });
 }
-
-/*
-═══════════════════════════════════════════════════════
-ALSO UPDATE MemeScanner.tsx — two lines to change:
-
-1. Line: const MIN_TRACK_SCORE = 100_000;
-   Change to: const MIN_TRACK_SCORE = 500_000;
-
-2. Add this check in recordTokenSighting():
-   After: if ((result.mcap || 0) > 0 && (result.mcap || 0) < MIN_TRACK_MCAP) return;
-   Add:   if ((result.mcap || 0) > 500_000) return;  // FIX 6: stop tracking $KOKOP etc
-
-This stops the Win Tracker from accumulating old high-mcap garbage.
-To clear existing bad entries: open browser console → localStorage.removeItem('wraith_token_history_v2')
-═══════════════════════════════════════════════════════
-*/

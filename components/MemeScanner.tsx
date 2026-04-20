@@ -149,9 +149,11 @@ function isGarbageKeyword(kw: string): boolean {
   return false;
 }
 
-// Lowered thresholds so more tokens get tracked
+// ─── DEAD TOKEN CONSTANTS ────────────────────────────────────────────────────
 const MIN_TRACK_SCORE = 500_000;
 const MIN_TRACK_MCAP = 1_000;
+const MIN_24H_CHANGE = -85; // kill tokens already dumped 85%+
+const MAX_LIQ_TO_MCAP_RATIO = 0.6; // if liq >= 60% of mcap = empty shell
 
 export function recordTokenSighting(result: ScanResult) {
   if (!result.contractAddress) return;
@@ -159,6 +161,15 @@ export function recordTokenSighting(result: ScanResult) {
   if ((result.score || 0) < MIN_TRACK_SCORE && !result.celebMention) return;
   if ((result.mcap || 0) > 0 && (result.mcap || 0) < MIN_TRACK_MCAP) return;
   if ((result.mcap || 0) > 500_000) return;
+
+  // FIX: kill already-dumped tokens before saving
+  if ((result.priceChange24h ?? 0) < MIN_24H_CHANGE) return;
+
+  // FIX: kill empty shell tokens (liquidity ≈ mcap = nothing left)
+  if ((result.mcap ?? 0) > 0 && (result.liquidity ?? 0) > 0) {
+    const liqRatio = (result.liquidity ?? 0) / (result.mcap ?? 1);
+    if (liqRatio > MAX_LIQ_TO_MCAP_RATIO) return;
+  }
 
   const h = loadHistory();
   const key = result.keyword;

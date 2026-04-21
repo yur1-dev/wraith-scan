@@ -67,6 +67,8 @@ interface TradeLog {
 const LOG_KEY = "wraith_sniper_log_v2";
 const POS_KEY = "wraith_positions_v2";
 const HW_KEY = "wraith_hot_wallet_v1";
+// Shared with WinsPanel — same key so bought state syncs automatically
+const WINS_BOUGHT_KEY = "wraith_bought_keys";
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
@@ -94,6 +96,25 @@ const C = {
   label: "#555",
   amber: "#ffaa00",
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WINS PANEL BOUGHT SYNC
+// When PaperTrader confirms a buy, write the keyword (lowercased symbol) to
+// the shared WINS_BOUGHT_KEY so WinsPanel shows "✓ IN" automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+function markBoughtInWinsPanel(keyword: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const existing: string[] = JSON.parse(
+      localStorage.getItem(WINS_BOUGHT_KEY) || "[]",
+    );
+    const kw = keyword.toLowerCase();
+    if (!existing.includes(kw)) {
+      existing.push(kw);
+      localStorage.setItem(WINS_BOUGHT_KEY, JSON.stringify(existing));
+    }
+  } catch {}
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CRYPTO HELPERS
@@ -170,22 +191,28 @@ function clearHW() {
 async function pollConfirm(
   conn: Connection,
   sig: string,
-  timeoutMs = 60000,
-): Promise<void> {
+  timeoutMs = 90000,
+): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const { value } = await conn.getSignatureStatuses([sig]);
-    const s = value?.[0];
-    if (
-      s &&
-      !s.err &&
-      (s.confirmationStatus === "confirmed" ||
-        s.confirmationStatus === "finalized")
-    )
-      return;
-    if (s?.err) throw new Error(`Tx failed on-chain: ${JSON.stringify(s.err)}`);
+    try {
+      const { value } = await conn.getSignatureStatuses([sig]);
+      const s = value?.[0];
+      if (
+        s &&
+        !s.err &&
+        (s.confirmationStatus === "confirmed" ||
+          s.confirmationStatus === "finalized")
+      )
+        return true;
+      if (s?.err)
+        throw new Error(`Tx failed on-chain: ${JSON.stringify(s.err)}`);
+    } catch (e) {
+      if ((e as Error).message?.includes("Tx failed")) throw e;
+    }
     await sleep(2000);
   }
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,7 +251,9 @@ async function jupiterBuy(
     skipPreflight: true,
     maxRetries: 3,
   });
-  await pollConfirm(conn, sig);
+  const confirmed = await pollConfirm(conn, sig);
+  if (!confirmed)
+    throw new Error("Transaction not confirmed within 90s — check your wallet");
   return sig;
 }
 
@@ -264,7 +293,8 @@ async function jupiterSell(
     skipPreflight: true,
     maxRetries: 3,
   });
-  await pollConfirm(conn, sig);
+  const confirmed = await pollConfirm(conn, sig, 90000);
+  if (!confirmed) throw new Error("Sell not confirmed within 90s");
   return sig;
 }
 
@@ -314,10 +344,14 @@ interface TokenData {
   links?: { twitter?: string; telegram?: string; website?: string };
 }
 
-async function fetchTokenData(ca: string): Promise<TokenData | null> {
+async function fetchTokenData(
+  ca: string,
+  signal?: AbortSignal,
+): Promise<TokenData | null> {
   try {
     const res = await fetch(
       `https://api.dexscreener.com/latest/dex/tokens/${ca}`,
+      { signal },
     );
     const data = await res.json();
     const pair = data?.pairs?.[0];
@@ -399,15 +433,27 @@ function fmtAgo(ts: number) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SOUND
+// AUDIO
 // ─────────────────────────────────────────────────────────────────────────────
+let _audioCtx: AudioContext | null = null;
+function getAudioCtx(): AudioContext | null {
+  try {
+    if (!_audioCtx || _audioCtx.state === "closed") {
+      _audioCtx = new (
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext
+      )();
+    }
+    return _audioCtx;
+  } catch {
+    return null;
+  }
+}
 function playAlert(type: "sell_tp" | "sell_sl" | "sell_trail") {
   try {
-    const ctx = new (
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext
-    )();
+    const ctx = getAudioCtx();
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -683,14 +729,7 @@ function clearRecovery() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NO-AUTOFILL PASSWORD INPUT
-// A custom component that completely blocks browser credential/password managers
-// from attaching to the field — works on Chrome, Edge, Brave, Firefox.
 // ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-// DROP-IN REPLACEMENT for NoFillPasswordInput in PaperTrader.tsx
-// Real CSS circle dots — no font rendering issues
-// ─────────────────────────────────────────────────────────────────────────────
-
 function NoFillPasswordInput({
   value,
   onChange,
@@ -708,10 +747,9 @@ function NoFillPasswordInput({
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
-      {/* Invisible real input — captures all keystrokes */}
       <input
         id={inputId}
-        name={`wraith_nofill_${inputId}_${Math.random().toString(36).slice(2)}`}
+        name={`wraith_nofill_${inputId}`}
         type="text"
         value={value}
         autoComplete="off"
@@ -736,7 +774,6 @@ function NoFillPasswordInput({
             opacity: 0,
             cursor: "text",
             zIndex: 2,
-            // Kill blue selection highlight bleeding through
             color: "transparent",
             background: "transparent",
             caretColor: "transparent",
@@ -744,8 +781,6 @@ function NoFillPasswordInput({
           } as React.CSSProperties
         }
       />
-
-      {/* Visual display layer */}
       <div
         style={{
           background: C.bgCard,
@@ -767,22 +802,22 @@ function NoFillPasswordInput({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}
           >
-            {/* Real CSS circle dots — not font characters */}
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              {Array.from({ length: value.length }).map((_, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: "50%",
-                    background: C.primary,
-                    flexShrink: 0,
-                  }}
-                />
-              ))}
+              {Array.from({ length: Math.min(value.length, 32) }).map(
+                (_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: C.primary,
+                      flexShrink: 0,
+                    }}
+                  />
+                ),
+              )}
             </div>
-            {/* Blinking cursor */}
             {focused && (
               <div
                 style={{
@@ -801,7 +836,6 @@ function NoFillPasswordInput({
           </span>
         )}
       </div>
-
       <style>{`@keyframes pwcursor { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
     </div>
   );
@@ -837,9 +871,12 @@ function HotWalletSetup({
     setRecoveryInput("");
     setErr("");
     setBusy(false);
+    if (m !== "backup" && m !== "reencrypt") {
+      setBackupPhrase("");
+      setPendingKp(null);
+    }
   };
 
-  // Step 1 of create: generate keypair, show backup phrase
   const doGenerate = async () => {
     if (pw.length < 6) {
       setErr("Min 6 chars");
@@ -862,7 +899,6 @@ function HotWalletSetup({
     setBusy(false);
   };
 
-  // Step 2 of create: user confirmed they saved phrase → encrypt and save
   const doConfirmBackup = async () => {
     if (!pendingKp) return;
     setBusy(true);
@@ -999,7 +1035,6 @@ function HotWalletSetup({
     </button>
   );
 
-  // ── MENU
   if (mode === "menu")
     return (
       <div
@@ -1054,7 +1089,6 @@ function HotWalletSetup({
       </div>
     );
 
-  // ── BACKUP PHRASE DISPLAY (after wallet creation)
   if (mode === "backup")
     return (
       <div
@@ -1158,7 +1192,6 @@ function HotWalletSetup({
       </div>
     );
 
-  // ── RECOVER WITH BACKUP PHRASE
   if (mode === "recover")
     return (
       <div
@@ -1213,7 +1246,6 @@ function HotWalletSetup({
       </div>
     );
 
-  // ── RE-ENCRYPT after recovery
   if (mode === "reencrypt")
     return (
       <div
@@ -1262,7 +1294,6 @@ function HotWalletSetup({
       </div>
     );
 
-  // ── CREATE / IMPORT / UNLOCK forms
   return (
     <div
       style={{
@@ -1272,7 +1303,6 @@ function HotWalletSetup({
         gap: 5,
       }}
     >
-      {/* Hidden decoy inputs — confuses Chrome/Edge credential heuristics */}
       <div
         style={{
           position: "absolute",
@@ -1287,7 +1317,6 @@ function HotWalletSetup({
         <input type="text" tabIndex={-1} />
         <input type="password" tabIndex={-1} />
       </div>
-
       {mode === "import" && (
         <textarea
           placeholder="Private key — base58 string or JSON array [1,2,3…]"
@@ -1314,7 +1343,6 @@ function HotWalletSetup({
           }}
         />
       )}
-
       <NoFillPasswordInput
         inputId={mode === "unlock" ? "hw-unlock" : "hw-create"}
         placeholder={mode === "unlock" ? "Password" : "Password (min 6 chars)"}
@@ -1325,7 +1353,6 @@ function HotWalletSetup({
         }}
         onKeyDown={(e) => e.key === "Enter" && mode === "unlock" && doUnlock()}
       />
-
       {mode !== "unlock" && (
         <NoFillPasswordInput
           inputId="hw-confirm"
@@ -1340,9 +1367,7 @@ function HotWalletSetup({
           }
         />
       )}
-
       {err && <div style={{ color: C.red, fontSize: 8, ...MONO }}>{err}</div>}
-
       <div style={{ display: "flex", gap: 4 }}>
         <Btn
           label={
@@ -1364,8 +1389,6 @@ function HotWalletSetup({
         />
         <Btn label="←" onClick={() => reset("menu")} />
       </div>
-
-      {/* Export backup phrase if available */}
       {mode === "unlock" && loadRecovery() && (
         <button
           onClick={() => {
@@ -1670,12 +1693,23 @@ export default function PaperTrader({ selectedMeme }: Props) {
   const [flashPos, setFlashPos] = useState<string | null>(null);
   const [borderFlash, setBorderFlash] = useState(false);
 
-  const fetchRef = useRef<string | null>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const balTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const monitorTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const sellingRef = useRef<Set<string>>(new Set());
   const hotKeypairRef = useRef<Keypair | null>(null);
   const trailPctRef = useRef(trailPct);
+  const borderFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     hotKeypairRef.current = hotKeypair;
@@ -1683,19 +1717,22 @@ export default function PaperTrader({ selectedMeme }: Props) {
   useEffect(() => {
     trailPctRef.current = trailPct;
   }, [trailPct]);
+
   useEffect(() => {
     setLog(loadLog());
     setPositions(loadPositions().filter((p) => p.status === "watching"));
   }, []);
 
+  // Balance polling
   useEffect(() => {
     if (!hotPub || !hotKeypair) return;
     const fetchBal = async () => {
+      if (!mountedRef.current) return;
       try {
         const conn = new Connection(RPC, "confirmed");
-        setHotBal(
-          (await conn.getBalance(hotKeypair.publicKey)) / LAMPORTS_PER_SOL,
-        );
+        const bal =
+          (await conn.getBalance(hotKeypair.publicKey)) / LAMPORTS_PER_SOL;
+        if (mountedRef.current) setHotBal(bal);
       } catch {
         /**/
       }
@@ -1707,15 +1744,22 @@ export default function PaperTrader({ selectedMeme }: Props) {
     };
   }, [hotPub, hotKeypair]);
 
+  // Token data fetch
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ca = (selectedMeme as any)?.contractAddress || selectedMeme?.keyword;
-    if (!ca || ca === fetchRef.current) return;
-    fetchRef.current = ca;
+    const ca = (selectedMeme as any)?.contractAddress;
+    if (!ca) {
+      setTokenData(null);
+      return;
+    }
+    if (fetchAbortRef.current) fetchAbortRef.current.abort();
+    const ctrl = new AbortController();
+    fetchAbortRef.current = ctrl;
     setTokenData(null);
-    fetchTokenData(ca).then((d) => {
-      if (fetchRef.current === ca) setTokenData(d);
+    fetchTokenData(ca, ctrl.signal).then((d) => {
+      if (!ctrl.signal.aborted && mountedRef.current) setTokenData(d);
     });
+    return () => ctrl.abort();
   }, [selectedMeme]);
 
   const triggerSell = useCallback(
@@ -1723,15 +1767,26 @@ export default function PaperTrader({ selectedMeme }: Props) {
       const kp = hotKeypairRef.current;
       if (!kp || sellingRef.current.has(posId)) return;
       sellingRef.current.add(posId);
-      setPositions((prev) =>
-        prev.map((p) =>
+
+      setPositions((prev) => {
+        const u = prev.map((p) =>
           p.id === posId ? { ...p, status: "selling" as const } : p,
-        ),
-      );
-      setBorderFlash(true);
-      setTimeout(() => setBorderFlash(false), 1000);
-      setFlashPos(posId);
-      setTimeout(() => setFlashPos(null), 2500);
+        );
+        savePositions(u);
+        return u;
+      });
+
+      if (borderFlashTimerRef.current)
+        clearTimeout(borderFlashTimerRef.current);
+      if (mountedRef.current) setBorderFlash(true);
+      borderFlashTimerRef.current = setTimeout(() => {
+        if (mountedRef.current) setBorderFlash(false);
+      }, 1000);
+      if (mountedRef.current) setFlashPos(posId);
+      setTimeout(() => {
+        if (mountedRef.current) setFlashPos(null);
+      }, 2500);
+
       playAlert(
         reason === "TP"
           ? "sell_tp"
@@ -1739,11 +1794,14 @@ export default function PaperTrader({ selectedMeme }: Props) {
             ? "sell_sl"
             : "sell_trail",
       );
-      const pos = loadPositions().find((p) => p.id === posId);
+
+      const currentPositions = loadPositions();
+      const pos = currentPositions.find((p) => p.id === posId);
       if (!pos) {
         sellingRef.current.delete(posId);
         return;
       }
+
       try {
         const rawBal = await getRawTokenBalance(kp.publicKey, pos.mint);
         if (rawBal <= 0) throw new Error("No token balance to sell");
@@ -1753,22 +1811,26 @@ export default function PaperTrader({ selectedMeme }: Props) {
           exitMcap > 0
             ? (exitMcap / pos.entryMcap - 1) * 100
             : pos.currentPnlPct;
-        setPositions((prev) => {
-          const u = prev.map((p) =>
-            p.id === posId
-              ? {
-                  ...p,
-                  status: "sold" as const,
-                  exitReason: reason,
-                  exitMcap,
-                  exitPnlPct: exitPnl,
-                  exitTxSig: sig,
-                }
-              : p,
-          );
-          savePositions(u);
-          return u;
-        });
+
+        if (mountedRef.current) {
+          setPositions((prev) => {
+            const u = prev.map((p) =>
+              p.id === posId
+                ? {
+                    ...p,
+                    status: "sold" as const,
+                    exitReason: reason,
+                    exitMcap,
+                    exitPnlPct: exitPnl,
+                    exitTxSig: sig,
+                  }
+                : p,
+            );
+            savePositions(u);
+            return u;
+          });
+        }
+
         const logEntry: TradeLog = {
           id: posId,
           symbol: pos.symbol,
@@ -1788,13 +1850,19 @@ export default function PaperTrader({ selectedMeme }: Props) {
         };
         const updated = [logEntry, ...loadLog()];
         saveLog(updated);
-        setLog(updated);
-        setStatus({
-          msg: `✓ ${reason} — SOLD $${pos.symbol} ${fmtPnl(exitPnl)}`,
-          type: "ok",
-        });
-        setTimeout(() => setStatus(null), 7000);
+        if (mountedRef.current) {
+          setLog(updated);
+          setStatus({
+            msg: `✓ ${reason} — SOLD $${pos.symbol} ${fmtPnl(exitPnl)}`,
+            type: "ok",
+          });
+          setTimeout(() => {
+            if (mountedRef.current) setStatus(null);
+          }, 7000);
+        }
+
         setTimeout(async () => {
+          if (!mountedRef.current) return;
           try {
             const conn = new Connection(RPC, "confirmed");
             setHotBal((await conn.getBalance(kp.publicKey)) / LAMPORTS_PER_SOL);
@@ -1804,57 +1872,65 @@ export default function PaperTrader({ selectedMeme }: Props) {
         }, 4000);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Unknown error";
-        setPositions((prev) => {
-          const u = prev.map((p) =>
-            p.id === posId ? { ...p, status: "watching" as const } : p,
-          );
-          savePositions(u);
-          return u;
-        });
-        setStatus({ msg: `✕ Sell failed: ${msg.slice(0, 44)}`, type: "err" });
-        setTimeout(() => setStatus(null), 8000);
+        if (mountedRef.current) {
+          setPositions((prev) => {
+            const u = prev.map((p) =>
+              p.id === posId ? { ...p, status: "watching" as const } : p,
+            );
+            savePositions(u);
+            return u;
+          });
+          setStatus({ msg: `✕ Sell failed: ${msg.slice(0, 44)}`, type: "err" });
+          setTimeout(() => {
+            if (mountedRef.current) setStatus(null);
+          }, 8000);
+        }
       }
       sellingRef.current.delete(posId);
     },
     [],
   );
 
+  // Monitor positions
   useEffect(() => {
     const monitor = async () => {
       const watching = loadPositions().filter((p) => p.status === "watching");
       if (!watching.length) return;
-      for (const pos of watching) {
-        if (sellingRef.current.has(pos.id)) continue;
-        try {
-          const mcap = await fetchMcap(pos.mint);
-          if (!mcap || mcap <= 0) continue;
-          const pnlPct = (mcap / pos.entryMcap - 1) * 100;
-          const newPeak = Math.max(pos.peakMcap, mcap);
-          const trailFrac = (pos.trailPct ?? trailPctRef.current) / 100;
-          const trailStop = newPeak * (1 - trailFrac);
-          const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
-          const tpMcap = pos.entryMcap * pos.tpX;
-          const updated = {
-            ...pos,
-            currentMcap: mcap,
-            currentPnlPct: pnlPct,
-            peakMcap: newPeak,
-            trailStopMcap: trailStop,
-          };
-          setPositions((prev) => {
-            const u = prev.map((p) => (p.id === pos.id ? updated : p));
-            savePositions(u);
-            return u;
-          });
-          if (mcap >= tpMcap) triggerSell(pos.id, "TP");
-          else if (mcap <= slMcap) triggerSell(pos.id, "SL");
-          else if (newPeak > pos.entryMcap && mcap <= trailStop)
-            triggerSell(pos.id, "TRAIL");
-        } catch {
-          /**/
-        }
-        await sleep(400);
-      }
+      await Promise.all(
+        watching.map(async (pos) => {
+          if (sellingRef.current.has(pos.id)) return;
+          try {
+            const mcap = await fetchMcap(pos.mint);
+            if (!mcap || mcap <= 0) return;
+            const pnlPct = (mcap / pos.entryMcap - 1) * 100;
+            const newPeak = Math.max(pos.peakMcap, mcap);
+            const trailFrac = (pos.trailPct ?? trailPctRef.current) / 100;
+            const trailStop = newPeak * (1 - trailFrac);
+            const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
+            const tpMcap = pos.entryMcap * pos.tpX;
+            const updated = {
+              ...pos,
+              currentMcap: mcap,
+              currentPnlPct: pnlPct,
+              peakMcap: newPeak,
+              trailStopMcap: trailStop,
+            };
+            if (mountedRef.current) {
+              setPositions((prev) => {
+                const u = prev.map((p) => (p.id === pos.id ? updated : p));
+                savePositions(u);
+                return u;
+              });
+            }
+            if (mcap >= tpMcap) triggerSell(pos.id, "TP");
+            else if (mcap <= slMcap) triggerSell(pos.id, "SL");
+            else if (newPeak > pos.entryMcap && mcap <= trailStop)
+              triggerSell(pos.id, "TRAIL");
+          } catch {
+            /**/
+          }
+        }),
+      );
     };
     monitorTimer.current = setInterval(monitor, POLL_MS);
     monitor();
@@ -1874,6 +1950,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
     !!(selectedMeme as any)?.avoid ||
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     !!(selectedMeme as any)?.honeypot;
+
   const slMcap = mcap > 0 ? mcap * (1 + slPct / 100) : 0;
   const tpMcap = mcap > 0 ? mcap * tpX : 0;
   const canBuy =
@@ -1923,13 +2000,26 @@ export default function PaperTrader({ selectedMeme }: Props) {
         savePositions(u);
         return u;
       });
-      setStatus({
-        msg: `✓ Bought ${uiBal > 0 ? uiBal.toFixed(0) : "?"} $${sym} · auto-sell armed`,
-        type: "ok",
-      });
-      setTab("positions");
-      setTimeout(() => setStatus(null), 6000);
+
+      // ── AUTO-SYNC TO WINS PANEL ──────────────────────────────────────────
+      // Mark the keyword (lowercased) as bought so WinsPanel shows "✓ IN"
+      // without the user having to manually tap BUY? in the wins panel.
+      const winKeyword = (sym || "").toLowerCase();
+      markBoughtInWinsPanel(winKeyword);
+      // ────────────────────────────────────────────────────────────────────
+
+      if (mountedRef.current) {
+        setStatus({
+          msg: `✓ Bought ${uiBal > 0 ? uiBal.toFixed(0) : "?"} $${sym} · auto-sell armed · marked IN on Win Tracker`,
+          type: "ok",
+        });
+        setTab("positions");
+        setTimeout(() => {
+          if (mountedRef.current) setStatus(null);
+        }, 6000);
+      }
       setTimeout(async () => {
+        if (!mountedRef.current) return;
         try {
           const conn = new Connection(RPC, "confirmed");
           setHotBal(
@@ -1941,10 +2031,14 @@ export default function PaperTrader({ selectedMeme }: Props) {
       }, 4000);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      setStatus({ msg: `✕ ${msg.slice(0, 50)}`, type: "err" });
-      setTimeout(() => setStatus(null), 8000);
+      if (mountedRef.current) {
+        setStatus({ msg: `✕ ${msg.slice(0, 50)}`, type: "err" });
+        setTimeout(() => {
+          if (mountedRef.current) setStatus(null);
+        }, 8000);
+      }
     }
-    setBuying(false);
+    if (mountedRef.current) setBuying(false);
   }, [
     canBuy,
     hotKeypair,
@@ -2103,7 +2197,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
         </div>
       </div>
 
-      {/* Scrollable content area */}
       <div
         style={{
           flex: 1,
@@ -2240,7 +2333,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
               </div>
             )}
 
-            {/* Token */}
+            {/* Token info */}
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <TokenAvatar
                 imageUrl={tokenData?.imageUrl}

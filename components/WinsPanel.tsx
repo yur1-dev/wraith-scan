@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { MemeTrend } from "@/app/page";
 import {
-  loadHistory,
   saveHistory,
   fetchCurrentMcap,
   fetchTokenMeta,
@@ -41,11 +40,12 @@ const MONO = {
 const AUTO_REFRESH_MS = 60_000;
 const UNDO_TIMEOUT_MS = 10_000;
 const BOUGHT_KEY = "wraith_bought_keys";
+const DISMISSED_KEY = "wraith_dismissed_keys";
 
 // ─── DEAD TOKEN PURGE CONSTANTS ───────────────────────────────────────────────
-const DEAD_THRESHOLD = 0.1; // lost 90%+ from initial = dead
-const DEAD_MIN_AGE_MS = 2 * 60 * 60 * 1000; // must be at least 2h old to purge
-const MAX_HISTORY_AGE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days max
+const DEAD_THRESHOLD = 0.1;
+const DEAD_MIN_AGE_MS = 2 * 60 * 60 * 1000;
+const MAX_HISTORY_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 
 const C = {
   primary: "#f0f0f0",
@@ -65,6 +65,7 @@ const C = {
   border: "#1a1a1a",
 };
 
+// ─── SAFE PARSERS ─────────────────────────────────────────────────────────────
 function safeSnapshots(raw: unknown): McapSnapshot[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(
@@ -75,6 +76,7 @@ function safeSnapshots(raw: unknown): McapSnapshot[] {
       typeof (s as Record<string, unknown>).mcap === "number",
   );
 }
+
 function safeEntry(key: string, raw: unknown): HistoryEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -107,6 +109,7 @@ function safeEntry(key: string, raw: unknown): HistoryEntry | null {
     return null;
   }
 }
+
 function loadSafeHistory(): Record<string, HistoryEntry> {
   if (typeof window === "undefined") return {};
   try {
@@ -121,6 +124,7 @@ function loadSafeHistory(): Record<string, HistoryEntry> {
     return {};
   }
 }
+
 function loadBoughtKeys(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
@@ -135,6 +139,22 @@ function saveBoughtKeys(keys: Set<string>) {
     localStorage.setItem(BOUGHT_KEY, JSON.stringify([...keys]));
   } catch {}
 }
+
+function loadDismissedKeys(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+function saveDismissedKeys(keys: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify([...keys]));
+  } catch {}
+}
+
 function isGarbage(kw: string): boolean {
   if (kw.length > 14) return true;
   if (/^[1-9A-HJ-NP-Za-km-z]{10,}$/.test(kw)) return true;
@@ -143,12 +163,9 @@ function isGarbage(kw: string): boolean {
   return false;
 }
 
-// ─── DEAD TOKEN CHECK ─────────────────────────────────────────────────────────
 function isDeadEntry(e: HistoryEntry, nowMs: number): boolean {
   const age = nowMs - e.seenAt;
-  // Too old
   if (age > MAX_HISTORY_AGE_MS) return true;
-  // Lost 90%+ and been around for at least 2h
   if (e.initialMcap > 0 && age > DEAD_MIN_AGE_MS) {
     const xNow = e.currentMcap / e.initialMcap;
     if (xNow < DEAD_THRESHOLD) return true;
@@ -156,6 +173,18 @@ function isDeadEntry(e: HistoryEntry, nowMs: number): boolean {
   return false;
 }
 
+function purgeDead(
+  h: Record<string, HistoryEntry>,
+): Record<string, HistoryEntry> {
+  const now = Date.now();
+  const out: Record<string, HistoryEntry> = {};
+  for (const [k, e] of Object.entries(h)) {
+    if (!isDeadEntry(e, now)) out[k] = e;
+  }
+  return out;
+}
+
+// ─── FORMATTERS ───────────────────────────────────────────────────────────────
 function fmtMcap(n: number): string {
   if (!n) return "—";
   if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
@@ -163,8 +192,8 @@ function fmtMcap(n: number): string {
   if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
   return `$${n.toFixed(0)}`;
 }
-function fmtAgo(ts: number): string {
-  const m = Math.floor((Date.now() - ts) / 60000);
+function fmtAgo(ts: number, now: number): string {
+  const m = Math.floor((now - ts) / 60000);
   if (m < 1) return "just now";
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
@@ -175,7 +204,7 @@ function calcX(init: number, cur: number): number {
   return !init || init === 0 ? 0 : cur / init;
 }
 
-// ── Avatar
+// ─── AVATAR ───────────────────────────────────────────────────────────────────
 function Avatar({
   imageUrl,
   symbol,
@@ -230,14 +259,18 @@ function Avatar({
   );
 }
 
-// ── Sparkline
+// ─── SPARKLINE ────────────────────────────────────────────────────────────────
+let sparkIdCounter = 0;
 function Spark({ snaps }: { snaps: McapSnapshot[] }) {
+  const idRef = useRef<number | null>(null);
+  if (idRef.current === null) idRef.current = sparkIdCounter++;
+
   const safe = safeSnapshots(snaps);
   if (safe.length < 2) return null;
-  const vals = safe.map((s) => s.mcap),
-    min = Math.min(...vals),
-    max = Math.max(...vals),
-    range = max - min || 1;
+  const vals = safe.map((s) => s.mcap);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min || 1;
   const W = 72,
     H = 24;
   const pts = safe
@@ -248,18 +281,16 @@ function Spark({ snaps }: { snaps: McapSnapshot[] }) {
     .join(" ");
   const up = vals[vals.length - 1] >= vals[0];
   const col = up ? C.green : C.red;
+  const uid = `sg${idRef.current}${up ? "u" : "d"}`;
   return (
     <svg width={W} height={H} style={{ display: "block", overflow: "visible" }}>
       <defs>
-        <linearGradient id={`sg${up ? "u" : "d"}`} x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={uid} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={col} stopOpacity="0.18" />
           <stop offset="100%" stopColor={col} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <polygon
-        points={`0,${H} ${pts} ${W},${H}`}
-        fill={`url(#sg${up ? "u" : "d"})`}
-      />
+      <polygon points={`0,${H} ${pts} ${W},${H}`} fill={`url(#${uid})`} />
       <polyline
         points={pts}
         fill="none"
@@ -272,7 +303,7 @@ function Spark({ snaps }: { snaps: McapSnapshot[] }) {
   );
 }
 
-// ── X Badge
+// ─── X BADGE ──────────────────────────────────────────────────────────────────
 function XBadge({
   xNow,
   xPeak,
@@ -282,9 +313,9 @@ function XBadge({
   xPeak: number;
   updating: boolean;
 }) {
-  const isMega = xPeak >= 5,
-    isWin = xPeak >= 2,
-    isDead = xNow < 0.3;
+  const isMega = xPeak >= 5;
+  const isWin = xPeak >= 2;
+  const isDead = xNow < 0.3;
   const col = isMega
     ? C.yellow
     : isWin
@@ -357,72 +388,103 @@ function XBadge({
   );
 }
 
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function WinsPanel({ onSelectMeme }: Props) {
   const [history, setHistory] = useState<Record<string, HistoryEntry>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [nextIn, setNextIn] = useState(AUTO_REFRESH_MS / 1000);
   const [lastAt, setLastAt] = useState<string | null>(null);
   const [updating, setUpdating] = useState<Set<string>>(new Set());
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [boughtKeys, setBoughtKeys] = useState<Set<string>>(new Set());
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [undoSnap, setUndoSnap] = useState<Record<string, HistoryEntry> | null>(
     null,
   );
   const [undoCD, setUndoCD] = useState(0);
   const [selKey, setSelKey] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const undoCD_ref = useRef<ReturnType<typeof setInterval> | null>(null);
   const rfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const backfillRunning = useRef(false);
 
-  // Load bought keys on mount
   useEffect(() => {
     setBoughtKeys(loadBoughtKeys());
+    setDismissed(loadDismissedKeys());
   }, []);
 
-  // ── LOAD + AUTO-PURGE DEAD TOKENS ON MOUNT ────────────────────────────────
+  // ── Listen for PaperTrader buy events via localStorage storage event
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === BOUGHT_KEY) {
+        setBoughtKeys(loadBoughtKeys());
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  // ── Also poll BOUGHT_KEY every 5s to catch same-tab updates from PaperTrader
+  useEffect(() => {
+    const t = setInterval(() => {
+      setBoughtKeys(loadBoughtKeys());
+    }, 5000);
+    return () => clearInterval(t);
+  }, []);
+
   useEffect(() => {
     const h = loadSafeHistory();
-    const clean: Record<string, HistoryEntry> = {};
-    const now = Date.now();
-
+    const filtered: Record<string, HistoryEntry> = {};
     for (const [k, e] of Object.entries(h)) {
       if (isGarbage(k)) continue;
       if (!e.contractAddress && e.initialMcap === 0) continue;
       if (e.initialMcap === 0 && e.currentMcap === 0 && e.peakMcap === 0)
         continue;
-      // FIX: auto-purge dead/stale tokens on load
-      if (isDeadEntry(e, now)) continue;
-      clean[k] = e;
+      filtered[k] = e;
     }
+    const clean = purgeDead(filtered);
     if (Object.keys(clean).length !== Object.keys(h).length) saveHistory(clean);
     setHistory(clean);
     backfill(clean);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function backfill(h: Record<string, HistoryEntry>) {
+    if (backfillRunning.current) return;
+    backfillRunning.current = true;
     const toFill = Object.values(h).filter(
       (e) => e.contractAddress && !e.tokenImageUrl,
     );
-    if (!toFill.length) return;
+    if (!toFill.length) {
+      backfillRunning.current = false;
+      return;
+    }
     const upd = { ...h };
     for (let i = 0; i < toFill.length; i += 8) {
       await Promise.all(
         toFill.slice(i, i + 8).map(async (e) => {
           const meta = await fetchTokenMeta(e.contractAddress!);
-          if (meta)
+          if (meta && upd[e.keyword]) {
             upd[e.keyword] = {
               ...upd[e.keyword],
               displayName: upd[e.keyword].displayName || meta.name,
               tokenSymbol: upd[e.keyword].tokenSymbol || meta.symbol,
               tokenImageUrl: meta.imageUrl,
             };
+          }
         }),
       );
     }
     saveHistory(upd);
-    setHistory({ ...upd });
+    setHistory((prev) => ({ ...prev, ...upd }));
+    backfillRunning.current = false;
   }
 
   useEffect(() => {
@@ -434,7 +496,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [undoSnap]);
 
-  // ── Bought / Sold tracking
   const markBought = (kw: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const next = new Set([...boughtKeys, kw]);
@@ -444,10 +505,18 @@ export default function WinsPanel({ onSelectMeme }: Props) {
 
   const markSold = (kw: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const next = new Set([...boughtKeys].filter((k) => k !== kw));
-    setBoughtKeys(next);
-    saveBoughtKeys(next);
-    setDismissed((p) => new Set([...p, kw]));
+    const nextBought = new Set([...boughtKeys].filter((k) => k !== kw));
+    setBoughtKeys(nextBought);
+    saveBoughtKeys(nextBought);
+    const nextDismissed = new Set([...dismissed, kw]);
+    setDismissed(nextDismissed);
+    saveDismissedKeys(nextDismissed);
+  };
+
+  const dismissEntry = (kw: string) => {
+    const next = new Set([...dismissed, kw]);
+    setDismissed(next);
+    saveDismissedKeys(next);
   };
 
   const doUndo = () => {
@@ -459,6 +528,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     if (undoTimer.current) clearTimeout(undoTimer.current);
     if (undoCD_ref.current) clearInterval(undoCD_ref.current);
   };
+
   const startUndo = (snap: Record<string, HistoryEntry>) => {
     setUndoSnap(snap);
     let s = UNDO_TIMEOUT_MS / 1000;
@@ -488,11 +558,34 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     setHistory({ ...cur });
     if (selKey === kw) setSelKey(null);
   };
+
   const clearAll = () => {
     startUndo(loadSafeHistory());
     localStorage.removeItem(HISTORY_KEY);
     setHistory({});
     setSelKey(null);
+  };
+
+  // ── Open token in chart / token panel
+  const openInPanel = (entry: HistoryEntry, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onSelectMeme) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const m: any = {
+      keyword: entry.tokenSymbol || entry.keyword,
+      score: 0,
+      posts: 1,
+      source: entry.platforms?.join(",") || "history",
+      hasTicker: !!entry.contractAddress,
+      crossPlatforms: entry.platforms?.length || 1,
+      isNewCoin: false,
+      mcap: entry.currentMcap || entry.initialMcap,
+      platforms: entry.platforms,
+      contractAddress: entry.contractAddress,
+      celebMention: entry.celebMention,
+      aiContext: entry.aiContext,
+    };
+    onSelectMeme(m);
   };
 
   const cardClick = (entry: HistoryEntry) => {
@@ -501,7 +594,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const m: any = {
         keyword: entry.tokenSymbol || entry.keyword,
-        score: entry.currentMcap || 0,
+        score: 0,
         posts: 1,
         source: entry.platforms?.join(",") || "history",
         hasTicker: !!entry.contractAddress,
@@ -522,57 +615,57 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     if (!entries.length) return h;
     setRefreshing(true);
     setUpdating(new Set(entries.map((e) => e.keyword)));
-    const upd = { ...h };
+
+    const updates: Record<string, HistoryEntry> = {};
     await Promise.all(
       entries.map(async (entry) => {
         try {
           const mcap = await fetchCurrentMcap(entry.contractAddress!);
           if (!mcap || mcap <= 0) return;
-          const now = Date.now();
+          const nowMs = Date.now();
           const e: HistoryEntry = {
-            ...upd[entry.keyword],
-            snapshots: safeSnapshots(upd[entry.keyword].snapshots),
+            ...entry,
+            snapshots: safeSnapshots(entry.snapshots),
           };
           e.currentMcap = mcap;
-          e.lastChecked = now;
+          e.lastChecked = nowMs;
           if (mcap > e.peakMcap) e.peakMcap = mcap;
-          const snaps = e.snapshots,
-            last = snaps[snaps.length - 1];
+
+          const snaps = e.snapshots;
+          const last = snaps[snaps.length - 1];
           if (!last) {
             if (e.initialMcap === 0) e.initialMcap = mcap;
-            e.snapshots = [{ ts: now, mcap }];
+            e.snapshots = [{ ts: nowMs, mcap }];
           } else {
             if (
-              now - last.ts > 1_800_000 ||
+              nowMs - last.ts > 1_800_000 ||
               Math.abs(mcap - last.mcap) / (last.mcap || 1) > 0.05
             ) {
-              e.snapshots = [...snaps, { ts: now, mcap }];
+              e.snapshots = [...snaps, { ts: nowMs, mcap }];
               if (e.snapshots.length > 48) e.snapshots.shift();
             }
           }
-          upd[entry.keyword] = e;
+          updates[entry.keyword] = e;
         } catch {
           /* skip */
         }
       }),
     );
 
-    // FIX: auto-purge dead tokens after refresh cycle
-    const nowMs = Date.now();
-    for (const [k, e] of Object.entries(upd)) {
-      if (isDeadEntry(e, nowMs)) {
-        delete upd[k];
-      }
-    }
+    setHistory((prev) => {
+      const merged = { ...prev, ...updates };
+      const clean = purgeDead(merged);
+      saveHistory(clean);
+      return clean;
+    });
 
-    saveHistory(upd);
-    setHistory({ ...upd });
     setRefreshing(false);
     setUpdating(new Set());
     setLastAt(new Date().toLocaleTimeString());
-    return upd;
+    return { ...h, ...updates };
   }, []);
 
+  // Auto-refresh loop
   useEffect(() => {
     let cancelled = false;
     const schedule = () => {
@@ -597,23 +690,41 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     };
   }, [runRefresh]);
 
-  const list = Object.values(history).sort(
-    (a, b) =>
-      calcX(b.initialMcap, b.peakMcap) - calcX(a.initialMcap, a.peakMcap),
+  // ── Derived state
+  const list = useMemo(
+    () =>
+      Object.values(history).sort(
+        (a, b) =>
+          calcX(b.initialMcap, b.peakMcap) - calcX(a.initialMcap, a.peakMcap),
+      ),
+    [history],
   );
-  const winners = list.filter((e) => calcX(e.initialMcap, e.peakMcap) >= 2);
-  const bestX = list.reduce(
-    (b, e) => Math.max(b, calcX(e.initialMcap, e.peakMcap)),
-    0,
-  );
-  const bestTok = list.find((e) => calcX(e.initialMcap, e.peakMcap) === bestX);
 
-  // TP alerts only for tokens you've actually bought
-  const tpAlerts = list.filter(
-    (e) =>
-      calcX(e.initialMcap, e.currentMcap) >= 2 &&
-      boughtKeys.has(e.keyword) &&
-      !dismissed.has(e.keyword),
+  const winners = useMemo(
+    () => list.filter((e) => calcX(e.initialMcap, e.peakMcap) >= 2),
+    [list],
+  );
+
+  const { bestX, bestTok } = useMemo(() => {
+    const bx = list.reduce(
+      (b, e) => Math.max(b, calcX(e.initialMcap, e.peakMcap)),
+      0,
+    );
+    return {
+      bestX: bx,
+      bestTok: list.find((e) => calcX(e.initialMcap, e.peakMcap) === bx),
+    };
+  }, [list]);
+
+  const tpAlerts = useMemo(
+    () =>
+      list.filter(
+        (e) =>
+          calcX(e.initialMcap, e.currentMcap) >= 2 &&
+          boughtKeys.has(e.keyword) &&
+          !dismissed.has(e.keyword),
+      ),
+    [list, boughtKeys, dismissed],
   );
 
   return (
@@ -637,7 +748,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         .wdel{opacity:0;transition:opacity .12s}
         .wc:hover .wdel{opacity:1}
         .tpb{animation:aglow 2s ease-in-out infinite}
-        .bpb{animation:bglow 2s ease-in-out infinite}
       `}</style>
 
       {/* HEADER */}
@@ -736,7 +846,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       </div>
 
-      {/* STATS */}
+      {/* STATS BAR */}
       {list.length > 0 && (
         <div
           style={{
@@ -825,7 +935,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       )}
 
-      {/* UNDO */}
+      {/* UNDO BANNER */}
       {undoSnap && undoCD > 0 && (
         <div
           style={{
@@ -890,7 +1000,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       )}
 
-      {/* EMPTY */}
+      {/* EMPTY STATE */}
       {list.length === 0 && !undoSnap && (
         <div
           style={{
@@ -940,31 +1050,24 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         </div>
       )}
 
-      {/* CARDS */}
+      {/* CARD LIST */}
       <div style={{ flex: 1, overflowY: "auto" as const }}>
         {list.map((entry) => {
           const snaps = safeSnapshots(entry.snapshots);
           const xNow = calcX(entry.initialMcap, entry.currentMcap);
           const xPeak = calcX(entry.initialMcap, entry.peakMcap);
-          const isMega = xPeak >= 5,
-            isWin = xPeak >= 2,
-            isDead = xNow < 0.3;
+          const isMega = xPeak >= 5;
+          const isWin = xPeak >= 2;
+          const isDead = xNow < 0.3;
           const hasDumped = xNow < 0.7 && xPeak >= 1.5;
           const isCeleb = !!entry.celebMention;
           const isUpd = updating.has(entry.keyword);
           const isSel = selKey === entry.keyword;
           const hasBought = boughtKeys.has(entry.keyword);
 
-          // TAKE PROFIT: only show if you actually marked it as bought
+          // TAKE PROFIT: only show for tokens you've marked as bought
           const showTP =
             xNow >= 2 && hasBought && !dismissed.has(entry.keyword);
-
-          // BUY PROMPT: spotted but not bought yet, still low mcap
-          const showBuyPrompt =
-            !hasBought &&
-            !dismissed.has(entry.keyword) &&
-            (entry.currentMcap || 0) > 0 &&
-            (entry.currentMcap || 0) < 500_000;
 
           const accent = isMega
             ? C.yellow
@@ -975,6 +1078,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 : isDead
                   ? C.red
                   : C.border;
+
           const drop =
             xPeak > 0
               ? ((entry.peakMcap - entry.currentMcap) / entry.peakMcap) * 100
@@ -999,7 +1103,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 background: isSel ? "#0d0300" : C.bg,
               }}
             >
-              {/* ── TAKE PROFIT BANNER */}
+              {/* TAKE PROFIT BANNER — only for tokens you bought */}
               {showTP && (
                 <div
                   style={{
@@ -1070,7 +1174,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        setDismissed((p) => new Set([...p, entry.keyword]));
+                        dismissEntry(entry.keyword);
                       }}
                       style={{
                         background: "transparent",
@@ -1089,110 +1193,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 </div>
               )}
 
-              {/* ── BUY PROMPT BANNER */}
-              {showBuyPrompt && (
-                <div
-                  className="bpb"
-                  style={{
-                    borderBottom: `1px solid ${C.blue}22`,
-                    padding: "7px 14px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    background: "#03090e",
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        color: C.blue,
-                        fontSize: 9,
-                        fontWeight: 900,
-                        letterSpacing: "0.12em",
-                        ...MONO,
-                      }}
-                    >
-                      ⚡ SPOTTED — {fmtMcap(entry.currentMcap)}
-                    </div>
-                    <div
-                      style={{
-                        color: `${C.blue}77`,
-                        fontSize: 8,
-                        ...MONO,
-                        marginTop: 2,
-                      }}
-                    >
-                      tap BOUGHT to start tracking profit
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                    {entry.contractAddress && (
-                      <a
-                        href={`https://dexscreener.com/solana/${entry.contractAddress}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ textDecoration: "none" }}
-                      >
-                        <button
-                          style={{
-                            background: "transparent",
-                            border: `1px solid ${C.blue}44`,
-                            color: C.blue,
-                            fontSize: 9,
-                            fontWeight: 700,
-                            ...MONO,
-                            padding: "5px 9px",
-                            borderRadius: 3,
-                            cursor: "pointer",
-                            letterSpacing: "0.08em",
-                          }}
-                        >
-                          VIEW↗
-                        </button>
-                      </a>
-                    )}
-                    <button
-                      onClick={(e) => markBought(entry.keyword, e)}
-                      style={{
-                        background: C.orange,
-                        border: "none",
-                        color: "#fff",
-                        fontSize: 9,
-                        fontWeight: 900,
-                        ...MONO,
-                        padding: "5px 10px",
-                        borderRadius: 3,
-                        cursor: "pointer",
-                        letterSpacing: "0.08em",
-                      }}
-                    >
-                      ✓ BOUGHT
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDismissed((p) => new Set([...p, entry.keyword]));
-                      }}
-                      style={{
-                        background: "transparent",
-                        border: `1px solid ${C.border}`,
-                        color: C.dim,
-                        fontSize: 9,
-                        ...MONO,
-                        padding: "5px 8px",
-                        borderRadius: 3,
-                        cursor: "pointer",
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* BODY */}
+              {/* CARD BODY */}
               <div
                 style={{
                   padding: "11px 12px",
@@ -1215,7 +1216,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   />
 
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Name badges */}
+                    {/* Name + badges */}
                     <div
                       style={{
                         display: "flex",
@@ -1448,7 +1449,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   </div>
                 )}
 
-                {/* Footer */}
+                {/* FOOTER */}
                 <div
                   style={{
                     display: "flex",
@@ -1462,7 +1463,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     style={{ display: "flex", alignItems: "center", gap: 5 }}
                   >
                     <span style={{ color: C.muted, fontSize: 8, ...MONO }}>
-                      {fmtAgo(entry.seenAt)}
+                      {fmtAgo(entry.seenAt, now)}
                     </span>
                     {entry.platforms.slice(0, 2).map((p) => (
                       <span
@@ -1497,6 +1498,28 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           : `-${((1 - xNow) * 100).toFixed(0)}%`}
                       </span>
                     )}
+
+                    {/* CHART button — opens token in TokenPanel */}
+                    {entry.contractAddress && onSelectMeme && (
+                      <button
+                        onClick={(e) => openInPanel(entry, e)}
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${C.orange}33`,
+                          color: C.orange,
+                          fontSize: 8,
+                          padding: "2px 7px",
+                          borderRadius: 2,
+                          cursor: "pointer",
+                          ...MONO,
+                          letterSpacing: "0.06em",
+                        }}
+                        title="Open chart in Token Panel"
+                      >
+                        CHART↗
+                      </button>
+                    )}
+
                     {entry.contractAddress && (
                       <>
                         <a
@@ -1535,6 +1558,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         </a>
                       </>
                     )}
+
                     <button
                       onClick={(e) =>
                         hasBought

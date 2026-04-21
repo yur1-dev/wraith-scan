@@ -22,3 +22,37 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #ff6600;
 }
+
+/* ── ADD THESE TO YOUR globals.css ── */
+
+/* Prevent zoom on input focus (iOS) */
+input,
+textarea,
+select {
+  font-size: 16px !important; /* iOS won't zoom if >= 16px */
+}
+
+/* But override for monospace display inputs that are intentionally small — 
+   we handle this by wrapping in a scale transform instead */
+@media (max-width: 767px) {
+  /* Allow scroll bounce on mobile panels */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* Bigger tap targets */
+  button {
+    min-height: 36px;
+  }
+
+  /* Safe area support */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Prevent double-tap zoom */
+  * {
+    touch-action: manipulation;
+  }
+}

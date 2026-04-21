@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { MemeTrend } from "@/app/page";
@@ -95,14 +95,12 @@ const PLATFORM_ICON: Record<string, string> = {
   hackernews: "🔶",
 };
 
-// ── READABLE color palette for labels/sub-text
-// OLD dark grays (#2a2a2a, #3a3a3a) → NEW readable grays (#888, #999, #aaa)
 const C = {
-  label: "#777", // section labels, stat card labels
-  sub: "#888", // secondary text
-  body: "#aaa", // body text, descriptions
-  dim: "#666", // dimmer secondary
-  accent: "#e8490f", // primary accent
+  label: "#777",
+  sub: "#888",
+  body: "#aaa",
+  dim: "#666",
+  accent: "#e8490f",
   green: "#00c47a",
   gold: "#ffd700",
   purple: "#a855f7",
@@ -180,7 +178,6 @@ async function fetchLiveTokenData(
   }
 }
 
-// ── Stat card — FIXED: readable label + value colors
 function StatCard({
   label,
   value,
@@ -234,7 +231,6 @@ function StatCard({
   );
 }
 
-// ── Narrative badge — NEW: shows the viral story behind the coin
 function NarrativeBadge({
   context,
   celebMention,
@@ -275,6 +271,184 @@ function NarrativeBadge({
   );
 }
 
+// ── Wraith Chart — clean DexScreener embed, no custom interval bar
+function WraithChart({ contractAddress }: { contractAddress: string }) {
+  // Default to 15m; DexScreener's own native toolbar handles interval switching
+  const iframeSrc = `https://dexscreener.com/solana/${contractAddress}?embed=1&theme=dark&trades=0&info=0&chart=1&chartLeftToolbar=0&chartDefaultOnMobile=1&chartTheme=dark&chartStyle=0&chartType=usd&interval=15`;
+
+  return (
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        background: C.bgDark,
+      }}
+    >
+      {/* Wraith toolbar — no interval buttons, just branding + links */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 10px",
+          borderBottom: `1px solid ${C.border}`,
+          background: "#030303",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            color: C.accent,
+            fontSize: 9,
+            fontWeight: 800,
+            letterSpacing: "0.18em",
+            ...MONO,
+          }}
+        >
+          ⚡ WRAITH
+        </span>
+        <span
+          style={{
+            color: C.dim,
+            fontSize: 7,
+            letterSpacing: "0.1em",
+            ...MONO,
+          }}
+        >
+          LIVE
+        </span>
+
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            gap: 5,
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              color: C.dim,
+              fontSize: 7,
+              ...MONO,
+              letterSpacing: "0.06em",
+            }}
+          >
+            {contractAddress.slice(0, 6)}…{contractAddress.slice(-4)}
+          </span>
+          <a
+            href={`https://dexscreener.com/solana/${contractAddress}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            <span
+              style={{
+                fontSize: 8,
+                color: C.blue,
+                border: `1px solid ${C.blue}33`,
+                padding: "2px 7px",
+                borderRadius: 2,
+                cursor: "pointer",
+                ...MONO,
+              }}
+            >
+              DEX ↗
+            </span>
+          </a>
+          <a
+            href={`https://pump.fun/${contractAddress}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            <span
+              style={{
+                fontSize: 8,
+                color: C.purple,
+                border: `1px solid ${C.purple}33`,
+                padding: "2px 7px",
+                borderRadius: 2,
+                cursor: "pointer",
+                ...MONO,
+              }}
+            >
+              PUMP ↗
+            </span>
+          </a>
+        </div>
+      </div>
+
+      {/* Chart area */}
+      <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+        <iframe
+          key={contractAddress}
+          src={iframeSrc}
+          style={{
+            width: "100%",
+            height: "calc(100% + 36px)",
+            border: "none",
+            background: "#060606",
+            display: "block",
+          }}
+          title="Wraith Chart"
+          sandbox="allow-scripts allow-same-origin allow-popups"
+        />
+        {/* Cover DexScreener footer */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 36,
+            background: "#060606",
+            zIndex: 10,
+            borderTop: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            paddingLeft: 10,
+            gap: 6,
+          }}
+        >
+          <span
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              background: C.green,
+              display: "inline-block",
+              flexShrink: 0,
+            }}
+          />
+          <span
+            style={{
+              color: C.accent,
+              fontSize: 7,
+              fontWeight: 800,
+              letterSpacing: "0.16em",
+              ...MONO,
+            }}
+          >
+            ⚡ WRAITH
+          </span>
+          <span
+            style={{
+              color: C.dim,
+              fontSize: 7,
+              ...MONO,
+              letterSpacing: "0.08em",
+            }}
+          >
+            LIVE CHART · SOLANA
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TokenPanel({ selectedMeme }: Props) {
   const { publicKey, sendTransaction } = useWallet();
   const { connection } = useConnection();
@@ -289,10 +463,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
   );
   const [buyMsg, setBuyMsg] = useState("");
   const [activeTab, setActiveTab] = useState<
-    "overview" | "evidence" | "safety" | "buy"
+    "overview" | "evidence" | "safety" | "chart"
   >("overview");
   const [solBalance, setSolBalance] = useState<number | null>(null);
-  const [copiedTg, setCopiedTg] = useState(false);
   const [copiedCA, setCopiedCA] = useState(false);
 
   useEffect(() => {
@@ -313,11 +486,11 @@ export default function TokenPanel({ selectedMeme }: Props) {
       setLiveData(data);
       setLiveLoading(false);
     });
-    const interval = setInterval(() => {
+    const timer = setInterval(() => {
       if (selectedMeme?.contractAddress)
         fetchLiveTokenData(selectedMeme.contractAddress).then(setLiveData);
     }, 30000);
-    return () => clearInterval(interval);
+    return () => clearInterval(timer);
   }, [selectedMeme?.contractAddress]);
 
   const fetchEvidence = useCallback(async (meme: ScanResult) => {
@@ -406,15 +579,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
     }
   };
 
-  const copyTgCommand = () => {
-    if (!selectedMeme?.contractAddress) return;
-    navigator.clipboard.writeText(
-      `/buy ${selectedMeme.contractAddress} ${buyAmount}`,
-    );
-    setCopiedTg(true);
-    setTimeout(() => setCopiedTg(false), 2000);
-  };
-
   const copyCA = () => {
     if (!selectedMeme?.contractAddress) return;
     navigator.clipboard.writeText(selectedMeme.contractAddress);
@@ -485,14 +649,6 @@ export default function TokenPanel({ selectedMeme }: Props) {
     selectedMeme.onCeleb ||
     (selectedMeme.platforms || []).includes("celebrity");
 
-  const tabs = [
-    { key: "overview", label: "OVERVIEW" },
-    { key: "evidence", label: "EVIDENCE" },
-    { key: "safety", label: "SAFETY" },
-    { key: "buy", label: "BUY / CREATE" },
-  ] as const;
-
-  // Platform label colors — FIXED: readable
   const PLAT_COLOR: Record<string, string> = {
     celebrity: C.gold,
     ai: C.accent,
@@ -508,6 +664,13 @@ export default function TokenPanel({ selectedMeme }: Props) {
     hackernews: "#ff8833",
     telegram: "#36b5f4",
   };
+
+  const tabs = [
+    { key: "overview", label: "OVERVIEW" },
+    { key: "evidence", label: "EVIDENCE" },
+    { key: "safety", label: "SAFETY" },
+    { key: "chart", label: "CHART" },
+  ] as const;
 
   return (
     <div
@@ -683,9 +846,28 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   title="Live · refreshes 30s"
                 />
               )}
+              {selectedMeme.contractAddress && (
+                <button
+                  onClick={() => setActiveTab("chart")}
+                  style={{
+                    background:
+                      activeTab === "chart" ? "#1a0800" : "transparent",
+                    border: `1px solid ${activeTab === "chart" ? C.accent + "55" : C.border}`,
+                    color: activeTab === "chart" ? C.accent : C.dim,
+                    fontSize: 8,
+                    padding: "2px 7px",
+                    borderRadius: 2,
+                    cursor: "pointer",
+                    ...MONO,
+                    marginLeft: 4,
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  CHART
+                </button>
+              )}
             </div>
 
-            {/* Narrative context — NEW prominent display */}
             {selectedMeme.aiContext && (
               <NarrativeBadge
                 context={selectedMeme.aiContext}
@@ -784,464 +966,191 @@ export default function TokenPanel({ selectedMeme }: Props) {
       </div>
 
       {/* ── Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
-        {/* ════ OVERVIEW ════ */}
-        {activeTab === "overview" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {activeTab === "chart" ? (
+        <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
+          {selectedMeme.contractAddress ? (
+            <WraithChart contractAddress={selectedMeme.contractAddress} />
+          ) : (
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 8,
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                color: C.dim,
+                fontSize: 10,
+                ...MONO,
+                gap: 10,
               }}
             >
-              <StatCard
-                label="Market Cap"
-                value={fmtMcap(displayMcap)}
-                loading={liveLoading && !displayMcap}
-              />
-              <StatCard
-                label="Liquidity"
-                value={fmtMcap(displayLiquidity)}
-                color={
-                  !displayLiquidity
-                    ? C.dim
-                    : displayLiquidity >= 50000
-                      ? C.green
-                      : displayLiquidity >= 10000
-                        ? "#ffaa00"
-                        : "#ff4444"
-                }
-                loading={liveLoading && !displayLiquidity}
-                sub={
-                  displayLiquidity && displayLiquidity < 10000
-                    ? "⚠ Very low"
-                    : undefined
-                }
-              />
-              <StatCard
-                label="1H Change"
-                value={fmtPct(displayChange1h) || "—"}
-                color={(displayChange1h ?? 0) >= 0 ? C.green : C.red}
-                loading={liveLoading && displayChange1h === undefined}
-              />
-              <StatCard
-                label="24H Change"
-                value={fmtPct(displayChange24h) || "—"}
-                color={(displayChange24h ?? 0) >= 0 ? C.green : C.red}
-                loading={liveLoading && displayChange24h === undefined}
-              />
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 8,
-              }}
-            >
-              <StatCard label="Age" value={displayAge || "—"} />
-              <StatCard
-                label="24H Volume"
-                value={fmtMcap(displayVolume)}
-                color={displayVolume ? C.accent : undefined}
-              />
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 8,
-              }}
-            >
-              <StatCard
-                label="Price"
-                value={fmtPrice(displayPrice)}
-                color={displayPrice ? C.accent : undefined}
-              />
-              <StatCard
-                label="Sources"
-                value={`${selectedMeme.crossPlatforms ?? selectedMeme.platforms?.length ?? 1} platforms`}
-              />
-            </div>
-
-            {/* Contract address */}
-            {selectedMeme.contractAddress && (
               <div
                 style={{
-                  background: C.bg,
+                  width: 40,
+                  height: 40,
                   border: `1px solid ${C.border}`,
-                  borderRadius: 6,
-                  padding: "10px 12px",
-                }}
-              >
-                <div
-                  style={{
-                    color: C.label,
-                    fontSize: 8,
-                    ...MONO,
-                    letterSpacing: "0.14em",
-                    marginBottom: 6,
-                  }}
-                >
-                  CONTRACT ADDRESS
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                  }}
-                >
-                  <span
-                    style={{
-                      color: C.sub,
-                      fontSize: 9,
-                      ...MONO,
-                      wordBreak: "break-all" as const,
-                      flex: 1,
-                    }}
-                  >
-                    {selectedMeme.contractAddress}
-                  </span>
-                  <button
-                    onClick={copyCA}
-                    style={{
-                      background: copiedCA ? "#001a0a" : "#1a1a1a",
-                      border: `1px solid ${copiedCA ? "#00c47a33" : "#2a2a2a"}`,
-                      color: copiedCA ? C.green : C.sub,
-                      fontSize: 8,
-                      ...MONO,
-                      padding: "4px 10px",
-                      borderRadius: 3,
-                      cursor: "pointer",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {copiedCA ? "COPIED!" : "COPY"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Quick links */}
-            {selectedMeme.contractAddress && (
-              <div>
-                <div
-                  style={{
-                    color: C.label,
-                    fontSize: 8,
-                    ...MONO,
-                    letterSpacing: "0.12em",
-                    marginBottom: 8,
-                  }}
-                >
-                  QUICK LINKS
-                </div>
-                <div
-                  style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}
-                >
-                  {[
-                    {
-                      label: "DexScreener",
-                      url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
-                      color: C.blue,
-                    },
-                    {
-                      label: "Pump.fun",
-                      url: `https://pump.fun/${selectedMeme.contractAddress}`,
-                      color: C.purple,
-                    },
-                    {
-                      label: "Rugcheck",
-                      url: `https://rugcheck.xyz/tokens/${selectedMeme.contractAddress}`,
-                      color: C.green,
-                    },
-                    {
-                      label: "Solscan",
-                      url: `https://solscan.io/token/${selectedMeme.contractAddress}`,
-                      color: C.accent,
-                    },
-                  ].map(({ label, url, color }) => (
-                    <a
-                      key={label}
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ textDecoration: "none" }}
-                    >
-                      <div
-                        style={{
-                          background: "#0d0d0d",
-                          border: `1px solid ${color}33`,
-                          color,
-                          fontSize: 9,
-                          ...MONO,
-                          padding: "5px 10px",
-                          borderRadius: 3,
-                          cursor: "pointer",
-                        }}
-                      >
-                        ↗ {label}
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Platforms detected — FIXED readable colors */}
-            <div>
-              <div
-                style={{
+                  borderRadius: 4,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                   color: C.label,
-                  fontSize: 8,
-                  ...MONO,
-                  letterSpacing: "0.12em",
-                  marginBottom: 6,
+                  fontSize: 18,
                 }}
               >
-                DETECTED ON
+                ◈
               </div>
-              <div
-                style={{ display: "flex", flexWrap: "wrap" as const, gap: 5 }}
-              >
-                {(selectedMeme.platforms || []).map((plat) => {
-                  const col = PLAT_COLOR[plat] || C.sub;
-                  return (
-                    <span
-                      key={plat}
-                      style={{
-                        fontSize: 9,
-                        ...MONO,
-                        color: col,
-                        background: "#0d0d0d",
-                        border: `1px solid ${col}22`,
-                        padding: "3px 8px",
-                        borderRadius: 3,
-                      }}
-                    >
-                      {PLATFORM_ICON[plat] || "·"}{" "}
-                      {plat.toUpperCase().replace(/-/g, " ")}
-                    </span>
-                  );
-                })}
-              </div>
+              <span>NO CONTRACT ADDRESS</span>
+              <span style={{ fontSize: 8, color: C.label }}>
+                Chart available once token is deployed on-chain
+              </span>
             </div>
-
-            {/* AI Prediction */}
-            {evidence?.predictionReason && !evidence.loading && (
+          )}
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+          {/* ════ OVERVIEW ════ */}
+          {activeTab === "overview" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div
                 style={{
-                  background:
-                    prediction === "strong"
-                      ? "#001a0a"
-                      : prediction === "avoid"
-                        ? "#1a0000"
-                        : "#0d0d00",
-                  border: `1px solid ${PRED_COLOR[prediction!]}22`,
-                  borderRadius: 6,
-                  padding: "10px 12px",
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
                 }}
               >
+                <StatCard
+                  label="Market Cap"
+                  value={fmtMcap(displayMcap)}
+                  loading={liveLoading && !displayMcap}
+                />
+                <StatCard
+                  label="Liquidity"
+                  value={fmtMcap(displayLiquidity)}
+                  color={
+                    !displayLiquidity
+                      ? C.dim
+                      : displayLiquidity >= 50000
+                        ? C.green
+                        : displayLiquidity >= 10000
+                          ? "#ffaa00"
+                          : "#ff4444"
+                  }
+                  loading={liveLoading && !displayLiquidity}
+                  sub={
+                    displayLiquidity && displayLiquidity < 10000
+                      ? "⚠ Very low"
+                      : undefined
+                  }
+                />
+                <StatCard
+                  label="1H Change"
+                  value={fmtPct(displayChange1h) || "—"}
+                  color={(displayChange1h ?? 0) >= 0 ? C.green : C.red}
+                  loading={liveLoading && displayChange1h === undefined}
+                />
+                <StatCard
+                  label="24H Change"
+                  value={fmtPct(displayChange24h) || "—"}
+                  color={(displayChange24h ?? 0) >= 0 ? C.green : C.red}
+                  loading={liveLoading && displayChange24h === undefined}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                }}
+              >
+                <StatCard label="Age" value={displayAge || "—"} />
+                <StatCard
+                  label="24H Volume"
+                  value={fmtMcap(displayVolume)}
+                  color={displayVolume ? C.accent : undefined}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                }}
+              >
+                <StatCard
+                  label="Price"
+                  value={fmtPrice(displayPrice)}
+                  color={displayPrice ? C.accent : undefined}
+                />
+                <StatCard
+                  label="Sources"
+                  value={`${selectedMeme.crossPlatforms ?? selectedMeme.platforms?.length ?? 1} platforms`}
+                />
+              </div>
+
+              {/* Contract address */}
+              {selectedMeme.contractAddress && (
                 <div
                   style={{
-                    color: PRED_COLOR[prediction!],
-                    fontSize: 8,
-                    ...MONO,
-                    letterSpacing: "0.12em",
-                    marginBottom: 6,
+                    background: C.bg,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 6,
+                    padding: "10px 12px",
                   }}
                 >
-                  AI PREDICTION
-                </div>
-                <div
-                  style={{
-                    color: C.body,
-                    fontSize: 10,
-                    ...MONO,
-                    lineHeight: 1.7,
-                  }}
-                >
-                  {evidence.predictionReason}
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => setActiveTab("buy")}
-                style={{
-                  flex: 1,
-                  background: C.accent,
-                  border: "none",
-                  color: "#fff",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  ...MONO,
-                  padding: "11px",
-                  borderRadius: 5,
-                  cursor: "pointer",
-                  letterSpacing: "0.1em",
-                }}
-              >
-                BUY NOW
-              </button>
-              <a
-                href={
-                  selectedMeme.contractAddress
-                    ? `https://dexscreener.com/solana/${selectedMeme.contractAddress}`
-                    : `https://pump.fun/create`
-                }
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ textDecoration: "none", flex: 1 }}
-              >
-                <button
-                  style={{
-                    width: "100%",
-                    background: "transparent",
-                    border: `1px solid ${C.blue}44`,
-                    color: C.blue,
-                    fontSize: 10,
-                    ...MONO,
-                    padding: "11px",
-                    borderRadius: 5,
-                    cursor: "pointer",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  {selectedMeme.contractAddress
-                    ? "VIEW CHART ↗"
-                    : "CREATE ON PUMP.FUN"}
-                </button>
-              </a>
-            </div>
-          </div>
-        )}
-
-        {/* ════ EVIDENCE ════ */}
-        {activeTab === "evidence" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {evidence?.loading ? (
-              <div
-                style={{
-                  color: C.dim,
-                  fontSize: 10,
-                  ...MONO,
-                  padding: "24px 0",
-                  textAlign: "center",
-                }}
-              >
-                FETCHING VIRAL EVIDENCE...
-              </div>
-            ) : (
-              <>
-                {evidence?.aiAnalysis && (
                   <div
                     style={{
-                      background: "#050505",
-                      border: "1px solid #1a1a1a",
-                      borderRadius: 5,
-                      padding: "12px",
+                      color: C.label,
+                      fontSize: 8,
+                      ...MONO,
+                      letterSpacing: "0.14em",
+                      marginBottom: 6,
                     }}
                   >
-                    <div
+                    CONTRACT ADDRESS
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
+                  >
+                    <span
                       style={{
-                        color: C.accent,
+                        color: C.sub,
+                        fontSize: 9,
+                        ...MONO,
+                        wordBreak: "break-all" as const,
+                        flex: 1,
+                      }}
+                    >
+                      {selectedMeme.contractAddress}
+                    </span>
+                    <button
+                      onClick={copyCA}
+                      style={{
+                        background: copiedCA ? "#001a0a" : "#1a1a1a",
+                        border: `1px solid ${copiedCA ? "#00c47a33" : "#2a2a2a"}`,
+                        color: copiedCA ? C.green : C.sub,
                         fontSize: 8,
                         ...MONO,
-                        letterSpacing: "0.15em",
-                        marginBottom: 8,
+                        padding: "4px 10px",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                        flexShrink: 0,
                       }}
                     >
-                      ✦ AI ANALYSIS
-                    </div>
-                    <div
-                      style={{
-                        color: C.body,
-                        fontSize: 10,
-                        ...MONO,
-                        lineHeight: 1.8,
-                        whiteSpace: "pre-wrap" as const,
-                      }}
-                    >
-                      {evidence.aiAnalysis}
-                    </div>
+                      {copiedCA ? "COPIED!" : "COPY"}
+                    </button>
                   </div>
-                )}
+                </div>
+              )}
 
-                {selectedMeme.contractAddress && (
-                  <div>
-                    <div
-                      style={{
-                        color: C.label,
-                        fontSize: 8,
-                        ...MONO,
-                        letterSpacing: "0.12em",
-                        marginBottom: 8,
-                      }}
-                    >
-                      ON-CHAIN LINKS
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 7,
-                        flexWrap: "wrap" as const,
-                      }}
-                    >
-                      {[
-                        {
-                          label: "DexScreener",
-                          url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
-                          color: C.blue,
-                        },
-                        {
-                          label: "Pump.fun",
-                          url: `https://pump.fun/${selectedMeme.contractAddress}`,
-                          color: C.purple,
-                        },
-                        {
-                          label: "Rugcheck",
-                          url: `https://rugcheck.xyz/tokens/${selectedMeme.contractAddress}`,
-                          color: C.green,
-                        },
-                        {
-                          label: "Solscan",
-                          url: `https://solscan.io/token/${selectedMeme.contractAddress}`,
-                          color: C.accent,
-                        },
-                      ].map(({ label, url, color }) => (
-                        <a
-                          key={label}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ textDecoration: "none" }}
-                        >
-                          <div
-                            style={{
-                              background: "#0d0d0d",
-                              border: `1px solid ${color}33`,
-                              color,
-                              fontSize: 9,
-                              ...MONO,
-                              padding: "5px 10px",
-                              borderRadius: 3,
-                            }}
-                          >
-                            ↗ {label}
-                          </div>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
+              {/* Quick links */}
+              {selectedMeme.contractAddress && (
                 <div>
                   <div
                     style={{
@@ -1252,495 +1161,65 @@ export default function TokenPanel({ selectedMeme }: Props) {
                       marginBottom: 8,
                     }}
                   >
-                    VIRAL SOURCES & PROOF
+                    QUICK LINKS
                   </div>
-                  {(evidence?.links || []).length === 0 ? (
-                    <div
-                      style={{
-                        color: C.dim,
-                        fontSize: 10,
-                        ...MONO,
-                        padding: "16px 0",
-                      }}
-                    >
-                      No direct links found — trend may be too new
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column" as const,
-                        gap: 7,
-                      }}
-                    >
-                      {evidence!.links.map((link, i) => (
-                        <a
-                          key={i}
-                          href={link.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ textDecoration: "none", display: "block" }}
-                        >
-                          <div
-                            style={{
-                              background: C.bg,
-                              border: `1px solid ${C.border}`,
-                              borderRadius: 5,
-                              padding: "10px 12px",
-                              cursor: "pointer",
-                            }}
-                            onMouseEnter={(e) =>
-                              ((
-                                e.currentTarget as HTMLElement
-                              ).style.borderColor = "#e8490f44")
-                            }
-                            onMouseLeave={(e) =>
-                              ((
-                                e.currentTarget as HTMLElement
-                              ).style.borderColor = C.border)
-                            }
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                marginBottom: 4,
-                              }}
-                            >
-                              <span style={{ fontSize: 10 }}>
-                                {PLATFORM_ICON[link.platform] || "🔗"}
-                              </span>
-                              <span
-                                style={{
-                                  color: C.sub,
-                                  fontSize: 8,
-                                  ...MONO,
-                                  letterSpacing: "0.1em",
-                                  textTransform: "uppercase" as const,
-                                }}
-                              >
-                                {link.platform}
-                              </span>
-                              <span
-                                style={{
-                                  color: C.dim,
-                                  fontSize: 8,
-                                  ...MONO,
-                                  marginLeft: "auto",
-                                }}
-                              >
-                                ↗ OPEN
-                              </span>
-                            </div>
-                            <div
-                              style={{
-                                color: C.body,
-                                fontSize: 10,
-                                ...MONO,
-                                lineHeight: 1.5,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap" as const,
-                              }}
-                            >
-                              {link.title}
-                            </div>
-                          </div>
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ════ SAFETY ════ */}
-        {activeTab === "safety" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {evidence?.loading ? (
-              <div
-                style={{
-                  color: C.dim,
-                  fontSize: 10,
-                  ...MONO,
-                  padding: "24px 0",
-                  textAlign: "center",
-                }}
-              >
-                RUNNING SAFETY ANALYSIS...
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
                   <div
                     style={{
-                      width: 76,
-                      height: 76,
-                      borderRadius: "50%",
-                      border: `3px solid ${safetyColor}`,
                       display: "flex",
-                      flexDirection: "column" as const,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      boxShadow: `0 0 22px ${safetyColor}33`,
-                      flexShrink: 0,
+                      gap: 6,
+                      flexWrap: "wrap" as const,
                     }}
                   >
-                    <span
-                      style={{
-                        color: safetyColor,
-                        fontSize: 24,
-                        fontWeight: 900,
-                        ...MONO,
-                      }}
-                    >
-                      {safetyScore ?? "?"}
-                    </span>
-                    <span
-                      style={{
-                        color: safetyColor,
-                        fontSize: 7,
-                        ...MONO,
-                        opacity: 0.6,
-                      }}
-                    >
-                      /100
-                    </span>
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        color: safetyColor,
-                        fontSize: 14,
-                        fontWeight: 700,
-                        ...MONO,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {(safetyScore ?? 0) >= 70
-                        ? "✓ LOOKS SAFE"
-                        : (safetyScore ?? 0) >= 40
-                          ? "⚠ USE CAUTION"
-                          : "✗ HIGH RISK"}
-                    </div>
-                    <div
-                      style={{
-                        color: C.sub,
-                        fontSize: 9,
-                        ...MONO,
-                        lineHeight: 1.7,
-                      }}
-                    >
-                      Rug check:{" "}
-                      <span
-                        style={{
-                          color: RUG_COLOR[selectedMeme.rugRisk || "unknown"],
-                          fontWeight: 700,
-                        }}
+                    {[
+                      {
+                        label: "DexScreener",
+                        url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
+                        color: C.blue,
+                      },
+                      {
+                        label: "Pump.fun",
+                        url: `https://pump.fun/${selectedMeme.contractAddress}`,
+                        color: C.purple,
+                      },
+                      {
+                        label: "Rugcheck",
+                        url: `https://rugcheck.xyz/tokens/${selectedMeme.contractAddress}`,
+                        color: C.green,
+                      },
+                      {
+                        label: "Solscan",
+                        url: `https://solscan.io/token/${selectedMeme.contractAddress}`,
+                        color: C.accent,
+                      },
+                    ].map(({ label, url, color }) => (
+                      <a
+                        key={label}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ textDecoration: "none" }}
                       >
-                        {(selectedMeme.rugRisk || "unknown").toUpperCase()}
-                      </span>
-                      {selectedMeme.rugDetails && (
-                        <span style={{ color: C.dim }}>
-                          {" "}
-                          — {selectedMeme.rugDetails}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column" as const,
-                    gap: 6,
-                  }}
-                >
-                  {(
-                    evidence?.safetyBreakdown ||
-                    defaultSafetyBreakdown(selectedMeme)
-                  ).map((item, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 10,
-                        background: C.bg,
-                        border: `1px solid ${item.pass ? "#00c47a11" : "#ff222211"}`,
-                        borderRadius: 5,
-                        padding: "9px 11px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: item.pass ? C.green : "#ff2222",
-                          fontSize: 13,
-                          flexShrink: 0,
-                          marginTop: -1,
-                        }}
-                      >
-                        {item.pass ? "✓" : "✗"}
-                      </span>
-                      <div>
                         <div
                           style={{
-                            color: item.pass ? C.green : "#ff4444",
+                            background: "#0d0d0d",
+                            border: `1px solid ${color}33`,
+                            color,
                             fontSize: 9,
                             ...MONO,
-                            fontWeight: 700,
-                            marginBottom: 3,
+                            padding: "5px 10px",
+                            borderRadius: 3,
+                            cursor: "pointer",
                           }}
                         >
-                          {item.label}
+                          ↗ {label}
                         </div>
-                        {/* FIXED: detail text is now readable #888 not #555 */}
-                        <div
-                          style={{
-                            color: C.sub,
-                            fontSize: 9,
-                            ...MONO,
-                            lineHeight: 1.6,
-                          }}
-                        >
-                          {item.detail}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {selectedMeme.rugRisk === "high" && (
-                  <div
-                    style={{
-                      background: "#1a0000",
-                      border: "1px solid #ff222233",
-                      borderRadius: 5,
-                      padding: "10px 12px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        color: "#ff2222",
-                        fontSize: 10,
-                        ...MONO,
-                        fontWeight: 700,
-                        marginBottom: 4,
-                      }}
-                    >
-                      ⚠ DO NOT BUY
-                    </div>
-                    <div
-                      style={{
-                        color: "#cc6666",
-                        fontSize: 9,
-                        ...MONO,
-                        lineHeight: 1.7,
-                      }}
-                    >
-                      This token has been flagged as high risk by Rugcheck. Mint
-                      authority or freeze authority may still be active.
-                    </div>
+                      </a>
+                    ))}
                   </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ════ BUY / CREATE ════ */}
-        {activeTab === "buy" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {!publicKey ? (
-              <div
-                style={{
-                  background: "#0d0d0d",
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 5,
-                  padding: "16px",
-                  textAlign: "center" as const,
-                }}
-              >
-                <div
-                  style={{
-                    color: C.sub,
-                    fontSize: 10,
-                    ...MONO,
-                    marginBottom: 4,
-                  }}
-                >
-                  CONNECT WALLET TO BUY
                 </div>
-                <div style={{ color: C.dim, fontSize: 9, ...MONO }}>
-                  Use the wallet button in the header
-                </div>
-              </div>
-            ) : (
-              <div
-                style={{
-                  background: "#050505",
-                  border: `1px solid #111`,
-                  borderRadius: 5,
-                  padding: "8px 12px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span style={{ color: C.sub, fontSize: 9, ...MONO }}>
-                  BALANCE
-                </span>
-                <span
-                  style={{
-                    color: C.accent,
-                    fontSize: 14,
-                    fontWeight: 700,
-                    ...MONO,
-                  }}
-                >
-                  {solBalance?.toFixed(4) ?? "—"} SOL
-                </span>
-              </div>
-            )}
+              )}
 
-            <div>
-              <div
-                style={{
-                  color: C.label,
-                  fontSize: 8,
-                  ...MONO,
-                  letterSpacing: "0.12em",
-                  marginBottom: 6,
-                }}
-              >
-                AMOUNT TO BUY (SOL)
-              </div>
-              <div style={{ display: "flex", gap: 5 }}>
-                {["0.05", "0.1", "0.25", "0.5", "1"].map((amt) => (
-                  <button
-                    key={amt}
-                    onClick={() => setBuyAmount(amt)}
-                    style={{
-                      flex: 1,
-                      background: buyAmount === amt ? "#1a0800" : "#0d0d0d",
-                      border: `1px solid ${buyAmount === amt ? "#e8490f66" : "#1a1a1a"}`,
-                      color: buyAmount === amt ? C.accent : C.sub,
-                      fontSize: 9,
-                      ...MONO,
-                      padding: "6px 0",
-                      borderRadius: 3,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {amt}
-                  </button>
-                ))}
-              </div>
-              {/* // 1. Change type="number" to type="text" and add inputMode for
-              mobile numeric keyboard */}
-              <input
-                type="text"
-                inputMode="decimal"
-                value={buyAmount}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (/^\d*\.?\d*$/.test(val)) setBuyAmount(val);
-                }}
-                style={
-                  {
-                    width: "100%",
-                    marginTop: 6,
-                    background: C.bg,
-                    border: `1px solid ${C.border}`,
-                    color: "#e0e0e0",
-                    fontSize: 12,
-                    ...MONO,
-                    padding: "8px 10px",
-                    borderRadius: 4,
-                    outline: "none",
-                    boxSizing: "border-box" as const,
-                    // remove spinners just in case
-                    MozAppearance: "textfield",
-                  } as React.CSSProperties
-                }
-                placeholder="Custom amount..."
-              />
-            </div>
-
-            {selectedMeme.rugRisk === "high" && (
-              <div
-                style={{
-                  background: "#1a0000",
-                  border: "1px solid #ff222244",
-                  borderRadius: 4,
-                  padding: "8px 12px",
-                }}
-              >
-                <div style={{ color: "#ff2222", fontSize: 9, ...MONO }}>
-                  ⚠ HIGH RUG RISK — Buying not recommended
-                </div>
-              </div>
-            )}
-            {selectedMeme.rugRisk === "medium" && (
-              <div
-                style={{
-                  background: "#1a1000",
-                  border: "1px solid #ffaa0044",
-                  borderRadius: 4,
-                  padding: "8px 12px",
-                }}
-              >
-                <div style={{ color: "#ffaa00", fontSize: 9, ...MONO }}>
-                  ⚠ MEDIUM RISK — Proceed with caution
-                </div>
-              </div>
-            )}
-
-            {selectedMeme.contractAddress ? (
-              <button
-                onClick={handleBuy}
-                disabled={
-                  buying || !publicKey || selectedMeme.rugRisk === "high"
-                }
-                style={{
-                  background: buying
-                    ? "#111"
-                    : selectedMeme.rugRisk === "high"
-                      ? "#1a0000"
-                      : C.accent,
-                  border:
-                    selectedMeme.rugRisk === "high"
-                      ? "1px solid #ff222233"
-                      : "none",
-                  color: buying
-                    ? C.dim
-                    : selectedMeme.rugRisk === "high"
-                      ? "#ff2222"
-                      : "#fff",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  ...MONO,
-                  padding: "13px",
-                  borderRadius: 5,
-                  cursor:
-                    buying || !publicKey || selectedMeme.rugRisk === "high"
-                      ? "not-allowed"
-                      : "pointer",
-                  letterSpacing: "0.1em",
-                  width: "100%",
-                }}
-              >
-                {buying
-                  ? "SWAPPING VIA JUPITER..."
-                  : selectedMeme.rugRisk === "high"
-                    ? "BUY BLOCKED — RUG RISK"
-                    : `BUY $${selectedMeme.keyword.toUpperCase()} · ${buyAmount} SOL`}
-              </button>
-            ) : (
+              {/* Platforms detected */}
               <div>
                 <div
                   style={{
@@ -1751,178 +1230,555 @@ export default function TokenPanel({ selectedMeme }: Props) {
                     marginBottom: 6,
                   }}
                 >
-                  NO CONTRACT YET — LAUNCH IT
+                  DETECTED ON
                 </div>
+                <div
+                  style={{ display: "flex", flexWrap: "wrap" as const, gap: 5 }}
+                >
+                  {(selectedMeme.platforms || []).map((plat) => {
+                    const col = PLAT_COLOR[plat] || C.sub;
+                    return (
+                      <span
+                        key={plat}
+                        style={{
+                          fontSize: 9,
+                          ...MONO,
+                          color: col,
+                          background: "#0d0d0d",
+                          border: `1px solid ${col}22`,
+                          padding: "3px 8px",
+                          borderRadius: 3,
+                        }}
+                      >
+                        {PLATFORM_ICON[plat] || "·"}{" "}
+                        {plat.toUpperCase().replace(/-/g, " ")}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* AI Prediction */}
+              {evidence?.predictionReason && !evidence.loading && (
+                <div
+                  style={{
+                    background:
+                      prediction === "strong"
+                        ? "#001a0a"
+                        : prediction === "avoid"
+                          ? "#1a0000"
+                          : "#0d0d00",
+                    border: `1px solid ${PRED_COLOR[prediction!]}22`,
+                    borderRadius: 6,
+                    padding: "10px 12px",
+                  }}
+                >
+                  <div
+                    style={{
+                      color: PRED_COLOR[prediction!],
+                      fontSize: 8,
+                      ...MONO,
+                      letterSpacing: "0.12em",
+                      marginBottom: 6,
+                    }}
+                  >
+                    AI PREDICTION
+                  </div>
+                  <div
+                    style={{
+                      color: C.body,
+                      fontSize: 10,
+                      ...MONO,
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    {evidence.predictionReason}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setActiveTab("chart")}
+                  style={{
+                    flex: 1,
+                    background: C.accent,
+                    border: "none",
+                    color: "#fff",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    ...MONO,
+                    padding: "11px",
+                    borderRadius: 5,
+                    cursor: "pointer",
+                    letterSpacing: "0.1em",
+                  }}
+                >
+                  VIEW CHART ↗
+                </button>
                 <a
-                  href="https://pump.fun/create"
+                  href={
+                    selectedMeme.contractAddress
+                      ? `https://dexscreener.com/solana/${selectedMeme.contractAddress}`
+                      : `https://pump.fun/create`
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ textDecoration: "none", display: "block" }}
+                  style={{ textDecoration: "none", flex: 1 }}
                 >
                   <button
                     style={{
-                      background: "#0f0018",
-                      border: `1px solid ${C.purple}44`,
-                      color: C.purple,
-                      fontSize: 11,
-                      fontWeight: 700,
+                      width: "100%",
+                      background: "transparent",
+                      border: `1px solid ${C.blue}44`,
+                      color: C.blue,
+                      fontSize: 10,
                       ...MONO,
-                      padding: "13px",
+                      padding: "11px",
                       borderRadius: 5,
                       cursor: "pointer",
-                      letterSpacing: "0.1em",
-                      width: "100%",
+                      letterSpacing: "0.08em",
                     }}
                   >
-                    ⚡ CREATE ${selectedMeme.keyword.toUpperCase()} ON PUMP.FUN
+                    {selectedMeme.contractAddress ? "DEX ↗" : "PUMP.FUN ↗"}
                   </button>
                 </a>
               </div>
-            )}
+            </div>
+          )}
 
-            {buyMsg && (
-              <div
-                style={{
-                  background: buyStatus === "success" ? "#001a0a" : "#1a0000",
-                  border: `1px solid ${buyStatus === "success" ? "#00c47a33" : "#ff222233"}`,
-                  borderRadius: 4,
-                  padding: "8px 12px",
-                }}
-              >
+          {/* ════ EVIDENCE ════ */}
+          {activeTab === "evidence" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {evidence?.loading ? (
                 <div
                   style={{
-                    color: buyStatus === "success" ? C.green : "#ff4444",
-                    fontSize: 9,
+                    color: C.dim,
+                    fontSize: 10,
                     ...MONO,
+                    padding: "24px 0",
+                    textAlign: "center",
                   }}
                 >
-                  {buyMsg}
+                  FETCHING VIRAL EVIDENCE...
                 </div>
-              </div>
-            )}
-
-            {/* DEX terminals */}
-            {selectedMeme.contractAddress && (
-              <div>
-                <div
-                  style={{
-                    color: C.label,
-                    fontSize: 8,
-                    ...MONO,
-                    letterSpacing: "0.12em",
-                    marginBottom: 8,
-                  }}
-                >
-                  OPEN IN TRADING TERMINAL
-                </div>
-                <div
-                  style={{ display: "flex", gap: 7, flexWrap: "wrap" as const }}
-                >
-                  {[
-                    {
-                      label: "BullX",
-                      url: `https://bullx.io/terminal?chainId=1399811149&address=${selectedMeme.contractAddress}`,
-                      color: C.accent,
-                    },
-                    {
-                      label: "Photon",
-                      url: `https://photon-sol.tinyastro.io/en/lp/${selectedMeme.contractAddress}`,
-                      color: "#ffaa00",
-                    },
-                    {
-                      label: "Axiom",
-                      url: `https://axiom.trade/t/${selectedMeme.contractAddress}`,
-                      color: C.green,
-                    },
-                    {
-                      label: "DexScreener",
-                      url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
-                      color: C.blue,
-                    },
-                  ].map(({ label, url, color }) => (
-                    <a
-                      key={label}
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ textDecoration: "none" }}
+              ) : (
+                <>
+                  {evidence?.aiAnalysis && (
+                    <div
+                      style={{
+                        background: "#050505",
+                        border: "1px solid #1a1a1a",
+                        borderRadius: 5,
+                        padding: "12px",
+                      }}
                     >
                       <div
                         style={{
-                          background: "#0d0d0d",
-                          border: `1px solid ${color}33`,
-                          color,
-                          fontSize: 9,
+                          color: C.accent,
+                          fontSize: 8,
                           ...MONO,
-                          padding: "6px 11px",
-                          borderRadius: 3,
-                          cursor: "pointer",
+                          letterSpacing: "0.15em",
+                          marginBottom: 8,
                         }}
                       >
-                        ↗ {label}
+                        ✦ AI ANALYSIS
                       </div>
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
+                      <div
+                        style={{
+                          color: C.body,
+                          fontSize: 10,
+                          ...MONO,
+                          lineHeight: 1.8,
+                          whiteSpace: "pre-wrap" as const,
+                        }}
+                      >
+                        {evidence.aiAnalysis}
+                      </div>
+                    </div>
+                  )}
 
-            <div style={{ borderTop: `1px solid #111`, paddingTop: 14 }}>
-              <div
-                style={{
-                  color: C.label,
-                  fontSize: 8,
-                  ...MONO,
-                  letterSpacing: "0.12em",
-                  marginBottom: 8,
-                }}
-              >
-                TELEGRAM BOT COMMAND
-              </div>
-              <div
-                style={{
-                  background: C.bg,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 4,
-                  padding: "8px 12px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                }}
-              >
-                <span style={{ color: C.sub, fontSize: 10, ...MONO }}>
-                  /buy{" "}
-                  {selectedMeme.contractAddress
-                    ? `${selectedMeme.contractAddress.slice(0, 8)}...`
-                    : "<no CA yet>"}{" "}
-                  {buyAmount}
-                </span>
-                <button
-                  onClick={copyTgCommand}
-                  disabled={!selectedMeme.contractAddress}
+                  {selectedMeme.contractAddress && (
+                    <div>
+                      <div
+                        style={{
+                          color: C.label,
+                          fontSize: 8,
+                          ...MONO,
+                          letterSpacing: "0.12em",
+                          marginBottom: 8,
+                        }}
+                      >
+                        ON-CHAIN LINKS
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 7,
+                          flexWrap: "wrap" as const,
+                        }}
+                      >
+                        {[
+                          {
+                            label: "DexScreener",
+                            url: `https://dexscreener.com/solana/${selectedMeme.contractAddress}`,
+                            color: C.blue,
+                          },
+                          {
+                            label: "Pump.fun",
+                            url: `https://pump.fun/${selectedMeme.contractAddress}`,
+                            color: C.purple,
+                          },
+                          {
+                            label: "Rugcheck",
+                            url: `https://rugcheck.xyz/tokens/${selectedMeme.contractAddress}`,
+                            color: C.green,
+                          },
+                          {
+                            label: "Solscan",
+                            url: `https://solscan.io/token/${selectedMeme.contractAddress}`,
+                            color: C.accent,
+                          },
+                        ].map(({ label, url, color }) => (
+                          <a
+                            key={label}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ textDecoration: "none" }}
+                          >
+                            <div
+                              style={{
+                                background: "#0d0d0d",
+                                border: `1px solid ${color}33`,
+                                color,
+                                fontSize: 9,
+                                ...MONO,
+                                padding: "5px 10px",
+                                borderRadius: 3,
+                              }}
+                            >
+                              ↗ {label}
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <div
+                      style={{
+                        color: C.label,
+                        fontSize: 8,
+                        ...MONO,
+                        letterSpacing: "0.12em",
+                        marginBottom: 8,
+                      }}
+                    >
+                      VIRAL SOURCES & PROOF
+                    </div>
+                    {(evidence?.links || []).length === 0 ? (
+                      <div
+                        style={{
+                          color: C.dim,
+                          fontSize: 10,
+                          ...MONO,
+                          padding: "16px 0",
+                        }}
+                      >
+                        No direct links found — trend may be too new
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column" as const,
+                          gap: 7,
+                        }}
+                      >
+                        {evidence!.links.map((link, i) => (
+                          <a
+                            key={i}
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ textDecoration: "none", display: "block" }}
+                          >
+                            <div
+                              style={{
+                                background: C.bg,
+                                border: `1px solid ${C.border}`,
+                                borderRadius: 5,
+                                padding: "10px 12px",
+                                cursor: "pointer",
+                              }}
+                              onMouseEnter={(e) =>
+                                ((
+                                  e.currentTarget as HTMLElement
+                                ).style.borderColor = "#e8490f44")
+                              }
+                              onMouseLeave={(e) =>
+                                ((
+                                  e.currentTarget as HTMLElement
+                                ).style.borderColor = C.border)
+                              }
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  marginBottom: 4,
+                                }}
+                              >
+                                <span style={{ fontSize: 10 }}>
+                                  {PLATFORM_ICON[link.platform] || "🔗"}
+                                </span>
+                                <span
+                                  style={{
+                                    color: C.sub,
+                                    fontSize: 8,
+                                    ...MONO,
+                                    letterSpacing: "0.1em",
+                                    textTransform: "uppercase" as const,
+                                  }}
+                                >
+                                  {link.platform}
+                                </span>
+                                <span
+                                  style={{
+                                    color: C.dim,
+                                    fontSize: 8,
+                                    ...MONO,
+                                    marginLeft: "auto",
+                                  }}
+                                >
+                                  ↗ OPEN
+                                </span>
+                              </div>
+                              <div
+                                style={{
+                                  color: C.body,
+                                  fontSize: 10,
+                                  ...MONO,
+                                  lineHeight: 1.5,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap" as const,
+                                }}
+                              >
+                                {link.title}
+                              </div>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ════ SAFETY ════ */}
+          {activeTab === "safety" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {evidence?.loading ? (
+                <div
                   style={{
-                    background: copiedTg ? "#001a0a" : "#111",
-                    border: `1px solid ${copiedTg ? "#00c47a33" : "#222"}`,
-                    color: copiedTg ? C.green : C.sub,
-                    fontSize: 8,
+                    color: C.dim,
+                    fontSize: 10,
                     ...MONO,
-                    padding: "4px 10px",
-                    borderRadius: 3,
-                    cursor: "pointer",
-                    flexShrink: 0,
+                    padding: "24px 0",
+                    textAlign: "center",
                   }}
                 >
-                  {copiedTg ? "COPIED!" : "COPY"}
-                </button>
-              </div>
-              <div style={{ color: C.dim, fontSize: 8, ...MONO, marginTop: 4 }}>
-                Paste into Trojan / Bonk Bot / BullX
-              </div>
+                  RUNNING SAFETY ANALYSIS...
+                </div>
+              ) : (
+                <>
+                  <div
+                    style={{ display: "flex", gap: 16, alignItems: "center" }}
+                  >
+                    <div
+                      style={{
+                        width: 76,
+                        height: 76,
+                        borderRadius: "50%",
+                        border: `3px solid ${safetyColor}`,
+                        display: "flex",
+                        flexDirection: "column" as const,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: `0 0 22px ${safetyColor}33`,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: safetyColor,
+                          fontSize: 24,
+                          fontWeight: 900,
+                          ...MONO,
+                        }}
+                      >
+                        {safetyScore ?? "?"}
+                      </span>
+                      <span
+                        style={{
+                          color: safetyColor,
+                          fontSize: 7,
+                          ...MONO,
+                          opacity: 0.6,
+                        }}
+                      >
+                        /100
+                      </span>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          color: safetyColor,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          ...MONO,
+                          marginBottom: 6,
+                        }}
+                      >
+                        {(safetyScore ?? 0) >= 70
+                          ? "✓ LOOKS SAFE"
+                          : (safetyScore ?? 0) >= 40
+                            ? "⚠ USE CAUTION"
+                            : "✗ HIGH RISK"}
+                      </div>
+                      <div
+                        style={{
+                          color: C.sub,
+                          fontSize: 9,
+                          ...MONO,
+                          lineHeight: 1.7,
+                        }}
+                      >
+                        Rug check:{" "}
+                        <span
+                          style={{
+                            color: RUG_COLOR[selectedMeme.rugRisk || "unknown"],
+                            fontWeight: 700,
+                          }}
+                        >
+                          {(selectedMeme.rugRisk || "unknown").toUpperCase()}
+                        </span>
+                        {selectedMeme.rugDetails && (
+                          <span style={{ color: C.dim }}>
+                            {" "}
+                            — {selectedMeme.rugDetails}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column" as const,
+                      gap: 6,
+                    }}
+                  >
+                    {(
+                      evidence?.safetyBreakdown ||
+                      defaultSafetyBreakdown(selectedMeme)
+                    ).map((item, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 10,
+                          background: C.bg,
+                          border: `1px solid ${item.pass ? "#00c47a11" : "#ff222211"}`,
+                          borderRadius: 5,
+                          padding: "9px 11px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: item.pass ? C.green : "#ff2222",
+                            fontSize: 13,
+                            flexShrink: 0,
+                            marginTop: -1,
+                          }}
+                        >
+                          {item.pass ? "✓" : "✗"}
+                        </span>
+                        <div>
+                          <div
+                            style={{
+                              color: item.pass ? C.green : "#ff4444",
+                              fontSize: 9,
+                              ...MONO,
+                              fontWeight: 700,
+                              marginBottom: 3,
+                            }}
+                          >
+                            {item.label}
+                          </div>
+                          <div
+                            style={{
+                              color: C.sub,
+                              fontSize: 9,
+                              ...MONO,
+                              lineHeight: 1.6,
+                            }}
+                          >
+                            {item.detail}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selectedMeme.rugRisk === "high" && (
+                    <div
+                      style={{
+                        background: "#1a0000",
+                        border: "1px solid #ff222233",
+                        borderRadius: 5,
+                        padding: "10px 12px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: "#ff2222",
+                          fontSize: 10,
+                          ...MONO,
+                          fontWeight: 700,
+                          marginBottom: 4,
+                        }}
+                      >
+                        ⚠ DO NOT BUY
+                      </div>
+                      <div
+                        style={{
+                          color: "#cc6666",
+                          fontSize: 9,
+                          ...MONO,
+                          lineHeight: 1.7,
+                        }}
+                      >
+                        This token has been flagged as high risk by Rugcheck.
+                        Mint authority or freeze authority may still be active.
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

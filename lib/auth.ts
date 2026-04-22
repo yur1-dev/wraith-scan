@@ -1,7 +1,13 @@
 import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
-import { MongoDBAdapter } from "@auth/mongodb-adapter";
+import { MongoDBAdapter } from "@next-auth/mongodb-adapter";
 import clientPromise from "@/lib/mongoClient";
+
+// ─── ALLOWLIST ────────────────────────────────────────────────────────────────
+// Only these emails can sign in. Add more as needed.
+const ALLOWED_EMAILS = [
+  "yuriesb01@gmail.com", // ← replace with your actual Gmail
+];
 
 // ─── TYPE AUGMENTATION ────────────────────────────────────────────────────────
 declare module "next-auth" {
@@ -32,15 +38,18 @@ export const authOptions: NextAuthOptions = {
   ],
   session: {
     strategy: "jwt",
-    // 7-day sessions — short enough to limit exposure if a token is stolen,
-    // long enough not to annoy active users.
-    maxAge: 7 * 24 * 60 * 60,
-    // Roll the session on every request so active users never get logged out.
-    updateAge: 24 * 60 * 60,
+    maxAge: 24 * 60 * 60,
+    updateAge: 30 * 60,
   },
   callbacks: {
+    async signIn({ user }) {
+      // Block anyone not on the allowlist — they'll see NextAuth's Access Denied page
+      if (!user.email || !ALLOWED_EMAILS.includes(user.email)) {
+        return false;
+      }
+      return true;
+    },
     async jwt({ token, user }) {
-      // Only set on first sign-in when `user` is populated
       if (user) token.userId = user.id;
       return token;
     },
@@ -51,5 +60,6 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: "/login",
+    error: "/login", // sends error param back to your login page instead of NextAuth's ugly default
   },
 };

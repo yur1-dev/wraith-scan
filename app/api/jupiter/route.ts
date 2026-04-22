@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { jupiterLimiter } from "@/lib/ratelimit";
+import { jupiterLimiter, checkLimit } from "@/lib/ratelimit"; // ✅
 
 const JUP_BASE = "https://api.jup.ag/swap/v1";
 const TIMEOUT_MS = 30000;
@@ -17,6 +17,20 @@ const QUOTE_ALLOWED_PARAMS = new Set([
   "swapMode",
   "onlyDirectRoutes",
   "asLegacyTransaction",
+]);
+
+// ✅ Allowlist of top-level fields accepted in POST swap body
+const SWAP_ALLOWED_FIELDS = new Set([
+  "quoteResponse",
+  "userPublicKey",
+  "wrapAndUnwrapSol",
+  "computeUnitPriceMicroLamports",
+  "asLegacyTransaction",
+  "useSharedAccounts",
+  "feeAccount",
+  "trackingAccount",
+  "prioritizationFeeLamports",
+  "dynamicComputeUnitLimit",
 ]);
 
 async function fetchWithTimeout(url: string, options: RequestInit, ms: number) {
@@ -35,7 +49,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { success } = await jupiterLimiter.limit(session.user.id);
+  // ✅ Redis outage safe
+  const { success } = await checkLimit(jupiterLimiter, session.user.id);
   if (!success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }
@@ -99,14 +114,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { success } = await jupiterLimiter.limit(session.user.id);
-  if (!success) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
-  }
-
   const contentLength = parseInt(req.headers.get("content-length") ?? "0");
   if (contentLength > MAX_BODY_BYTES) {
     return NextResponse.json({ error: "Request too large" }, { status: 413 });
+  }
+
+  // ✅ Redis outage safe
+  const { success } = await checkLimit(jupiterLimiter, session.user.id);
+  if (!success) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -116,7 +132,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 });
   }
 
-  const body = await req.json();
+  let rawBody: Record<string, unknown>;
+  try {
+    rawBody = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // ✅ Strip unknown fields — only allowlisted swap fields reach Jupiter
+  const filteredBody: Record<string, unknown> = {};
+  for (const key of SWAP_ALLOWED_FIELDS) {
+    if (key in rawBody) filteredBody[key] = rawBody[key];
+  }
+
+  // userPublicKey must be a valid base58 Solana address
+  if (
+    typeof filteredBody.userPublicKey !== "string" ||
+    !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(filteredBody.userPublicKey)
+  ) {
+    return NextResponse.json(
+      { error: "Invalid userPublicKey" },
+      { status: 400 },
+    );
+  }
+
   const upstreamUrl = `${JUP_BASE}/${endpoint}`;
 
   try {
@@ -129,7 +168,7 @@ export async function POST(req: NextRequest) {
           Accept: "application/json",
           "x-api-key": process.env.JUPITER_API_KEY ?? "",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(filteredBody),
       },
       TIMEOUT_MS,
     );

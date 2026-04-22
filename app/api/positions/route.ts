@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getDb } from "@/lib/mongoClient";
-import { positionLimiter } from "@/lib/ratelimit";
+import { positionLimiter, checkLimit } from "@/lib/ratelimit";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const MAX_BODY_BYTES = 50_000; // 50KB hard cap
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Request too large" }, { status: 413 });
   }
 
-  const { success } = await positionLimiter.limit(session.user.id);
+  const { success } = await checkLimit(positionLimiter, session.user.id);
   if (!success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }

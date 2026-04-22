@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { scanLimiter } from "@/lib/ratelimit";
+import { scanLimiter, checkLimit } from "@/lib/ratelimit";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WRAITH SCANNER v24 — HARDENED
@@ -3123,7 +3123,11 @@ export async function GET() {
   }
 
   // ── RATE LIMIT ───────────────────────────────────────────────────────────────
-  const { success: rateLimitOk } = await scanLimiter.limit(session.user.id);
+  const { success: rateLimitOk } = await checkLimit(
+    scanLimiter,
+    session.user.id,
+    false,
+  );
   if (!rateLimitOk) {
     return NextResponse.json(
       { error: "Too many scans. Wait a few minutes." },

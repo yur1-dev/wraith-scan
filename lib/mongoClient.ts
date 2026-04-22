@@ -13,32 +13,18 @@ if (!MONGODB_URI) {
 
 // ─── CONNECTION OPTIONS ───────────────────────────────────────────────────────
 const MONGO_OPTIONS = {
-  // Keep alive — prevents connection drops on serverless cold starts
   serverSelectionTimeoutMS: 10_000,
   socketTimeoutMS: 30_000,
-  // Connection pool — serverless functions share at most 10 connections
   maxPoolSize: 10,
   minPoolSize: 1,
 };
 
 // ─── CLIENT SINGLETON ─────────────────────────────────────────────────────────
-// In both development and production we cache the client on the global object.
-//
-// Development: Next.js hot-reloads modules on every file save, which would
-// create a new MongoClient on every reload and exhaust the connection pool
-// within minutes. The global cache survives hot-reloads.
-//
-// Production (serverless): Each worker process evaluates modules once per
-// cold start. Without the global cache, concurrent invocations that happen
-// to cold-start at the same time each create their own client. With the
-// global cache, the first invocation wins and all subsequent ones in the
-// same process reuse it.
-//
-// Either way: one MongoClient per Node.js process, never more.
-
 declare global {
   // eslint-disable-next-line no-var
   var _mongoClientPromise: Promise<MongoClient> | undefined;
+  // eslint-disable-next-line no-var
+  var _mongoIndexesEnsured: boolean | undefined;
 }
 
 let clientPromise: Promise<MongoClient>;
@@ -53,9 +39,57 @@ clientPromise = global._mongoClientPromise;
 export default clientPromise;
 
 // ─── DB HELPER ────────────────────────────────────────────────────────────────
-// Always targets the named "wraith" database (or MONGODB_DB env override).
-// Never falls back to the connection string default or "test".
 export async function getDb(): Promise<Db> {
   const client = await clientPromise;
   return client.db(MONGODB_DB);
 }
+
+// ─── INDEX BOOTSTRAP ──────────────────────────────────────────────────────────
+// Called once per process. Safe to call multiple times — createIndex is idempotent.
+// Runs in the background so it never blocks the first request.
+export async function ensureIndexes(): Promise<void> {
+  if (global._mongoIndexesEnsured) return;
+  global._mongoIndexesEnsured = true;
+
+  try {
+    const db = await getDb();
+
+    // ── users (managed by NextAuth adapter) ───────────────────────────────────
+    // NextAuth creates its own indexes, but these cover our app-level queries.
+    await db
+      .collection("users")
+      .createIndex({ email: 1 }, { unique: true, sparse: true });
+
+    // ── sessions (NextAuth) ───────────────────────────────────────────────────
+    await db.collection("sessions").createIndex({ userId: 1 });
+    await db.collection("sessions").createIndex(
+      { expires: 1 },
+      { expireAfterSeconds: 0 }, // MongoDB TTL — auto-deletes expired sessions
+    );
+
+    // ── positions ─────────────────────────────────────────────────────────────
+    // Primary query: all positions for a user, sorted by open time
+    await db.collection("positions").createIndex({ userId: 1, openedAt: -1 });
+    // Uniqueness: one position record per user+token combo (if your logic enforces this)
+    await db.collection("positions").createIndex(
+      { userId: 1, tokenMint: 1 },
+      { unique: false }, // set true if you enforce one-position-per-token
+    );
+
+    // ── trades ────────────────────────────────────────────────────────────────
+    // Primary query: all trades for a user, newest first
+    await db.collection("trades").createIndex({ userId: 1, timestamp: -1 });
+    // Filter by token within a user's trade history
+    await db
+      .collection("trades")
+      .createIndex({ userId: 1, tokenMint: 1, timestamp: -1 });
+
+    console.log("[mongoClient] Indexes ensured");
+  } catch (err) {
+    // Non-fatal — app still works, just potentially slower queries
+    console.error("[mongoClient] Failed to ensure indexes:", err);
+  }
+}
+
+// Auto-run on module load (non-blocking — errors are caught above)
+ensureIndexes();

@@ -1,46 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-// Routes that are publicly accessible without a session
 const PUBLIC_PATHS = new Set(["/login"]);
-
-// API routes that handle their own auth (NextAuth internals)
 const PUBLIC_API_PREFIXES = ["/api/auth/"];
+const ALLOWED_ORIGIN = process.env.NEXTAUTH_URL || "";
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Always allow NextAuth's own endpoints
   if (PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  // Always allow static assets
   if (pathname.startsWith("/_next/") || pathname === "/favicon.ico") {
     return NextResponse.next();
   }
 
-  // Check JWT token
-  const token = await getToken({ req });
+  const token = await getToken({
+    req,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
 
   if (!token) {
-    // API routes: return 401 JSON — never redirect, never leak HTML
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Public pages: allow through
     if (PUBLIC_PATHS.has(pathname)) {
       return NextResponse.next();
     }
 
-    // All other pages: redirect to login
+    const rawCallback = req.url;
+    const callbackUrl = isSafeCallbackUrl(rawCallback, ALLOWED_ORIGIN)
+      ? rawCallback
+      : "/";
+
     const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("callbackUrl", req.url);
+    loginUrl.searchParams.set("callbackUrl", callbackUrl);
     return NextResponse.redirect(loginUrl);
   }
 
-  // Authenticated user hitting /login — send them home
   if (pathname === "/login") {
     return NextResponse.redirect(new URL("/", req.url));
   }
@@ -49,5 +48,19 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|[^/]+\\.[^/]+$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|woff2?)$).*)",
+  ],
 };
+
+function isSafeCallbackUrl(url: string, allowedOrigin: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (allowedOrigin && parsed.origin === new URL(allowedOrigin).origin) {
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getDb } from "@/lib/mongoClient";
-import { tradeLimiter } from "@/lib/ratelimit";
+import { tradeLimiter, checkLimit } from "@/lib/ratelimit";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const MAX_BODY_BYTES = 10_000; // 10KB — a single trade object is tiny
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Request too large" }, { status: 413 });
   }
 
-  const { success } = await tradeLimiter.limit(session.user.id);
+  const { success } = await checkLimit(tradeLimiter, session.user.id);
   if (!success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }

@@ -1,7 +1,32 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
+// ─── REDIS CONNECTION ─────────────────────────────────────────────────────────
+// Fails fast at startup if UPSTASH_REDIS_REST_URL / TOKEN are missing
 const redis = Redis.fromEnv();
+
+// ─── SAFE LIMIT HELPER ────────────────────────────────────────────────────────
+// Wraps every limiter.limit() call so a Redis outage never crashes an API route.
+// Pass failOpen=true (default) to allow requests through during outages.
+// Pass failOpen=false on sensitive routes (e.g. scan) to block during outages.
+export async function checkLimit(
+  limiter: Ratelimit,
+  id: string,
+  failOpen = true,
+): Promise<{ success: boolean; limit: number; remaining: number }> {
+  try {
+    return await limiter.limit(id);
+  } catch (err) {
+    console.error("[ratelimit] Redis unavailable:", err);
+    return {
+      success: failOpen,
+      limit: 0,
+      remaining: 0,
+    };
+  }
+}
+
+// ─── LIMITERS ─────────────────────────────────────────────────────────────────
 
 // Scan: 6 per 10 minutes — expensive AI + multi-source scan
 export const scanLimiter = new Ratelimit({

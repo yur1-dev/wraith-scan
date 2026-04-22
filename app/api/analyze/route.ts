@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { analyzeLimiter } from "@/lib/ratelimit";
+import { analyzeLimiter, checkLimit } from "@/lib/ratelimit";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_URL =
@@ -15,32 +15,38 @@ const CELEB_RE = /^[a-zA-Z0-9 ]{1,60}$/;
 const MAX_CONTEXT_LEN = 300;
 const MAX_PLATFORMS = 20;
 
-// ─── SANITIZE FOR PROMPT ──────────────────────────────────────────────────────
-// Strips characters that enable prompt injection before any value
-// is embedded into a Gemini prompt string.
+// ─── SAFE FETCH HOST ALLOWLIST ────────────────────────────────────────────────
+const ALLOWED_FETCH_HOSTS = new Set([
+  "www.reddit.com",
+  "news.google.com",
+  "www.youtube.com",
+]);
+
 function sanitizeForPrompt(input: string, maxLength: number): string {
-  return (
-    input
-      .slice(0, maxLength)
-      // Remove backticks (code fences used to escape prompt context)
-      .replace(/`/g, "'")
-      // Remove backslashes (escape sequences)
-      .replace(/\\/g, "")
-      // Collapse excessive newlines — 3+ lines → 2
-      .replace(/\n{3,}/g, "\n\n")
-      // Strip null bytes
-      .replace(/\0/g, "")
-      // Strip angle brackets — prevents HTML/XML injection into prompt
-      .replace(/[<>]/g, "")
-      .trim()
-  );
+  return input
+    .slice(0, maxLength)
+    .replace(/`/g, "'")
+    .replace(/\\/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\0/g, "")
+    .replace(/[<>]/g, "")
+    .trim();
 }
 
-// ─── SAFE FETCH ───────────────────────────────────────────────────────────────
-// 4.1 FIX: increased default timeout from 8000ms → 12000ms
-// Evidence fetches (Reddit, Google News, YouTube) were timing out on slow
-// connections. 12s gives them a fair chance without blocking the response.
 async function safeFetch(url: string, ms = 12000): Promise<Response | null> {
+  // ✅ Validate host against allowlist before connecting
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!ALLOWED_FETCH_HOSTS.has(parsed.hostname)) {
+    console.warn("[analyze/safeFetch] Blocked host:", parsed.hostname);
+    return null;
+  }
+  if (parsed.protocol !== "https:") return null;
+
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
@@ -59,7 +65,6 @@ async function safeFetch(url: string, ms = 12000): Promise<Response | null> {
   }
 }
 
-// ─── SAFETY SCORE ─────────────────────────────────────────────────────────────
 function computeSafetyScore(params: {
   rugRisk: string;
   liquidity: number;
@@ -153,7 +158,6 @@ function computeSafetyScore(params: {
   };
 }
 
-// ─── PREDICTION ───────────────────────────────────────────────────────────────
 function buildPrediction(
   safetyScore: number,
   crossPlatforms: number,
@@ -197,21 +201,18 @@ function buildPrediction(
   };
 }
 
-// ─── HANDLER ──────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
-  // ── AUTH ────────────────────────────────────────────────────────────────────
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ── RATE LIMIT ──────────────────────────────────────────────────────────────
-  const { success } = await analyzeLimiter.limit(session.user.id);
+  // ✅ Redis outage safe — analyze fails open (low sensitivity route)
+  const { success } = await checkLimit(analyzeLimiter, session.user.id);
   if (!success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }
 
-  // ── PARSE & VALIDATE QUERY PARAMS ───────────────────────────────────────────
   const { searchParams } = new URL(req.url);
 
   const rawKeyword = searchParams.get("keyword") ?? "";
@@ -224,12 +225,9 @@ export async function GET(req: Request) {
   const rawRugRisk = searchParams.get("rugRisk") ?? "unknown";
   const rawPriceChange1h = searchParams.get("priceChange1h") ?? "0";
 
-  // Validate keyword — must match alphanumeric 1-20 chars
   if (!KEYWORD_RE.test(rawKeyword)) {
     return NextResponse.json({ error: "Invalid keyword" }, { status: 400 });
   }
-
-  // Validate contract address if provided
   if (rawContract && !CONTRACT_RE.test(rawContract)) {
     return NextResponse.json(
       { error: "Invalid contract address" },
@@ -237,7 +235,6 @@ export async function GET(req: Request) {
     );
   }
 
-  // Validate rugRisk enum
   const VALID_RUG_RISKS = new Set(["low", "medium", "high", "unknown"]);
   if (!VALID_RUG_RISKS.has(rawRugRisk)) {
     return NextResponse.json(
@@ -246,7 +243,6 @@ export async function GET(req: Request) {
     );
   }
 
-  // Validate numeric params — reject NaN and out-of-range values
   const mcap = parseFloat(rawMcap);
   const liquidity = parseFloat(rawLiquidity);
   const priceChange1h = parseFloat(rawPriceChange1h);
@@ -262,8 +258,6 @@ export async function GET(req: Request) {
       { status: 400 },
     );
   }
-
-  // Validate celebMention if provided
   if (rawCeleb && !CELEB_RE.test(rawCeleb)) {
     return NextResponse.json(
       { error: "Invalid celebMention" },
@@ -271,7 +265,6 @@ export async function GET(req: Request) {
     );
   }
 
-  // Validate and filter platforms array
   const platforms = rawPlatforms
     ? rawPlatforms
         .split(",")
@@ -281,24 +274,15 @@ export async function GET(req: Request) {
 
   const crossPlatforms = platforms.length;
   const isCeleb = !!rawCeleb;
-
-  // 4.6 FIX: removed dead "tiktok" platform value (never emitted by scanner),
-  // replaced with "google-news" which is actually in the platforms array.
   const isViral = platforms.some((p) =>
     ["google-trends", "youtube", "kym", "celebrity", "google-news"].includes(p),
   );
 
-  // ── SANITIZE FOR PROMPT EMBEDDING ───────────────────────────────────────────
-  // All values that will be embedded into the Gemini prompt are sanitized here.
-  // Values that passed regex validation above are sanitized again as
-  // defence-in-depth — the regex ensures shape, sanitize ensures no
-  // injection characters survive into the prompt string.
   const safeKeyword = sanitizeForPrompt(rawKeyword, 20);
   const safeContext = sanitizeForPrompt(rawContext, MAX_CONTEXT_LEN);
   const safeCeleb = sanitizeForPrompt(rawCeleb, 60);
   const safePlatforms = platforms.map((p) => sanitizeForPrompt(p, 30));
 
-  // ── SCORES ──────────────────────────────────────────────────────────────────
   const { score: safetyScore, breakdown: safetyBreakdown } = computeSafetyScore(
     {
       rugRisk: rawRugRisk,
@@ -318,7 +302,6 @@ export async function GET(req: Request) {
     isCeleb,
   );
 
-  // ── EVIDENCE LINKS ──────────────────────────────────────────────────────────
   const evidenceLinks: { url: string; platform: string; title: string }[] = [];
 
   const [redditRes, newsRes, ytRes, ytSearch] = await Promise.all([
@@ -434,7 +417,6 @@ export async function GET(req: Request) {
     });
   }
 
-  // ── GEMINI AI ANALYSIS ──────────────────────────────────────────────────────
   let aiAnalysis = "";
   if (GEMINI_API_KEY && safeKeyword) {
     try {
@@ -442,11 +424,6 @@ export async function GET(req: Request) {
         ? `\nKEY FACT: ${safeCeleb} is connected to this trend. Find EXACTLY what they said/did and when.`
         : "";
 
-      // All user-supplied values embedded in the prompt have been:
-      // 1. Validated by regex (shape check)
-      // 2. Sanitized by sanitizeForPrompt (injection character removal)
-      // None of the values can contain backticks, backslashes, angle brackets,
-      // null bytes, or more than their capped length.
       const prompt = `You are a Solana meme coin analyst. Search the web for current information about "$${safeKeyword.toUpperCase()}" RIGHT NOW.
 
 Known data:
@@ -460,7 +437,7 @@ Known data:
 
 Write 3 paragraphs of ORIGINAL analysis:
 
-PARAGRAPH 1 — VIRAL ORIGIN: What is the EXACT viral moment, tweet, TikTok, news event, or meme that created buzz around "$${safeKeyword.toUpperCase()}"? Name dates, accounts, view counts. If it is a new coin, where was it launched and what is the theme?
+PARAGRAPH 1 — VIRAL ORIGIN: What is the EXACT viral moment, tweet, TikTok, news event, or meme that created buzz around "$${safeKeyword.toUpperCase()}"? Name dates, accounts, view counts.
 
 PARAGRAPH 2 — RISK REALITY CHECK: Look at the on-chain data. Is the liquidity real? What does the price action tell you? Is this coin already 10x'd (too late) or early (opportunity)? Any red flags?
 
@@ -483,19 +460,13 @@ ${safeContext ? `\nAdditional context: ${safeContext}` : ""}`;
       if (res.ok) {
         const data = await res.json();
         const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (raw.length > 100) {
-          aiAnalysis = raw;
-        }
+        if (raw.length > 100) aiAnalysis = raw;
       }
     } catch {
-      /* silent — fallback below */
+      /* silent */
     }
   }
 
-  // ── FALLBACK ANALYSIS ────────────────────────────────────────────────────────
-  // 4.2 FIX: when safeContext is empty, the old fallback echoed back the
-  // user's own inputs as if they were analysis. Now it explicitly states that
-  // AI analysis is unavailable so the user knows why they're seeing plain data.
   if (!aiAnalysis || aiAnalysis.length < 80) {
     const mcapLabel =
       mcap >= 1_000_000

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useSession, signOut } from "next-auth/react";
 import Image from "next/image";
 import WalletModal from "./WalletModal";
 
@@ -15,8 +16,10 @@ function trimAddress(addr: string) {
 
 export default function Header() {
   const { connected, publicKey, disconnect, connecting } = useWallet();
+  const { data: session } = useSession();
   const [modalOpen, setModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     if (connected) setModalOpen(false);
@@ -28,6 +31,13 @@ export default function Header() {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handler = () => setUserMenuOpen(false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, [userMenuOpen]);
 
   return (
     <>
@@ -69,31 +79,17 @@ export default function Header() {
             />
           </div>
 
-          <div>
-            <div
-              style={{
-                color: "#e0e0e0",
-                fontSize: 21,
-                fontWeight: 700,
-                letterSpacing: "0.15em",
-                ...MONO,
-                lineHeight: 1,
-              }}
-            >
-              WRAITH
-            </div>
-            {/* <div
-              style={{
-                color: "#555",
-                fontSize: 9,
-                letterSpacing: "0.1em",
-                ...MONO,
-                lineHeight: 1,
-                marginTop: 2,
-              }}
-            >
-              MEME TOKEN SNIPER
-            </div> */}
+          <div
+            style={{
+              color: "#e0e0e0",
+              fontSize: 21,
+              fontWeight: 700,
+              letterSpacing: "0.15em",
+              ...MONO,
+              lineHeight: 1,
+            }}
+          >
+            WRAITH
           </div>
 
           <div
@@ -125,8 +121,9 @@ export default function Header() {
           </span>
         </div>
 
-        {/* Right — wallet */}
+        {/* Right — wallet + user account */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Wallet controls */}
           {connected && publicKey ? (
             <>
               <button
@@ -137,7 +134,8 @@ export default function Header() {
                   color: copied ? "#00c47a" : "#888",
                   fontSize: 10,
                   ...MONO,
-                  padding: "6px 12px",
+                  padding: "0 12px",
+                  height: 32,
                   borderRadius: 4,
                   cursor: "pointer",
                   letterSpacing: "0.05em",
@@ -155,7 +153,8 @@ export default function Header() {
                   color: "#555",
                   fontSize: 10,
                   ...MONO,
-                  padding: "6px 12px",
+                  padding: "0 12px",
+                  height: 32,
                   borderRadius: 4,
                   cursor: "pointer",
                   transition: "all 0.15s",
@@ -184,7 +183,8 @@ export default function Header() {
                 fontSize: 11,
                 fontWeight: 700,
                 ...MONO,
-                padding: "8px 20px",
+                padding: "0 20px",
+                height: 32,
                 borderRadius: 5,
                 cursor: connecting ? "not-allowed" : "pointer",
                 letterSpacing: "0.1em",
@@ -202,6 +202,183 @@ export default function Header() {
             >
               {connecting ? "CONNECTING..." : "CONNECT WALLET"}
             </button>
+          )}
+
+          {/* Divider */}
+          {session && (
+            <div
+              style={{
+                width: 1,
+                height: 24,
+                background: "#1a1a1a",
+                margin: "0 4px",
+              }}
+            />
+          )}
+
+          {/* Google account menu */}
+          {session && (
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setUserMenuOpen((v) => !v);
+                }}
+                style={{
+                  background: "transparent",
+                  border: "1px solid #222",
+                  borderRadius: 4,
+                  padding: "0 8px",
+                  height: 32,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  transition: "border-color 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor = "#333";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor = "#222";
+                }}
+              >
+                {/* Avatar */}
+                {session.user?.image ? (
+                  <Image
+                    src={session.user.image}
+                    alt="avatar"
+                    width={22}
+                    height={22}
+                    style={{ borderRadius: "50%", display: "block" }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: "50%",
+                      background: "#e8490f22",
+                      border: "1px solid #e8490f44",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#e8490f",
+                      fontSize: 9,
+                      fontWeight: 700,
+                      ...MONO,
+                    }}
+                  >
+                    {(session.user?.name ??
+                      session.user?.email ??
+                      "?")[0].toUpperCase()}
+                  </div>
+                )}
+
+                <span style={{ color: "#555", fontSize: 10, ...MONO }}>
+                  {session.user?.name?.split(" ")[0] ??
+                    session.user?.email?.split("@")[0] ??
+                    "USER"}
+                </span>
+
+                {/* Chevron */}
+                <svg
+                  width="8"
+                  height="8"
+                  viewBox="0 0 8 8"
+                  style={{
+                    transform: userMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+                    transition: "transform 0.15s",
+                  }}
+                >
+                  <path
+                    d="M1 2.5L4 5.5L7 2.5"
+                    stroke="#444"
+                    strokeWidth="1.5"
+                    fill="none"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+
+              {/* Dropdown */}
+              {userMenuOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 8px)",
+                    right: 0,
+                    background: "#060606",
+                    border: "1px solid #1a1a1a",
+                    borderRadius: 6,
+                    minWidth: 180,
+                    zIndex: 100,
+                    overflow: "hidden",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Account info */}
+                  <div
+                    style={{
+                      padding: "10px 14px",
+                      borderBottom: "1px solid #111",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: "#888",
+                        fontSize: 9,
+                        ...MONO,
+                        marginBottom: 2,
+                      }}
+                    >
+                      SIGNED IN AS
+                    </div>
+                    <div
+                      style={{
+                        color: "#e0e0e0",
+                        fontSize: 10,
+                        ...MONO,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        maxWidth: 152,
+                      }}
+                    >
+                      {session.user?.email ?? "—"}
+                    </div>
+                  </div>
+
+                  {/* Sign out */}
+                  <button
+                    onClick={() => signOut({ callbackUrl: "/login" })}
+                    style={{
+                      width: "100%",
+                      background: "transparent",
+                      border: "none",
+                      color: "#ff4444",
+                      fontSize: 10,
+                      ...MONO,
+                      padding: "10px 14px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      letterSpacing: "0.05em",
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLElement).style.background =
+                        "#1a0000";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLElement).style.background =
+                        "transparent";
+                    }}
+                  >
+                    SIGN OUT
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </header>

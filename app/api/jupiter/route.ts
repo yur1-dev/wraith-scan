@@ -39,7 +39,6 @@ export async function GET(req: NextRequest) {
     try {
       data = JSON.parse(text);
     } catch {
-      // Jupiter returned non-JSON — surface the raw body as an error
       return NextResponse.json(
         { error: `Jupiter returned non-JSON: ${text.slice(0, 200)}` },
         { status: 502 },
@@ -47,7 +46,6 @@ export async function GET(req: NextRequest) {
     }
 
     if (!res.ok) {
-      // Pass Jupiter's error through with its status so the client can read it
       return NextResponse.json(data, { status: res.status });
     }
 
@@ -77,6 +75,8 @@ export async function POST(req: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
+          // FIX #10: forward x-api-key on POST just like GET does
+          "x-api-key": process.env.JUPITER_API_KEY ?? "",
         },
         body: JSON.stringify(body),
       },

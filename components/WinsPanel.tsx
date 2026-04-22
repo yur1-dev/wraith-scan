@@ -503,14 +503,14 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     saveBoughtKeys(next);
   };
 
+  // FIX #4 / #8: markSold only removes from bought — does NOT dismiss.
+  // Dismissal is a separate explicit action via the ✕ button or dismissEntry().
   const markSold = (kw: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const nextBought = new Set([...boughtKeys].filter((k) => k !== kw));
     setBoughtKeys(nextBought);
     saveBoughtKeys(nextBought);
-    const nextDismissed = new Set([...dismissed, kw]);
-    setDismissed(nextDismissed);
-    saveDismissedKeys(nextDismissed);
+    // ← intentionally NOT calling dismissEntry here
   };
 
   const dismissEntry = (kw: string) => {
@@ -691,7 +691,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
   }, [runRefresh]);
 
   // ── Derived state
-  // Only show tokens that have hit 2x peak — no-movement trash is hidden
+  // FIX #6: removed dead `winners` memo — list is already filtered to >= 2x,
+  // so winners === list always. Stats bar now uses list.length directly.
   const list = useMemo(
     () =>
       Object.values(history)
@@ -701,11 +702,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
             calcX(b.initialMcap, b.peakMcap) - calcX(a.initialMcap, a.peakMcap),
         ),
     [history],
-  );
-
-  const winners = useMemo(
-    () => list.filter((e) => calcX(e.initialMcap, e.peakMcap) >= 2),
-    [list],
   );
 
   const { bestX, bestTok } = useMemo(() => {
@@ -868,8 +864,10 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               color: C.orange,
             },
             {
+              // FIX #6: was winners.length (dead memo, always === list.length)
+              // now correctly uses list.length since list is already 2x-filtered
               label: "2X+ WINS",
-              value: winners.length.toString(),
+              value: list.length.toString(),
               color: C.green,
             },
             {
@@ -1105,7 +1103,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 background: isSel ? "#0d0300" : C.bg,
               }}
             >
-              {/* TAKE PROFIT BANNER — only for tokens you bought */}
+              {/* TAKE PROFIT BANNER */}
               {showTP && (
                 <div
                   style={{
@@ -1145,34 +1143,55 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       {fmtMcap(entry.currentMcap)}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                  {/* FIX #4 / #8: DEX link and SOLD button are now separate.
+                      The link opens DexScreener. The SOLD button only marks
+                      as sold (removes ✓ IN badge). Neither auto-dismisses. */}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 5,
+                      flexShrink: 0,
+                      alignItems: "center",
+                    }}
+                  >
                     {entry.contractAddress && (
                       <a
                         href={`https://dexscreener.com/solana/${entry.contractAddress}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        style={{ textDecoration: "none" }}
+                        style={{
+                          fontSize: 9,
+                          color: C.blue,
+                          border: `1px solid ${C.blue}33`,
+                          padding: "5px 10px",
+                          borderRadius: 3,
+                          textDecoration: "none",
+                          ...MONO,
+                          letterSpacing: "0.1em",
+                          background: `${C.blue}0f`,
+                        }}
                       >
-                        <button
-                          onClick={(e) => markSold(entry.keyword, e)}
-                          style={{
-                            background: C.green,
-                            border: "none",
-                            color: "#000",
-                            fontSize: 9,
-                            fontWeight: 900,
-                            ...MONO,
-                            padding: "5px 10px",
-                            borderRadius: 3,
-                            cursor: "pointer",
-                            letterSpacing: "0.1em",
-                          }}
-                        >
-                          SELL↗
-                        </button>
+                        DEX↗
                       </a>
                     )}
+                    <button
+                      onClick={(e) => markSold(entry.keyword, e)}
+                      style={{
+                        background: C.green,
+                        border: "none",
+                        color: "#000",
+                        fontSize: 9,
+                        fontWeight: 900,
+                        ...MONO,
+                        padding: "5px 10px",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                        letterSpacing: "0.1em",
+                      }}
+                    >
+                      SOLD ✓
+                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1188,6 +1207,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         borderRadius: 3,
                         cursor: "pointer",
                       }}
+                      title="Dismiss this alert"
                     >
                       ✕
                     </button>
@@ -1501,7 +1521,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       </span>
                     )}
 
-                    {/* CHART button — opens token in TokenPanel */}
+                    {/* CHART button */}
                     {entry.contractAddress && onSelectMeme && (
                       <button
                         onClick={(e) => openInPanel(entry, e)}

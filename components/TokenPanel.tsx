@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { VersionedTransaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { MemeTrend } from "@/app/page";
 
 interface ScanResult extends MemeTrend {
@@ -110,6 +110,9 @@ const C = {
   bg: "#0a0a0a",
   bgDark: "#060606",
 };
+
+// ── SOL mint address
+const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 function fmtMcap(n?: number): string {
   if (!n || n === 0) return "—";
@@ -271,9 +274,7 @@ function NarrativeBadge({
   );
 }
 
-// ── Wraith Chart — clean DexScreener embed, no custom interval bar
 function WraithChart({ contractAddress }: { contractAddress: string }) {
-  // Default to 15m; DexScreener's own native toolbar handles interval switching
   const iframeSrc = `https://dexscreener.com/solana/${contractAddress}?embed=1&theme=dark&trades=0&info=0&chart=1&chartLeftToolbar=0&chartDefaultOnMobile=1&chartTheme=dark&chartStyle=0&chartType=usd&interval=15`;
 
   return (
@@ -285,7 +286,6 @@ function WraithChart({ contractAddress }: { contractAddress: string }) {
         background: C.bgDark,
       }}
     >
-      {/* Wraith toolbar — no interval buttons, just branding + links */}
       <div
         style={{
           display: "flex",
@@ -318,7 +318,6 @@ function WraithChart({ contractAddress }: { contractAddress: string }) {
         >
           LIVE
         </span>
-
         <div
           style={{
             marginLeft: "auto",
@@ -380,7 +379,6 @@ function WraithChart({ contractAddress }: { contractAddress: string }) {
         </div>
       </div>
 
-      {/* Chart area */}
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
         <iframe
           key={contractAddress}
@@ -395,7 +393,6 @@ function WraithChart({ contractAddress }: { contractAddress: string }) {
           title="Wraith Chart"
           sandbox="allow-scripts allow-same-origin allow-popups"
         />
-        {/* Cover DexScreener footer */}
         <div
           style={{
             position: "absolute",
@@ -450,6 +447,7 @@ function WraithChart({ contractAddress }: { contractAddress: string }) {
 }
 
 export default function TokenPanel({ selectedMeme }: Props) {
+  // FIX #1: removed unused Transaction import, use VersionedTransaction instead
   const { publicKey, sendTransaction } = useWallet();
   const { connection } = useConnection();
 
@@ -494,6 +492,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
   }, [selectedMeme?.contractAddress]);
 
   const fetchEvidence = useCallback(async (meme: ScanResult) => {
+    // FIX #2: evidence is explicitly set to loading state (clearing old data)
+    // before the fetch so stale data from the previous token never shows
     setEvidence({
       links: [],
       aiAnalysis: "",
@@ -527,6 +527,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
 
   useEffect(() => {
     if (selectedMeme) {
+      // FIX #2: clear evidence immediately on token switch so stale data
+      // from the previous token is never visible during the new fetch
+      setEvidence(null);
       setActiveTab("overview");
       setBuyStatus("idle");
       setBuyMsg("");
@@ -534,6 +537,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
     }
   }, [selectedMeme?.keyword]);
 
+  // FIX #1: Jupiter swap now routes through /api/jupiter proxy (no CORS),
+  // and uses VersionedTransaction instead of the legacy Transaction class
+  // which Jupiter v6/v1 always returns.
   const handleBuy = async () => {
     if (!publicKey || !selectedMeme?.contractAddress) return;
     setBuying(true);
@@ -544,30 +550,59 @@ export default function TokenPanel({ selectedMeme }: Props) {
       if (isNaN(amountSol) || amountSol <= 0) throw new Error("Invalid amount");
       if ((solBalance || 0) < amountSol + 0.01)
         throw new Error("Insufficient SOL balance");
-      const quoteRes = await fetch(
-        `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${selectedMeme.contractAddress}&amount=${Math.floor(amountSol * LAMPORTS_PER_SOL)}&slippageBps=1000`,
-      );
-      if (!quoteRes.ok)
+
+      // ── Step 1: get quote via our proxy (avoids browser CORS block)
+      const quoteParams = new URLSearchParams({
+        endpoint: "quote",
+        inputMint: SOL_MINT,
+        outputMint: selectedMeme.contractAddress,
+        amount: String(Math.floor(amountSol * LAMPORTS_PER_SOL)),
+        slippageBps: "1000",
+        // Jupiter v1 API param — avoids legacy tx format
+        asLegacyTransaction: "false",
+      });
+      const quoteRes = await fetch(`/api/jupiter?${quoteParams.toString()}`);
+      if (!quoteRes.ok) {
+        const errData = await quoteRes.json().catch(() => ({}));
         throw new Error(
-          "Could not get swap quote — token may not be tradeable yet",
+          (errData as { error?: string }).error ||
+            "Could not get swap quote — token may not be tradeable yet",
         );
+      }
       const quote = await quoteRes.json();
-      if (quote.error) throw new Error(quote.error);
-      const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+      if ((quote as { error?: string }).error)
+        throw new Error((quote as { error: string }).error);
+
+      // ── Step 2: build swap tx via our proxy
+      const swapRes = await fetch("/api/jupiter?endpoint=swap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote,
           userPublicKey: publicKey.toString(),
           wrapAndUnwrapSol: true,
+          // Ensures we always get a versioned transaction back
+          asLegacyTransaction: false,
         }),
       });
-      if (!swapRes.ok) throw new Error("Failed to build swap transaction");
+      if (!swapRes.ok) {
+        const errData = await swapRes.json().catch(() => ({}));
+        throw new Error(
+          (errData as { error?: string }).error ||
+            "Failed to build swap transaction",
+        );
+      }
       const { swapTransaction } = await swapRes.json();
+
+      // ── Step 3: deserialize as VersionedTransaction (Jupiter v6/v1 always
+      // returns versioned txs — legacy Transaction.from() throws here)
       const txBuf = Buffer.from(swapTransaction, "base64");
-      const tx = Transaction.from(txBuf);
+      const tx = VersionedTransaction.deserialize(txBuf);
+
+      // ── Step 4: sign + send
       const sig = await sendTransaction(tx, connection);
       await connection.confirmTransaction(sig, "confirmed");
+
       setBuyStatus("success");
       setBuyMsg(`✓ Bought! TX: ${sig.slice(0, 8)}...${sig.slice(-8)}`);
       setSolBalance((prev) => (prev !== null ? prev - amountSol : null));
@@ -877,8 +912,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
             )}
           </div>
 
-          {/* Safety score circle */}
-          {safetyScore !== null && (
+          {/* Safety score circle — hidden while loading so the circle doesn't
+              flash 0/100 from the previous token during the new fetch */}
+          {safetyScore !== null && !evidence?.loading && (
             <div
               style={{
                 display: "flex",
@@ -1296,6 +1332,123 @@ export default function TokenPanel({ selectedMeme }: Props) {
                   </div>
                 </div>
               )}
+
+              {/* Buy section */}
+              <div
+                style={{
+                  background: C.bg,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  padding: "12px",
+                }}
+              >
+                <div
+                  style={{
+                    color: C.label,
+                    fontSize: 8,
+                    ...MONO,
+                    letterSpacing: "0.14em",
+                    marginBottom: 8,
+                  }}
+                >
+                  QUICK BUY
+                  {solBalance !== null && (
+                    <span style={{ color: C.dim, marginLeft: 8 }}>
+                      BAL: {solBalance.toFixed(3)} SOL
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  {["0.05", "0.1", "0.25", "0.5"].map((amt) => (
+                    <button
+                      key={amt}
+                      onClick={() => setBuyAmount(amt)}
+                      style={{
+                        background:
+                          buyAmount === amt ? "#1a0800" : "transparent",
+                        border: `1px solid ${buyAmount === amt ? C.accent + "55" : C.border}`,
+                        color: buyAmount === amt ? C.accent : C.dim,
+                        fontSize: 9,
+                        ...MONO,
+                        padding: "3px 8px",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {amt}
+                    </button>
+                  ))}
+                  <input
+                    value={buyAmount}
+                    onChange={(e) => setBuyAmount(e.target.value)}
+                    style={{
+                      background: "#111",
+                      border: `1px solid ${C.border}`,
+                      color: C.body,
+                      fontSize: 9,
+                      ...MONO,
+                      padding: "3px 8px",
+                      borderRadius: 3,
+                      width: 60,
+                      outline: "none",
+                    }}
+                    placeholder="SOL"
+                  />
+                </div>
+                <button
+                  onClick={handleBuy}
+                  disabled={
+                    buying || !publicKey || !selectedMeme.contractAddress
+                  }
+                  style={{
+                    width: "100%",
+                    background:
+                      buyStatus === "success"
+                        ? C.green
+                        : buyStatus === "error"
+                          ? "#330000"
+                          : !publicKey
+                            ? "#111"
+                            : C.accent,
+                    border: "none",
+                    color:
+                      !publicKey || !selectedMeme.contractAddress
+                        ? C.dim
+                        : "#fff",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    ...MONO,
+                    padding: "10px",
+                    borderRadius: 4,
+                    cursor:
+                      buying || !publicKey || !selectedMeme.contractAddress
+                        ? "not-allowed"
+                        : "pointer",
+                    letterSpacing: "0.1em",
+                  }}
+                >
+                  {buying
+                    ? "SWAPPING..."
+                    : !publicKey
+                      ? "CONNECT WALLET"
+                      : !selectedMeme.contractAddress
+                        ? "NO CONTRACT"
+                        : `BUY ${buyAmount} SOL`}
+                </button>
+                {buyMsg && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      color: buyStatus === "success" ? C.green : C.red,
+                      fontSize: 9,
+                      ...MONO,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {buyMsg}
+                  </div>
+                )}
+              </div>
 
               {/* Actions */}
               <div style={{ display: "flex", gap: 8 }}>

@@ -72,10 +72,12 @@ const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-// Use our own API route as RPC proxy to get fallback handling
-const RPC = "https://solana-rpc.publicnode.com";
-const POLL_MS = 10000;
 
+// FIX #1: Use our own /api/rpc proxy (has fallback chain) instead of hardcoding an RPC URL.
+// All Connection instances now go through the proxy so publicnode outages don't break trades.
+const RPC_ENDPOINT = "/api/rpc";
+
+const POLL_MS = 10000;
 const DEFAULT_SL = -20;
 const DEFAULT_TP = 2;
 const DEFAULT_TRAIL = 15;
@@ -184,7 +186,100 @@ function clearHW() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POLL CONFIRM — fixed: searchTransactionHistory + clearer errors
+// RECOVERY KEY STORAGE
+// FIX #10: Recovery phrase was stored plaintext — now encrypted with a
+// deterministic key derived from the keypair itself so it can't be read
+// without the private key bytes. We use the first 16 bytes of the secret as
+// both salt and "password material" so recovery still works offline.
+// For true security the user should store the phrase offline; this at least
+// prevents trivial localStorage scraping.
+// ─────────────────────────────────────────────────────────────────────────────
+const RK_KEY = "wraith_recovery_v2"; // bumped key so old plaintext is ignored
+
+async function encryptRecovery(
+  phrase: string,
+  secret: Uint8Array,
+): Promise<string> {
+  const salt = secret.slice(0, 16);
+  const iv = secret.slice(16, 28);
+  const key = await deriveKey(
+    Array.from(secret.slice(0, 32))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(""),
+    salt,
+  );
+  const enc = new TextEncoder();
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
+    key,
+    enc.encode(phrase).buffer as ArrayBuffer,
+  );
+  const packed = new Uint8Array(ct.byteLength);
+  packed.set(new Uint8Array(ct));
+  return btoa(String.fromCharCode(...packed));
+}
+
+async function decryptRecovery(
+  encrypted: string,
+  secret: Uint8Array,
+): Promise<string | null> {
+  try {
+    const salt = secret.slice(0, 16);
+    const iv = secret.slice(16, 28);
+    const key = await deriveKey(
+      Array.from(secret.slice(0, 32))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(""),
+      salt,
+    );
+    const ct = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
+    const plain = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
+      key,
+      ct.buffer as ArrayBuffer,
+    );
+    return new TextDecoder().decode(plain);
+  } catch {
+    return null;
+  }
+}
+
+async function saveRecovery(phrase: string, secret: Uint8Array) {
+  if (typeof window === "undefined") return;
+  const enc = await encryptRecovery(phrase, secret);
+  localStorage.setItem(RK_KEY, enc);
+}
+function loadRawRecovery(): string | null {
+  return typeof window !== "undefined" ? localStorage.getItem(RK_KEY) : null;
+}
+function clearRecovery() {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem(RK_KEY);
+    localStorage.removeItem("wraith_recovery_v1"); // clear old plaintext store
+  }
+}
+
+function secretToPhrase(secret: Uint8Array): string {
+  const hex = Array.from(secret)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return hex.match(/.{8}/g)!.join("-");
+}
+function phraseToSecret(phrase: string): Uint8Array {
+  const hex = phrase.replace(/-/g, "").trim().toLowerCase();
+  if (hex.length !== 128) throw new Error("Invalid backup phrase length");
+  const bytes = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) {
+    const byte = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    if (isNaN(byte)) throw new Error("Invalid hex");
+    bytes[i] = byte;
+  }
+  return bytes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POLL CONFIRM
+// FIX #5: surface RPC errors in onStatus so user knows if RPC is down
 // ─────────────────────────────────────────────────────────────────────────────
 async function pollConfirm(
   conn: Connection,
@@ -194,12 +289,14 @@ async function pollConfirm(
 ): Promise<boolean> {
   const start = Date.now();
   let attempts = 0;
+  let consecutiveRpcErrors = 0;
   while (Date.now() - start < timeoutMs) {
     attempts++;
     try {
       const { value } = await conn.getSignatureStatuses([sig], {
         searchTransactionHistory: true,
       });
+      consecutiveRpcErrors = 0; // reset on success
       const s = value?.[0];
       if (s?.err) {
         throw new Error(`Tx rejected on-chain: ${JSON.stringify(s.err)}`);
@@ -216,7 +313,13 @@ async function pollConfirm(
     } catch (e) {
       const msg = (e as Error).message || "";
       if (msg.includes("Tx rejected")) throw e;
-      // RPC error — keep retrying
+      // FIX #5: surface consecutive RPC errors instead of silently looping
+      consecutiveRpcErrors++;
+      if (consecutiveRpcErrors >= 3) {
+        onStatus?.(
+          `⚠ RPC unresponsive (${consecutiveRpcErrors} errors) — still retrying… ${msg.slice(0, 40)}`,
+        );
+      }
     }
     await sleep(3000);
   }
@@ -224,19 +327,16 @@ async function pollConfirm(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JUPITER — BUY (fixed: higher fee, no skipPreflight, better status updates)
+// JUPITER — BUY
+// FIX #1: conn parameter injected from component instead of hardcoded RPC
 // ─────────────────────────────────────────────────────────────────────────────
 async function jupiterBuy(
+  conn: Connection,
   keypair: Keypair,
   outputMint: string,
   amountLamports: number,
   onStatus?: (msg: string) => void,
 ): Promise<string> {
-  const conn = new Connection(RPC, {
-    commitment: "confirmed",
-    confirmTransactionInitialTimeout: 120000,
-  });
-
   onStatus?.("Fetching quote…");
   const quoteRes = await fetch(
     `/api/jupiter?endpoint=quote&inputMint=${SOL_MINT}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=500`,
@@ -254,7 +354,7 @@ async function jupiterBuy(
       userPublicKey: keypair.publicKey.toString(),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: 500000, // bumped from 100k → 500k for faster inclusion
+      prioritizationFeeLamports: 500000,
     }),
   });
   if (!swapRes.ok) throw new Error(`Swap build failed: ${swapRes.status}`);
@@ -269,7 +369,7 @@ async function jupiterBuy(
   tx.sign([keypair]);
 
   const sig = await conn.sendRawTransaction(tx.serialize(), {
-    skipPreflight: false, // catch bad txs immediately
+    skipPreflight: false,
     preflightCommitment: "processed",
     maxRetries: 5,
   });
@@ -286,19 +386,16 @@ async function jupiterBuy(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JUPITER — SELL (fixed: higher fee, no skipPreflight)
+// JUPITER — SELL
+// FIX #1: conn parameter injected from component
 // ─────────────────────────────────────────────────────────────────────────────
 async function jupiterSell(
+  conn: Connection,
   keypair: Keypair,
   inputMint: string,
   tokenAmount: number,
   onStatus?: (msg: string) => void,
 ): Promise<string> {
-  const conn = new Connection(RPC, {
-    commitment: "confirmed",
-    confirmTransactionInitialTimeout: 120000,
-  });
-
   onStatus?.("Fetching sell quote…");
   const quoteRes = await fetch(
     `/api/jupiter?endpoint=quote&inputMint=${inputMint}&outputMint=${SOL_MINT}&amount=${Math.floor(tokenAmount)}&slippageBps=700`,
@@ -316,7 +413,7 @@ async function jupiterSell(
       userPublicKey: keypair.publicKey.toString(),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: 500000, // bumped from 200k → 500k
+      prioritizationFeeLamports: 500000,
     }),
   });
   if (!swapRes.ok) throw new Error(`Sell swap build failed: ${swapRes.status}`);
@@ -349,12 +446,13 @@ async function jupiterSell(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TOKEN BALANCE
+// FIX #1: conn parameter injected
 // ─────────────────────────────────────────────────────────────────────────────
 async function getTokenBalance(
+  conn: Connection,
   walletPubkey: PublicKey,
   mint: string,
 ): Promise<number> {
-  const conn = new Connection(RPC, "confirmed");
   try {
     const accounts = await conn.getParsedTokenAccountsByOwner(walletPubkey, {
       mint: new PublicKey(mint),
@@ -366,10 +464,10 @@ async function getTokenBalance(
   }
 }
 async function getRawTokenBalance(
+  conn: Connection,
   walletPubkey: PublicKey,
   mint: string,
 ): Promise<number> {
-  const conn = new Connection(RPC, "confirmed");
   try {
     const accounts = await conn.getParsedTokenAccountsByOwner(walletPubkey, {
       mint: new PublicKey(mint),
@@ -474,11 +572,20 @@ function fmtMcap(n: number) {
 function fmtPnl(pct: number) {
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
+// FIX #9: proper time formatting — shows days, hours, minutes, and absolute date for old entries
 function fmtAgo(ts: number) {
   const m = Math.floor((Date.now() - ts) / 60000);
   if (m < 1) return "just now";
   if (m < 60) return `${m}m ago`;
-  return `${Math.floor(m / 60)}h ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  // Older than a week: show actual date
+  return new Date(ts).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -745,38 +852,6 @@ function TokenAvatar({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RECOVERY KEY STORAGE
-// ─────────────────────────────────────────────────────────────────────────────
-const RK_KEY = "wraith_recovery_v1";
-
-function secretToPhrase(secret: Uint8Array): string {
-  const hex = Array.from(secret)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return hex.match(/.{8}/g)!.join("-");
-}
-function phraseToSecret(phrase: string): Uint8Array {
-  const hex = phrase.replace(/-/g, "").trim().toLowerCase();
-  if (hex.length !== 128) throw new Error("Invalid backup phrase length");
-  const bytes = new Uint8Array(64);
-  for (let i = 0; i < 64; i++) {
-    const byte = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    if (isNaN(byte)) throw new Error("Invalid hex");
-    bytes[i] = byte;
-  }
-  return bytes;
-}
-function saveRecovery(phrase: string) {
-  if (typeof window !== "undefined") localStorage.setItem(RK_KEY, phrase);
-}
-function loadRecovery(): string | null {
-  return typeof window !== "undefined" ? localStorage.getItem(RK_KEY) : null;
-}
-function clearRecovery() {
-  if (typeof window !== "undefined") localStorage.removeItem(RK_KEY);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // NO-AUTOFILL PASSWORD INPUT
 // ─────────────────────────────────────────────────────────────────────────────
 function NoFillPasswordInput({
@@ -891,6 +966,8 @@ function NoFillPasswordInput({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HOT WALLET SETUP
+// FIX #8: doRecover now shows derived pubkey and asks for confirmation before
+//         overwriting the stored wallet
 // ─────────────────────────────────────────────────────────────────────────────
 function HotWalletSetup({
   onUnlocked,
@@ -898,7 +975,14 @@ function HotWalletSetup({
   onUnlocked: (kp: Keypair, pub: string) => void;
 }) {
   const [mode, setMode] = useState<
-    "menu" | "create" | "backup" | "unlock" | "import" | "recover" | "reencrypt"
+    | "menu"
+    | "create"
+    | "backup"
+    | "unlock"
+    | "import"
+    | "recover"
+    | "reencrypt"
+    | "confirmRecover"
   >("menu");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
@@ -919,7 +1003,7 @@ function HotWalletSetup({
     setRecoveryInput("");
     setErr("");
     setBusy(false);
-    if (m !== "backup" && m !== "reencrypt") {
+    if (m !== "backup" && m !== "reencrypt" && m !== "confirmRecover") {
       setBackupPhrase("");
       setPendingKp(null);
     }
@@ -951,7 +1035,10 @@ function HotWalletSetup({
     setBusy(true);
     try {
       saveHW(await encryptKeypair(pendingKp.secretKey, pw));
-      saveRecovery(secretToPhrase(pendingKp.secretKey));
+      await saveRecovery(
+        secretToPhrase(pendingKp.secretKey),
+        pendingKp.secretKey,
+      );
       onUnlocked(pendingKp, pendingKp.publicKey.toString());
     } catch {
       setErr("Encryption failed");
@@ -997,7 +1084,7 @@ function HotWalletSetup({
         : (await import("bs58")).default.decode(t);
       const kp = Keypair.fromSecretKey(secret);
       saveHW(await encryptKeypair(kp.secretKey, pw));
-      saveRecovery(secretToPhrase(kp.secretKey));
+      await saveRecovery(secretToPhrase(kp.secretKey), kp.secretKey);
       onUnlocked(kp, kp.publicKey.toString());
     } catch {
       setErr("Invalid key format");
@@ -1005,6 +1092,7 @@ function HotWalletSetup({
     setBusy(false);
   };
 
+  // FIX #8: Step 1 — parse and show derived pubkey, don't overwrite yet
   const doRecover = async () => {
     if (!recoveryInput.trim()) {
       setErr("Enter your backup phrase");
@@ -1015,7 +1103,7 @@ function HotWalletSetup({
       const secret = phraseToSecret(recoveryInput.trim());
       const kp = Keypair.fromSecretKey(secret);
       setPendingKp(kp);
-      setMode("reencrypt");
+      setMode("confirmRecover"); // new confirmation step
       setErr("");
     } catch {
       setErr("Invalid backup phrase — check for typos");
@@ -1036,7 +1124,10 @@ function HotWalletSetup({
     setBusy(true);
     try {
       saveHW(await encryptKeypair(pendingKp.secretKey, pw));
-      saveRecovery(secretToPhrase(pendingKp.secretKey));
+      await saveRecovery(
+        secretToPhrase(pendingKp.secretKey),
+        pendingKp.secretKey,
+      );
       onUnlocked(pendingKp, pendingKp.publicKey.toString());
     } catch {
       setErr("Failed");
@@ -1292,6 +1383,58 @@ function HotWalletSetup({
       </div>
     );
 
+  // FIX #8: New confirmation step — shows derived pubkey before overwriting
+  if (mode === "confirmRecover")
+    return (
+      <div
+        style={{
+          padding: "10px 12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        <div style={{ color: C.green, fontSize: 9, fontWeight: 700, ...MONO }}>
+          ✓ PHRASE VALID
+        </div>
+        <div style={{ color: C.dim, fontSize: 8, ...MONO, lineHeight: 1.6 }}>
+          This phrase maps to:
+        </div>
+        <div
+          style={{
+            background: C.bgCard,
+            border: `1px solid ${C.green}33`,
+            borderRadius: 3,
+            padding: "7px 9px",
+          }}
+        >
+          <div
+            style={{
+              color: C.green,
+              fontSize: 9,
+              fontWeight: 700,
+              ...MONO,
+              wordBreak: "break-all" as const,
+            }}
+          >
+            {pendingKp?.publicKey.toString()}
+          </div>
+        </div>
+        <div style={{ color: C.amber, fontSize: 8, ...MONO, lineHeight: 1.5 }}>
+          ⚠ This will overwrite your currently stored wallet. Make sure this is
+          the correct address.
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          <Btn
+            label="YES — SET NEW PASSWORD"
+            onClick={() => setMode("reencrypt")}
+            primary
+          />
+          <Btn label="← CANCEL" onClick={() => reset("menu")} />
+        </div>
+      </div>
+    );
+
   if (mode === "reencrypt")
     return (
       <div
@@ -1303,7 +1446,7 @@ function HotWalletSetup({
         }}
       >
         <div style={{ color: C.green, fontSize: 9, fontWeight: 700, ...MONO }}>
-          ✓ PHRASE VALID — SET NEW PASSWORD
+          SET NEW PASSWORD
         </div>
         <div style={{ color: C.dim, fontSize: 8, ...MONO }}>
           {pendingKp?.publicKey.toString().slice(0, 20)}…
@@ -1435,13 +1578,22 @@ function HotWalletSetup({
         />
         <Btn label="←" onClick={() => reset("menu")} />
       </div>
-      {mode === "unlock" && loadRecovery() && (
+      {mode === "unlock" && loadRawRecovery() && (
         <button
-          onClick={() => {
-            const p = loadRecovery();
-            if (p) {
-              setBackupPhrase(p);
-              setMode("backup");
+          onClick={async () => {
+            const enc = loadHW();
+            if (!enc || !pw) return;
+            try {
+              const kp = Keypair.fromSecretKey(await decryptKeypair(enc, pw));
+              const raw = loadRawRecovery();
+              if (!raw) return;
+              const phrase = await decryptRecovery(raw, kp.secretKey);
+              if (phrase) {
+                setBackupPhrase(phrase);
+                setMode("backup");
+              } else setErr("Unlock first to view backup phrase");
+            } catch {
+              setErr("Unlock first to view backup phrase");
             }
           }}
           style={{
@@ -1709,7 +1861,23 @@ function PositionCard({
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function PaperTrader({ selectedMeme }: Props) {
-  useConnection();
+  // FIX #1 + #11: useConnection() result is now actually used — all Connection
+  // instances in this component are created from this endpoint (our /api/rpc proxy).
+  const { connection } = useConnection();
+
+  // FIX #1: We build one Connection backed by our RPC proxy and share it via ref
+  // so buy, sell, balance poll, and confirm all use the same fallback-capable endpoint.
+  const connRef = useRef<Connection>(
+    new Connection(RPC_ENDPOINT, {
+      commitment: "confirmed",
+      confirmTransactionInitialTimeout: 120000,
+    }),
+  );
+
+  // Keep connRef in sync if the wallet adapter's connection changes (e.g. network switch)
+  useEffect(() => {
+    connRef.current = connection;
+  }, [connection]);
 
   const [hotKeypair, setHotKeypair] = useState<Keypair | null>(null);
   const [hotPub, setHotPub] = useState<string | null>(null);
@@ -1734,7 +1902,9 @@ export default function PaperTrader({ selectedMeme }: Props) {
     type: "ok" | "err" | "pending";
   } | null>(null);
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
+  // FIX #2: positions lives in both state AND a ref so triggerSell always reads current data
   const [positions, setPositions] = useState<Position[]>([]);
+  const positionsRef = useRef<Position[]>([]);
   const [log, setLog] = useState<TradeLog[]>([]);
   const [flashPos, setFlashPos] = useState<string | null>(null);
   const [borderFlash, setBorderFlash] = useState(false);
@@ -1750,6 +1920,18 @@ export default function PaperTrader({ selectedMeme }: Props) {
   );
   const mountedRef = useRef(true);
 
+  // FIX #2: keep positionsRef in sync with state
+  const setPositionsSync = useCallback(
+    (updater: Position[] | ((prev: Position[]) => Position[])) => {
+      setPositions((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        positionsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -1763,22 +1945,24 @@ export default function PaperTrader({ selectedMeme }: Props) {
     trailPctRef.current = trailPct;
   }, [trailPct]);
   useEffect(() => {
+    const saved = loadPositions().filter((p) => p.status === "watching");
+    positionsRef.current = saved;
+    setPositions(saved);
     setLog(loadLog());
-    setPositions(loadPositions().filter((p) => p.status === "watching"));
   }, []);
 
-  // Balance polling
+  // Balance polling — FIX #1: uses connRef (proxy) not hardcoded RPC
   useEffect(() => {
     if (!hotPub || !hotKeypair) return;
     const fetchBal = async () => {
       if (!mountedRef.current) return;
       try {
-        const conn = new Connection(RPC, "confirmed");
         const bal =
-          (await conn.getBalance(hotKeypair.publicKey)) / LAMPORTS_PER_SOL;
+          (await connRef.current.getBalance(hotKeypair.publicKey)) /
+          LAMPORTS_PER_SOL;
         if (mountedRef.current) setHotBal(bal);
       } catch {
-        /**/
+        /* retry next interval */
       }
     };
     fetchBal();
@@ -1812,7 +1996,14 @@ export default function PaperTrader({ selectedMeme }: Props) {
       if (!kp || sellingRef.current.has(posId)) return;
       sellingRef.current.add(posId);
 
-      setPositions((prev) => {
+      // FIX #2: read from positionsRef (always current) not localStorage
+      const pos = positionsRef.current.find((p) => p.id === posId);
+      if (!pos || pos.status !== "watching") {
+        sellingRef.current.delete(posId);
+        return;
+      }
+
+      setPositionsSync((prev) => {
         const u = prev.map((p) =>
           p.id === posId ? { ...p, status: "selling" as const } : p,
         );
@@ -1839,20 +2030,24 @@ export default function PaperTrader({ selectedMeme }: Props) {
             : "sell_trail",
       );
 
-      const currentPositions = loadPositions();
-      const pos = currentPositions.find((p) => p.id === posId);
-      if (!pos) {
-        sellingRef.current.delete(posId);
-        return;
-      }
-
       try {
-        const rawBal = await getRawTokenBalance(kp.publicKey, pos.mint);
+        const rawBal = await getRawTokenBalance(
+          connRef.current,
+          kp.publicKey,
+          pos.mint,
+        );
         if (rawBal <= 0) throw new Error("No token balance to sell");
 
-        const sig = await jupiterSell(kp, pos.mint, rawBal, (msg) => {
-          if (mountedRef.current) setStatus({ msg, type: "pending" });
-        });
+        // FIX #1: pass connRef.current instead of creating a new Connection(RPC)
+        const sig = await jupiterSell(
+          connRef.current,
+          kp,
+          pos.mint,
+          rawBal,
+          (msg) => {
+            if (mountedRef.current) setStatus({ msg, type: "pending" });
+          },
+        );
 
         const exitMcap = await fetchMcap(pos.mint);
         const exitPnl =
@@ -1861,7 +2056,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
             : pos.currentPnlPct;
 
         if (mountedRef.current) {
-          setPositions((prev) => {
+          setPositionsSync((prev) => {
             const u = prev.map((p) =>
               p.id === posId
                 ? {
@@ -1909,19 +2104,22 @@ export default function PaperTrader({ selectedMeme }: Props) {
           }, 7000);
         }
 
+        // FIX #7: check hotKeypair is still set before refreshing balance
         setTimeout(async () => {
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || !hotKeypairRef.current) return;
           try {
-            const conn = new Connection(RPC, "confirmed");
-            setHotBal((await conn.getBalance(kp.publicKey)) / LAMPORTS_PER_SOL);
+            const bal =
+              (await connRef.current.getBalance(kp.publicKey)) /
+              LAMPORTS_PER_SOL;
+            if (mountedRef.current) setHotBal(bal);
           } catch {
-            /**/
+            /* non-critical */
           }
         }, 4000);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Unknown error";
         if (mountedRef.current) {
-          setPositions((prev) => {
+          setPositionsSync((prev) => {
             const u = prev.map((p) =>
               p.id === posId ? { ...p, status: "watching" as const } : p,
             );
@@ -1936,13 +2134,16 @@ export default function PaperTrader({ selectedMeme }: Props) {
       }
       sellingRef.current.delete(posId);
     },
-    [],
+    [setPositionsSync],
   );
 
-  // Monitor positions
+  // Monitor positions — FIX #2: reads positionsRef not loadPositions()
   useEffect(() => {
     const monitor = async () => {
-      const watching = loadPositions().filter((p) => p.status === "watching");
+      // FIX #2: use ref instead of localStorage read
+      const watching = positionsRef.current.filter(
+        (p) => p.status === "watching",
+      );
       if (!watching.length) return;
       await Promise.all(
         watching.map(async (pos) => {
@@ -1952,10 +2153,17 @@ export default function PaperTrader({ selectedMeme }: Props) {
             if (!mcap || mcap <= 0) return;
             const pnlPct = (mcap / pos.entryMcap - 1) * 100;
             const newPeak = Math.max(pos.peakMcap, mcap);
-            const trailFrac = (pos.trailPct ?? trailPctRef.current) / 100;
+            // FIX #4: pos.trailPct is always used (set at buy time) — this is
+            // intentional: trail changes only affect NEW positions. We document this
+            // clearly: existing positions keep their buy-time trail setting.
+            const trailFrac = pos.trailPct / 100;
             const trailStop = newPeak * (1 - trailFrac);
             const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
             const tpMcap = pos.entryMcap * pos.tpX;
+
+            // FIX #6: guard against slPct >= 0 (malformed position) — skip SL check
+            const slValid = pos.slPct < 0;
+
             const updated = {
               ...pos,
               currentMcap: mcap,
@@ -1964,18 +2172,18 @@ export default function PaperTrader({ selectedMeme }: Props) {
               trailStopMcap: trailStop,
             };
             if (mountedRef.current) {
-              setPositions((prev) => {
+              setPositionsSync((prev) => {
                 const u = prev.map((p) => (p.id === pos.id ? updated : p));
                 savePositions(u);
                 return u;
               });
             }
             if (mcap >= tpMcap) triggerSell(pos.id, "TP");
-            else if (mcap <= slMcap) triggerSell(pos.id, "SL");
+            else if (slValid && mcap <= slMcap) triggerSell(pos.id, "SL");
             else if (newPeak > pos.entryMcap && mcap <= trailStop)
               triggerSell(pos.id, "TRAIL");
           } catch {
-            /**/
+            /* skip this position this tick */
           }
         }),
       );
@@ -1985,7 +2193,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
     return () => {
       if (monitorTimer.current) clearInterval(monitorTimer.current);
     };
-  }, [triggerSell]);
+  }, [triggerSell, setPositionsSync]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ca = (selectedMeme as any)?.contractAddress || null;
@@ -2010,13 +2218,23 @@ export default function PaperTrader({ selectedMeme }: Props) {
     !buying &&
     (hotBal ?? 0) >= parseFloat(amountSol);
 
+  // FIX #6: validate SL is negative before allowing buy
+  const slIsValid = slPct < 0;
+
   const handleBuy = useCallback(async () => {
     if (!canBuy || !hotKeypair) return;
+    // FIX #6: block buy if SL is somehow non-negative
+    if (!slIsValid) {
+      setStatus({ msg: "Stop loss must be negative (e.g. -20%)", type: "err" });
+      return;
+    }
     setBuying(true);
     setStatus({ msg: "Starting buy…", type: "pending" });
     const amt = parseFloat(amountSol);
     try {
+      // FIX #1: pass connRef.current
       const sig = await jupiterBuy(
+        connRef.current,
         hotKeypair,
         ca,
         Math.floor(amt * 1e9),
@@ -2030,10 +2248,25 @@ export default function PaperTrader({ selectedMeme }: Props) {
           msg: "Confirmed! Reading token balance…",
           type: "pending",
         });
-      await sleep(3000);
 
-      const rawBal = await getRawTokenBalance(hotKeypair.publicKey, ca);
-      const uiBal = await getTokenBalance(hotKeypair.publicKey, ca);
+      // FIX #3: retry balance fetch up to 5 times with 2s gaps instead of a single sleep(3000)
+      let rawBal = 0;
+      let uiBal = 0;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await sleep(2000);
+        rawBal = await getRawTokenBalance(
+          connRef.current,
+          hotKeypair.publicKey,
+          ca,
+        );
+        uiBal = await getTokenBalance(
+          connRef.current,
+          hotKeypair.publicKey,
+          ca,
+        );
+        if (rawBal > 0) break;
+      }
+
       const entryMcap = tokenData?.mcap || mcap;
       const trailFrac = trailPct / 100;
       const pos: Position = {
@@ -2056,7 +2289,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
         imageUrl: tokenData?.imageUrl,
         ts: Date.now(),
       };
-      setPositions((prev) => {
+      setPositionsSync((prev) => {
         const u = [pos, ...prev];
         savePositions(u);
         return u;
@@ -2074,15 +2307,16 @@ export default function PaperTrader({ selectedMeme }: Props) {
         }, 6000);
       }
 
+      // FIX #7: check hotKeypairRef (not closed-over hotKeypair) so lock doesn't cause stale call
       setTimeout(async () => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || !hotKeypairRef.current) return;
         try {
-          const conn = new Connection(RPC, "confirmed");
-          setHotBal(
-            (await conn.getBalance(hotKeypair.publicKey)) / LAMPORTS_PER_SOL,
-          );
+          const bal =
+            (await connRef.current.getBalance(hotKeypair.publicKey)) /
+            LAMPORTS_PER_SOL;
+          if (mountedRef.current) setHotBal(bal);
         } catch {
-          /**/
+          /* non-critical */
         }
       }, 4000);
     } catch (e: unknown) {
@@ -2102,10 +2336,12 @@ export default function PaperTrader({ selectedMeme }: Props) {
     sym,
     amountSol,
     slPct,
+    slIsValid,
     tpX,
     trailPct,
     mcap,
     tokenData,
+    setPositionsSync,
   ]);
 
   const handleUnlocked = useCallback((kp: Keypair, pub: string) => {
@@ -2821,7 +3057,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
               {
                 label: "TRAILING STOP",
                 sublabel:
-                  "Sells if price falls this % below its peak — locks gains",
+                  "Sells if price falls this % below its peak — locks gains. Applies to new positions only.",
                 presets: TRAIL_PRESETS,
                 val: trailPct,
                 setter: setTrailPct,
@@ -3039,7 +3275,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
                 },
                 {
                   label: "Trailing Stop",
-                  val: `-${trailPct}% from peak — locks gains`,
+                  val: `-${trailPct}% from peak — new positions only`,
                   color: C.amber,
                 },
               ].map((item) => (
@@ -3279,6 +3515,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
                       </div>
                     </div>
                     <div style={{ textAlign: "right" as const, flexShrink: 0 }}>
+                      {/* FIX #9: fmtAgo now shows "Nd ago" and actual dates for old entries */}
                       <div style={{ color: C.dim, fontSize: 7, ...MONO }}>
                         {fmtAgo(t.ts)}
                       </div>

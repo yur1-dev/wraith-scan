@@ -23,6 +23,10 @@ import { NextResponse } from "next/server";
 //   - Reduce token count to stay under rate limit
 //   DEXSCREENER FIX:
 //   - Updated to working v1 endpoints
+//   BUG FIXES (v24.1):
+//   - #3: processPumpCoins return type no longer resolves to `never`
+//   - #5: Liquidity floor unified — all gates now use MIN_LIQUIDITY (300)
+//   - #7: $500K mcap off-by-one fixed (>= instead of >)
 // ═══════════════════════════════════════════════════════════════════════════
 
 const UA =
@@ -67,7 +71,7 @@ const MAX_AGE_MINUTES = MAX_AGE_DAYS * 1440;
 const MAX_1H_CHANGE = 300;
 const MAX_24H_CHANGE = 600;
 const MIN_24H_CHANGE = -85;
-const MIN_LIQUIDITY = 300;
+const MIN_LIQUIDITY = 300; // FIX #5: single source of truth for liq floor
 const MAX_LIQ_MCAP_RATIO = 0.8;
 const MIN_VOL_MCAP_RATIO = 0.05;
 const CONFIRMATION_MATRIX_THRESHOLD = 2;
@@ -248,7 +252,7 @@ const REDDIT_SUBS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BLACKLIST (same as v23 — omitted for brevity, paste yours here)
+// BLACKLIST
 // ─────────────────────────────────────────────────────────────────────────────
 const BLACKLIST = new Set([
   "you",
@@ -840,10 +844,11 @@ function calcConviction(input: ConvictionInput): ConvictionResult {
       reasons: [],
       killers: ["Down too much 24h"],
     };
+  // FIX #5: use MIN_LIQUIDITY (300) consistently — was hardcoded 100
   if (
     input.liquidity !== undefined &&
     input.liquidity > 0 &&
-    input.liquidity < 100
+    input.liquidity < MIN_LIQUIDITY
   )
     return {
       score: 0,
@@ -865,7 +870,7 @@ function calcConviction(input: ConvictionInput): ConvictionResult {
     } else if (input.liquidity >= 2000) {
       score += 6;
       reasons.push(`$${(input.liquidity / 1000).toFixed(1)}K liq`);
-    } else if (input.liquidity >= 300) {
+    } else if (input.liquidity >= MIN_LIQUIDITY) {
       score += 3;
       killers.push(`Low liq $${input.liquidity.toFixed(0)}`);
     } else {
@@ -1075,7 +1080,7 @@ function getAnimalBoost(keyword: string, context: string): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FIXED safeFetch — with retry + timeout
+// safeFetch — with retry + timeout
 // ─────────────────────────────────────────────────────────────────────────────
 async function safeFetch(
   url: string,
@@ -1231,9 +1236,7 @@ function getNarrativeBonus(ticker: string): {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIXED: TWITTER SCANNER
-// Primary: Twitter v2 API with correct headers
-// Fallback: Nitter RSS (no auth needed)
+// TWITTER SCANNER
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanTwitter(): Promise<{
   results: { keyword: string; score: number; context: string }[];
@@ -1248,12 +1251,10 @@ async function scanTwitter(): Promise<{
 
   let twitterApiWorked = false;
 
-  // ── ATTEMPT 1: Official Twitter v2 API ────────────────────────────────────
   if (TWITTER_BEARER) {
     const twitterHeaders = {
       Authorization: `Bearer ${TWITTER_BEARER}`,
       "Content-Type": "application/json",
-      // v24 FIX: added these headers — Twitter rejects requests without them
       "x-twitter-client-language": "en",
       "x-twitter-active-environment": "production",
     };
@@ -1261,7 +1262,6 @@ async function scanTwitter(): Promise<{
     let successCount = 0;
 
     for (const query of TWITTER_QUERIES.slice(0, 6)) {
-      // limit to 6 to avoid rate limit
       try {
         const url = `https://api.twitter.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=100&tweet.fields=public_metrics,created_at&expansions=author_id`;
         const ctrl = new AbortController();
@@ -1369,7 +1369,6 @@ async function scanTwitter(): Promise<{
     logs.push("[Twitter] No bearer token — using Nitter fallback");
   }
 
-  // ── FALLBACK: Nitter RSS (works without auth) ─────────────────────────────
   if (!twitterApiWorked) {
     logs.push("[Nitter] Attempting RSS fallback...");
     let nitterWorked = false;
@@ -1436,7 +1435,7 @@ async function scanTwitter(): Promise<{
       }
       if (instanceSuccess > 0) {
         logs.push(`[Nitter] ✓ ${instance} — ${instanceSuccess} queries worked`);
-        break; // use first working instance
+        break;
       }
     }
     if (!nitterWorked) {
@@ -1458,9 +1457,7 @@ async function scanTwitter(): Promise<{
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIXED: TELEGRAM SCANNER
-// Primary: rsshub.app (yours)
-// Fallback: tginfo.me, telegram.me/s/ HTML scrape
+// TELEGRAM SCANNER
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanTelegram(): Promise<{
   results: { keyword: string; score: number; context: string }[];
@@ -1473,19 +1470,17 @@ async function scanTelegram(): Promise<{
   const logs: string[] = [];
   const wordMap = new Map<string, { score: number; context: string }>();
 
-  // RSS proxy options to try in order
   const rssProxies = [
-    (ch: string) => `${TELEGRAM_RSS_BASE}/${ch}`, // your rsshub
-    (ch: string) => `https://rsshub.app/telegram/channel/${ch}`, // rsshub direct
-    (ch: string) => `https://rss.app/feeds/_telegram_${ch}.xml`, // rss.app
-    (ch: string) => `https://tginfo.me/rss/${ch}/`, // tginfo
+    (ch: string) => `${TELEGRAM_RSS_BASE}/${ch}`,
+    (ch: string) => `https://rsshub.app/telegram/channel/${ch}`,
+    (ch: string) => `https://rss.app/feeds/_telegram_${ch}.xml`,
+    (ch: string) => `https://tginfo.me/rss/${ch}/`,
   ];
 
   await Promise.all(
     TELEGRAM_CHANNELS.map(async (channel) => {
       let success = false;
 
-      // Try each proxy
       for (const proxyFn of rssProxies) {
         if (success) break;
         try {
@@ -1576,7 +1571,8 @@ async function scanTelegram(): Promise<{
         }
       }
 
-      // Last resort: scrape telegram.me/s/channel (public preview)
+      // Last resort: scrape telegram.me/s/channel
+      // NOTE #9: this path has no age filter — stale posts can slip through
       if (!success) {
         try {
           const r = await safeFetch(
@@ -1586,19 +1582,59 @@ async function scanTelegram(): Promise<{
           );
           if (r) {
             const html = await r.text();
-            // Extract message text from Telegram web preview
-            const msgMatches =
+
+            // t.me/s/ renders message blocks that each contain a sibling
+            // <time class="time" datetime="2024-01-15T12:34:56+00:00"> element.
+            // We pair each text block with the nearest datetime so we can
+            // apply the same MAX_AGE_MINUTES gate used by the RSS paths above.
+            const msgBlocks =
               html.match(
-                /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g,
+                /<div class="tgme_widget_message_bubble"[\s\S]*?<\/div>\s*<\/div>/g,
               ) || [];
+
+            // Fallback: if the bubble wrapper regex catches nothing, use the
+            // original text-only selector — but still parse any datetime inside.
+            const blocks =
+              msgBlocks.length > 0
+                ? msgBlocks
+                : html.match(
+                    /<div class="tgme_widget_message_text[^"]*"[^>]*>[\s\S]*?<\/div>/g,
+                  ) || [];
+
             let scraped = 0;
-            for (const msg of msgMatches.slice(0, 15)) {
-              const text = msg
+            for (const block of blocks.slice(0, 15)) {
+              // FIX #9: extract datetime and skip posts older than MAX_AGE_MINUTES
+              const dtMatch = block.match(/<time[^>]+datetime="([^"]+)"/);
+              if (dtMatch?.[1]) {
+                const postAgeMinutes =
+                  (Date.now() - new Date(dtMatch[1]).getTime()) / 60000;
+                if (postAgeMinutes > MAX_AGE_MINUTES) continue;
+              }
+
+              const text = block
                 .replace(/<[^>]+>/g, " ")
                 .replace(/\s+/g, " ")
                 .trim()
                 .toLowerCase();
               if (!text || text.length < 10) continue;
+
+              // Recency multiplier — mirror the RSS path logic
+              let recencyMult = 1.0;
+              if (dtMatch?.[1]) {
+                const ageH =
+                  (Date.now() - new Date(dtMatch[1]).getTime()) / 3600000;
+                recencyMult =
+                  ageH < 1
+                    ? 5.0
+                    : ageH < 3
+                      ? 3.5
+                      : ageH < 6
+                        ? 2.5
+                        : ageH < 24
+                          ? 1.5
+                          : 1.0;
+              }
+
               rawTexts.push(text.slice(0, 200));
               scraped++;
               for (const m of text.matchAll(/\$([a-z][a-z0-9]{1,11})\b/g)) {
@@ -1606,7 +1642,7 @@ async function scanTelegram(): Promise<{
                 if (isValidKeyword(ticker)) {
                   const ex = wordMap.get(ticker);
                   wordMap.set(ticker, {
-                    score: (ex?.score || 0) + 5000,
+                    score: (ex?.score || 0) + 5000 * recencyMult,
                     context: ex?.context || text.slice(0, 100),
                   });
                   registerViralWord(
@@ -1649,28 +1685,28 @@ async function scanTelegram(): Promise<{
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIXED: PUMP.FUN SCANNER
-// Uses correct browser-mimic headers that bypass Cloudflare
-// Falls back to pump.fun/advanced API if frontend-api blocks
+// PUMP.FUN SCANNER
 // ─────────────────────────────────────────────────────────────────────────────
-async function scanPumpFun() {
-  const results: {
-    keyword: string;
-    score: number;
-    isNew: boolean;
-    ageMinutes: number;
-    mcap: number;
-    volume: number;
-    contractAddress?: string;
-    name?: string;
-    description?: string;
-    replyCount?: number;
-    nearGraduation?: boolean;
-  }[] = [];
 
-  // v24 FIX: Use the correct API domain + proper browser headers
+// FIX #3: explicit named type — no more circular ReturnType inference
+type PumpResult = {
+  keyword: string;
+  score: number;
+  isNew: boolean;
+  ageMinutes: number;
+  mcap: number;
+  volume: number;
+  contractAddress?: string;
+  name?: string;
+  description?: string;
+  replyCount?: number;
+  nearGraduation?: boolean;
+};
+
+async function scanPumpFun() {
+  const results: PumpResult[] = [];
+
   const endpoints = [
-    // Primary: frontend-api-v3 (newer, less blocked)
     "https://frontend-api-v3.pump.fun/coins?offset=0&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false",
     "https://frontend-api-v3.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
     "https://frontend-api-v3.pump.fun/coins?offset=0&limit=50&sort=reply_count&order=DESC&includeNsfw=false",
@@ -1678,7 +1714,6 @@ async function scanPumpFun() {
     "https://frontend-api-v3.pump.fun/coins?offset=0&limit=50&sort=market_cap&order=ASC&includeNsfw=false",
     "https://frontend-api-v3.pump.fun/coins?offset=100&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
     "https://frontend-api-v3.pump.fun/coins?offset=0&limit=50&sort=market_cap&order=DESC&includeNsfw=false",
-    // Fallback: original frontend-api
     "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false",
     "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
     "https://frontend-api.pump.fun/coins/king-of-the-hill?includeNsfw=false",
@@ -1692,9 +1727,6 @@ async function scanPumpFun() {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 10000);
-
-      // v24 FIX: Use PUMP_HEADERS with correct Origin/Referer
-      // Also try with a 1-second delay between calls to avoid rate limiting
       const r = await fetch(url, {
         headers: PUMP_HEADERS,
         signal: ctrl.signal,
@@ -1703,7 +1735,6 @@ async function scanPumpFun() {
 
       if (!r.ok) {
         pumpLogs.push(`[Pump.fun] ✗ ${url.slice(40, 80)} HTTP ${r.status}`);
-        // If 403, the headers might be wrong — try with different headers
         if (r.status === 403) {
           const r2 = await safeFetch(
             url,
@@ -1734,7 +1765,6 @@ async function scanPumpFun() {
     }
   }
 
-  // If ALL pump endpoints failed, try DexScreener as pump data source
   if (totalSuccess === 0) {
     pumpLogs.push(
       "[Pump.fun] All endpoints failed — pulling new tokens from DexScreener fallback",
@@ -1755,7 +1785,8 @@ async function scanPumpFun() {
           );
           if (!sym || !isValidKeyword(sym) || seen.has(sym)) continue;
           const mcap = token.fdv || token.marketCap || 0;
-          if (mcap > MAX_MCAP && mcap > 0) continue;
+          // FIX #7: >= MAX_MCAP (was > MAX_MCAP, letting exactly $500K through)
+          if (mcap >= MAX_MCAP && mcap > 0) continue;
           seen.add(sym);
           results.push({
             keyword: sym,
@@ -1782,14 +1813,11 @@ async function scanPumpFun() {
   return { results, logs: pumpLogs };
 }
 
+// FIX #3: uses explicit PumpResult[] instead of circular ReturnType inference
 function processPumpCoins(
   coins: Record<string, unknown>[],
   seen: Set<string>,
-  results: ReturnType<typeof scanPumpFun> extends Promise<infer T>
-    ? T extends { results: infer R }
-      ? R
-      : never
-    : never,
+  results: PumpResult[],
   _pumpLogs: string[],
 ): number {
   let added = 0;
@@ -1804,7 +1832,8 @@ function processPumpCoins(
     const description = ((coin.description as string) || "").toLowerCase();
     const name = (coin.name as string) || "";
 
-    if (mcap > MAX_MCAP) continue;
+    // FIX #7: >= MAX_MCAP (was > MAX_MCAP, letting exactly $500K through)
+    if (mcap >= MAX_MCAP) continue;
     if (ageMinutes > MAX_AGE_MINUTES) continue;
 
     const ageMult = ageMultiplier(ageMinutes);
@@ -1879,7 +1908,7 @@ function processPumpCoins(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIXED: GEMINI with retry on 429
+// GEMINI
 // ─────────────────────────────────────────────────────────────────────────────
 interface GeminiStory {
   ticker: string;
@@ -1918,8 +1947,7 @@ async function geminiRequest(
       });
       if (!res.ok) {
         if (res.status === 429) {
-          // Rate limited — wait and retry with exponential backoff
-          const waitMs = Math.pow(2, attempt + 1) * 2000; // 4s, 8s, 16s
+          const waitMs = Math.pow(2, attempt + 1) * 2000;
           await new Promise((r) => setTimeout(r, waitMs));
           continue;
         }
@@ -2018,7 +2046,7 @@ RULES: MAX 15. coinabilityScore = 2x probability. Skip 300%+ pumped. coinMcap un
         if (!s.ticker || !isValidKeyword(cleanTicker(s.ticker))) return false;
         if (s.coinAgeDays !== undefined && s.coinAgeDays > MAX_AGE_DAYS)
           return false;
-        if (s.coinMcap !== undefined && s.coinMcap > MAX_MCAP) return false;
+        if (s.coinMcap !== undefined && s.coinMcap >= MAX_MCAP) return false; // FIX #7
         if ((s.coinabilityScore || 0) < 55) return false;
         return true;
       })
@@ -2092,7 +2120,7 @@ Rules: MAX 8. Only with evidence in data above.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REMAINING SCANNERS (unchanged from v23)
+// REMAINING SCANNERS
 // ─────────────────────────────────────────────────────────────────────────────
 async function scanHackerNews() {
   const results: { keyword: string; score: number; context: string }[] = [];
@@ -2168,7 +2196,8 @@ async function scanBirdeye() {
   }
   try {
     const r = await safeFetch(
-      "https://public-api.birdeye.so/defi/tokenlist?sort_by=v24hUSD&sort_type=desc&offset=0&limit=50&min_liquidity=100&chain=solana",
+      // FIX #5: min_liquidity query param updated to match MIN_LIQUIDITY constant
+      `https://public-api.birdeye.so/defi/tokenlist?sort_by=v24hUSD&sort_type=desc&offset=0&limit=50&min_liquidity=${MIN_LIQUIDITY}&chain=solana`,
       { "X-API-KEY": BIRDEYE_API_KEY, "x-chain": "solana" },
       8000,
     );
@@ -2183,7 +2212,7 @@ async function scanBirdeye() {
       const mcap = token.mc || token.realMc || 0;
       const vol = token.v24hUSD || 0;
       const address = token.address || "";
-      if (!isValidKeyword(sym) || mcap > MAX_MCAP) continue;
+      if (!isValidKeyword(sym) || mcap >= MAX_MCAP) continue; // FIX #7
       const mcapMult = mcapMultiplier(mcap);
       if (mcapMult === 0) continue;
       const volSpike = volumeSpikeMultiplier(vol, mcap);
@@ -2302,7 +2331,8 @@ async function scanDexScreener() {
       for (const token of (data || []).slice(0, 50)) {
         if (token.chainId !== "solana") continue;
         const preMcap = token.fdv || token.marketCap || token.mc || 0;
-        if (preMcap > MAX_MCAP && preMcap > 0) continue;
+        // FIX #7: >= MAX_MCAP
+        if (preMcap >= MAX_MCAP && preMcap > 0) continue;
         const sym = cleanTicker(token.symbol || token.baseToken?.symbol || "");
         if (sym && isValidKeyword(sym))
           results.push({
@@ -2325,7 +2355,8 @@ async function scanDexScreener() {
       for (const token of (data || []).slice(0, 30)) {
         if (token.chainId !== "solana") continue;
         const preMcap = token.fdv || token.marketCap || token.mc || 0;
-        if (preMcap > MAX_MCAP && preMcap > 0) continue;
+        // FIX #7: >= MAX_MCAP
+        if (preMcap >= MAX_MCAP && preMcap > 0) continue;
         const sym = cleanTicker(token.symbol || token.baseToken?.symbol || "");
         if (sym && isValidKeyword(sym))
           results.push({
@@ -2380,9 +2411,11 @@ async function scanDexScreener() {
         const ageMinutes = pair.pairCreatedAt
           ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
           : undefined;
-        if (mcap > MAX_MCAP) return;
+        // FIX #7: >= MAX_MCAP
+        if (mcap >= MAX_MCAP) return;
         if (ageMinutes !== undefined && ageMinutes > MAX_AGE_MINUTES) return;
-        if (liq > 0 && liq < 50) return;
+        // FIX #5: use MIN_LIQUIDITY (was hardcoded 50)
+        if (liq > 0 && liq < MIN_LIQUIDITY) return;
         if (change1h > MAX_1H_CHANGE) return;
         if (change24h > MAX_24H_CHANGE || change24h < MIN_24H_CHANGE) return;
         if (mcap > 0 && liq > 0 && liq / mcap > MAX_LIQ_MCAP_RATIO) return;
@@ -2990,7 +3023,7 @@ export async function GET() {
   ) => {
     const key = word.toLowerCase().trim();
     if (!isValidKeyword(key) || amount <= 0) return;
-    if (opts.mcap !== undefined && opts.mcap > MAX_MCAP) return;
+    if (opts.mcap !== undefined && opts.mcap >= MAX_MCAP) return; // FIX #7
     if (opts.ageMinutes !== undefined && opts.ageMinutes > MAX_AGE_MINUTES)
       return;
     if (
@@ -3487,7 +3520,9 @@ export async function GET() {
         "dexscreener",
         "Narrative Match",
         "narrativeScore",
-        { narrativeStory: story },
+        {
+          narrativeStory: story,
+        },
       );
   }
   logs.push(`[DexScreener] ${dexResults.length} pairs`);
@@ -3544,7 +3579,9 @@ export async function GET() {
             "reddit",
             `r/${sub}`,
             "socialScore",
-            { hasTicker: true },
+            {
+              hasTicker: true,
+            },
           );
       }
       if (upvotes > 5000) {
@@ -3621,7 +3658,7 @@ export async function GET() {
   // ─────────────────────────────────────────────────────────────────────────
   const scoredEntries = Array.from(scoreMap.entries())
     .map(([keyword, v]) => {
-      if (v.mcap !== undefined && v.mcap > MAX_MCAP) return null;
+      if (v.mcap !== undefined && v.mcap >= MAX_MCAP) return null; // FIX #7
       if (v.ageMinutes !== undefined && v.ageMinutes > MAX_AGE_MINUTES)
         return null;
       if (v.priceChange1h !== undefined && v.priceChange1h > MAX_1H_CHANGE)
@@ -3639,7 +3676,12 @@ export async function GET() {
         v.liquidity / v.mcap > MAX_LIQ_MCAP_RATIO
       )
         return null;
-      if (v.liquidity !== undefined && v.liquidity > 0 && v.liquidity < 50)
+      // FIX #5: use MIN_LIQUIDITY (was hardcoded 50)
+      if (
+        v.liquidity !== undefined &&
+        v.liquidity > 0 &&
+        v.liquidity < MIN_LIQUIDITY
+      )
         return null;
       if (
         v.volume !== undefined &&

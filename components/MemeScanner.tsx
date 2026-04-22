@@ -29,6 +29,9 @@ interface ScanResult extends MemeTrend {
   tokenName?: string;
   tokenSymbol?: string;
   tokenImageUrl?: string;
+  // conviction fields from route
+  twoXTier?: "ULTRA" | "HIGH" | "MEDIUM" | "LOW" | "SKIP";
+  twoXScore?: number;
 }
 
 interface McapSnapshot {
@@ -149,32 +152,71 @@ function isGarbageKeyword(kw: string): boolean {
   return false;
 }
 
-// ─── DEAD TOKEN CONSTANTS ────────────────────────────────────────────────────
-const MIN_TRACK_SCORE = 500_000;
-const MIN_TRACK_MCAP = 1_000;
-const MIN_24H_CHANGE = -85; // kill tokens already dumped 85%+
-const MAX_LIQ_TO_MCAP_RATIO = 0.6; // if liq >= 60% of mcap = empty shell
+// ─── WIN TRACKER ENTRY GATES ──────────────────────────────────────────────────
+// Only HIGH/ULTRA conviction tokens with real on-chain data make it in.
+// This keeps the Win Tracker as a curated list of actual gems, not a dump
+// of every random pump.fun coin that crossed the scanner.
+
+const MIN_TRACK_MCAP = 2_000; // need real mcap, not dust
+const MIN_TRACK_LIQUIDITY = 300; // need actual trading happening
+const MIN_24H_CHANGE = -85; // kill already-rugged tokens
+const MAX_LIQ_TO_MCAP_RATIO = 0.6; // empty shell check
 
 export function recordTokenSighting(result: ScanResult) {
+  // ── HARD REQUIREMENTS ────────────────────────────────────────────────────
+  // Must have a CA — we track on-chain tokens only
   if (!result.contractAddress) return;
-  if (isGarbageKeyword(result.keyword)) return;
-  if ((result.score || 0) < MIN_TRACK_SCORE && !result.celebMention) return;
-  if ((result.mcap || 0) > 0 && (result.mcap || 0) < MIN_TRACK_MCAP) return;
-  if ((result.mcap || 0) > 500_000) return;
 
-  // FIX: kill already-dumped tokens before saving
+  // Must not be garbage ticker
+  if (isGarbageKeyword(result.keyword)) return;
+
+  // Must have real mcap data
+  const mcap = result.mcap || 0;
+  if (mcap > 0 && mcap < MIN_TRACK_MCAP) return;
+  if (mcap > 500_000) return;
+
+  // Must have on-chain source — pure social signals don't belong in Win Tracker
+  const hasOnchain = (result.platforms || []).some((p) =>
+    ["pumpfun", "dexscreener", "birdeye"].includes(p),
+  );
+  const isCeleb = !!result.celebMention || result.onCeleb;
+  if (!hasOnchain && !isCeleb) return;
+
+  // ── CONVICTION GATE ───────────────────────────────────────────────────────
+  // Non-celeb tokens must be HIGH or ULTRA conviction from the scan engine.
+  // MEDIUM is allowed only if it also has cross-platform confirmation (2+ sources).
+  // LOW and SKIP are always rejected.
+  const tier = result.twoXTier;
+  if (!isCeleb) {
+    if (!tier || tier === "LOW" || tier === "SKIP") return;
+    if (tier === "MEDIUM" && (result.crossPlatforms ?? 0) < 2) return;
+  } else {
+    // Celeb tokens still need at least MEDIUM conviction or a real on-chain signal
+    if (tier === "SKIP") return;
+    if (!hasOnchain && tier === "LOW") return;
+  }
+
+  // ── QUALITY GATES ─────────────────────────────────────────────────────────
+  // Already dumped 85%+ in 24h — skip
   if ((result.priceChange24h ?? 0) < MIN_24H_CHANGE) return;
 
-  // FIX: kill empty shell tokens (liquidity ≈ mcap = nothing left)
-  if ((result.mcap ?? 0) > 0 && (result.liquidity ?? 0) > 0) {
-    const liqRatio = (result.liquidity ?? 0) / (result.mcap ?? 1);
+  // Liquidity floor — if we have liq data and it's below $300, skip
+  if (
+    (result.liquidity ?? 0) > 0 &&
+    (result.liquidity ?? 0) < MIN_TRACK_LIQUIDITY
+  )
+    return;
+
+  // Empty shell: liquidity ≈ mcap = nothing left to pump
+  if (mcap > 0 && (result.liquidity ?? 0) > 0) {
+    const liqRatio = (result.liquidity ?? 0) / mcap;
     if (liqRatio > MAX_LIQ_TO_MCAP_RATIO) return;
   }
 
+  // ── RECORD ────────────────────────────────────────────────────────────────
   const h = loadHistory();
   const key = result.keyword;
   const now = Date.now();
-  const mcap = result.mcap || 0;
 
   if (!h[key]) {
     h[key] = {
@@ -363,6 +405,35 @@ function TokenAvatar({
     >
       {letter}
     </div>
+  );
+}
+
+// ─── CONVICTION BADGE ─────────────────────────────────────────────────────────
+function ConvictionBadge({ tier, score }: { tier?: string; score?: number }) {
+  if (!tier || tier === "SKIP" || tier === "LOW") return null;
+  const cfg =
+    tier === "ULTRA"
+      ? { label: "🔥 ULTRA", color: "#ffd700", bg: "#120c00" }
+      : tier === "HIGH"
+        ? { label: "⚡ HIGH", color: "#00c47a", bg: "#001610" }
+        : { label: "✦ MED", color: "#ffaa00", bg: "#0e0800" };
+  return (
+    <span
+      style={{
+        fontSize: 8,
+        fontWeight: 700,
+        ...MONO,
+        color: cfg.color,
+        background: cfg.bg,
+        border: `1px solid ${cfg.color}44`,
+        padding: "1px 5px",
+        borderRadius: 2,
+        letterSpacing: "0.06em",
+      }}
+    >
+      {cfg.label}
+      {score !== undefined ? ` ${score}` : ""}
+    </span>
   );
 }
 
@@ -620,7 +691,15 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
   const [autoScan, setAutoScan] = useState(true);
   const [filter, setFilter] = useState<
-    "all" | "celeb" | "new" | "viral" | "social" | "onchain" | "safe" | "fresh"
+    | "all"
+    | "celeb"
+    | "new"
+    | "viral"
+    | "social"
+    | "onchain"
+    | "safe"
+    | "fresh"
+    | "ultra"
   >("all");
   const [expandedDecision, setExpandedDecision] = useState<string | null>(null);
   const [enriching, setEnriching] = useState(false);
@@ -770,6 +849,8 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     if (filter === "celeb") return t.onCeleb || p.includes("celebrity");
     if (filter === "new") return t.isNewCoin;
     if (filter === "fresh") return (t.ageMinutes || Infinity) < 1440;
+    if (filter === "ultra")
+      return t.twoXTier === "ULTRA" || t.twoXTier === "HIGH";
     if (filter === "viral")
       return (
         t.isViralTrend ||
@@ -790,11 +871,15 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
   const freshCount = trends.filter(
     (t) => (t.ageMinutes || Infinity) < 1440,
   ).length;
+  const ultraCount = trends.filter(
+    (t) => t.twoXTier === "ULTRA" || t.twoXTier === "HIGH",
+  ).length;
 
   const TABS: { key: typeof filter; label: string; color?: string }[] = [
     { key: "all", label: "ALL" },
+    { key: "ultra", label: "🔥 ULTRA/HIGH", color: "#ffd700" },
     { key: "celeb", label: "⭐ CELEB", color: "#ffd700" },
-    { key: "fresh", label: "🔥 FRESH", color: "#00c47a" },
+    { key: "fresh", label: "⚡ FRESH", color: "#00c47a" },
     { key: "new", label: "NEW" },
     { key: "viral", label: "VIRAL" },
     { key: "social", label: "SOCIAL" },
@@ -876,6 +961,21 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
             >
               {loading ? "SCANNING" : enriching ? "ENRICHING" : "LIVE"}
             </span>
+            {!loading && ultraCount > 0 && (
+              <span
+                style={{
+                  fontSize: 9,
+                  ...MONO,
+                  color: "#ffd700",
+                  border: "1px solid #ffd70033",
+                  padding: "1px 6px",
+                  borderRadius: 3,
+                  background: "#120c0022",
+                }}
+              >
+                🔥 {ultraCount} HOT
+              </span>
+            )}
             {!loading && celebCount > 0 && (
               <span
                 style={{
@@ -1099,7 +1199,9 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                 ? "NO SAFE TOKENS"
                 : filter === "fresh"
                   ? "NO FRESH TOKENS YET — SCAN NOW"
-                  : "HUNTING..."}
+                  : filter === "ultra"
+                    ? "NO HIGH/ULTRA CONVICTION TOKENS YET"
+                    : "HUNTING..."}
           </div>
         </div>
       )}
@@ -1239,6 +1341,8 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                           {displayName}
                         </span>
                       )}
+                      {/* Conviction badge — now visible in scanner list */}
+                      <ConvictionBadge tier={t.twoXTier} score={t.twoXScore} />
                       {ageDisplay.label && (
                         <span
                           style={{
@@ -1494,13 +1598,16 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         >
           <div style={{ display: "flex", gap: 10 }}>
             <span style={{ color: "#ffd70066", fontSize: 9, ...MONO }}>
+              🔥 {ultraCount} hot
+            </span>
+            <span style={{ color: "#ffd70066", fontSize: 9, ...MONO }}>
               ⭐ {celebCount}
             </span>
             <span style={{ color: "#00c47a66", fontSize: 9, ...MONO }}>
               ⚡ {freshCount} fresh
             </span>
             <span style={{ color: "#ff660066", fontSize: 9, ...MONO }}>
-              🔥 {viralCount}
+              viral {viralCount}
             </span>
             <span style={{ color: "#00c47a55", fontSize: 9, ...MONO }}>
               SAFE: {trends.filter((t) => t.rugRisk === "low").length}

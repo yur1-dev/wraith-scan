@@ -67,12 +67,12 @@ interface TradeLog {
 const LOG_KEY = "wraith_sniper_log_v2";
 const POS_KEY = "wraith_positions_v2";
 const HW_KEY = "wraith_hot_wallet_v1";
-// Shared with WinsPanel — same key so bought state syncs automatically
 const WINS_BOUGHT_KEY = "wraith_bought_keys";
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
 const SOL_MINT = "So11111111111111111111111111111111111111112";
+// Use our own API route as RPC proxy to get fallback handling
 const RPC = "https://solana-rpc.publicnode.com";
 const POLL_MS = 10000;
 
@@ -99,8 +99,6 @@ const C = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WINS PANEL BOUGHT SYNC
-// When PaperTrader confirms a buy, write the keyword (lowercased symbol) to
-// the shared WINS_BOUGHT_KEY so WinsPanel shows "✓ IN" automatically.
 // ─────────────────────────────────────────────────────────────────────────────
 function markBoughtInWinsPanel(keyword: string) {
   if (typeof window === "undefined") return;
@@ -186,50 +184,68 @@ function clearHW() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POLL CONFIRM
+// POLL CONFIRM — fixed: searchTransactionHistory + clearer errors
 // ─────────────────────────────────────────────────────────────────────────────
 async function pollConfirm(
   conn: Connection,
   sig: string,
-  timeoutMs = 90000,
+  timeoutMs = 120000,
+  onStatus?: (msg: string) => void,
 ): Promise<boolean> {
   const start = Date.now();
+  let attempts = 0;
   while (Date.now() - start < timeoutMs) {
+    attempts++;
     try {
-      const { value } = await conn.getSignatureStatuses([sig]);
+      const { value } = await conn.getSignatureStatuses([sig], {
+        searchTransactionHistory: true,
+      });
       const s = value?.[0];
+      if (s?.err) {
+        throw new Error(`Tx rejected on-chain: ${JSON.stringify(s.err)}`);
+      }
       if (
         s &&
-        !s.err &&
         (s.confirmationStatus === "confirmed" ||
           s.confirmationStatus === "finalized")
-      )
+      ) {
         return true;
-      if (s?.err)
-        throw new Error(`Tx failed on-chain: ${JSON.stringify(s.err)}`);
+      }
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      onStatus?.(`Waiting confirm… ${elapsed}s (attempt ${attempts})`);
     } catch (e) {
-      if ((e as Error).message?.includes("Tx failed")) throw e;
+      const msg = (e as Error).message || "";
+      if (msg.includes("Tx rejected")) throw e;
+      // RPC error — keep retrying
     }
-    await sleep(2000);
+    await sleep(3000);
   }
   return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JUPITER — BUY
+// JUPITER — BUY (fixed: higher fee, no skipPreflight, better status updates)
 // ─────────────────────────────────────────────────────────────────────────────
 async function jupiterBuy(
   keypair: Keypair,
   outputMint: string,
   amountLamports: number,
+  onStatus?: (msg: string) => void,
 ): Promise<string> {
-  const conn = new Connection(RPC, "confirmed");
+  const conn = new Connection(RPC, {
+    commitment: "confirmed",
+    confirmTransactionInitialTimeout: 120000,
+  });
+
+  onStatus?.("Fetching quote…");
   const quoteRes = await fetch(
-    `/api/jupiter?endpoint=quote&inputMint=${SOL_MINT}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=300`,
+    `/api/jupiter?endpoint=quote&inputMint=${SOL_MINT}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=500`,
   );
   if (!quoteRes.ok) throw new Error(`Quote failed: ${quoteRes.status}`);
   const quote = await quoteRes.json();
-  if (quote.error) throw new Error(`Quote: ${quote.error}`);
+  if (quote.error) throw new Error(`Quote error: ${quote.error}`);
+
+  onStatus?.("Building swap transaction…");
   const swapRes = await fetch("/api/jupiter?endpoint=swap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -238,40 +254,60 @@ async function jupiterBuy(
       userPublicKey: keypair.publicKey.toString(),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: 100000,
+      prioritizationFeeLamports: 500000, // bumped from 100k → 500k for faster inclusion
     }),
   });
   if (!swapRes.ok) throw new Error(`Swap build failed: ${swapRes.status}`);
-  const { swapTransaction } = await swapRes.json();
+  const swapJson = await swapRes.json();
+  if (swapJson.error) throw new Error(`Swap error: ${swapJson.error}`);
+  const { swapTransaction } = swapJson;
+
+  onStatus?.("Signing & sending transaction…");
   const tx = VersionedTransaction.deserialize(
     Buffer.from(swapTransaction, "base64"),
   );
   tx.sign([keypair]);
+
   const sig = await conn.sendRawTransaction(tx.serialize(), {
-    skipPreflight: true,
-    maxRetries: 3,
+    skipPreflight: false, // catch bad txs immediately
+    preflightCommitment: "processed",
+    maxRetries: 5,
   });
-  const confirmed = await pollConfirm(conn, sig);
-  if (!confirmed)
-    throw new Error("Transaction not confirmed within 90s — check your wallet");
+
+  onStatus?.(`Tx sent: ${sig.slice(0, 10)}… confirming`);
+
+  const confirmed = await pollConfirm(conn, sig, 120000, onStatus);
+  if (!confirmed) {
+    throw new Error(
+      `Tx sent (${sig.slice(0, 8)}…) but not confirmed in 120s. Check Solscan: https://solscan.io/tx/${sig}`,
+    );
+  }
   return sig;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JUPITER — SELL
+// JUPITER — SELL (fixed: higher fee, no skipPreflight)
 // ─────────────────────────────────────────────────────────────────────────────
 async function jupiterSell(
   keypair: Keypair,
   inputMint: string,
   tokenAmount: number,
+  onStatus?: (msg: string) => void,
 ): Promise<string> {
-  const conn = new Connection(RPC, "confirmed");
+  const conn = new Connection(RPC, {
+    commitment: "confirmed",
+    confirmTransactionInitialTimeout: 120000,
+  });
+
+  onStatus?.("Fetching sell quote…");
   const quoteRes = await fetch(
-    `/api/jupiter?endpoint=quote&inputMint=${inputMint}&outputMint=${SOL_MINT}&amount=${Math.floor(tokenAmount)}&slippageBps=500`,
+    `/api/jupiter?endpoint=quote&inputMint=${inputMint}&outputMint=${SOL_MINT}&amount=${Math.floor(tokenAmount)}&slippageBps=700`,
   );
   if (!quoteRes.ok) throw new Error(`Sell quote failed: ${quoteRes.status}`);
   const quote = await quoteRes.json();
-  if (quote.error) throw new Error(`Sell quote: ${quote.error}`);
+  if (quote.error) throw new Error(`Sell quote error: ${quote.error}`);
+
+  onStatus?.("Building sell transaction…");
   const swapRes = await fetch("/api/jupiter?endpoint=swap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -280,21 +316,34 @@ async function jupiterSell(
       userPublicKey: keypair.publicKey.toString(),
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: 200000,
+      prioritizationFeeLamports: 500000, // bumped from 200k → 500k
     }),
   });
   if (!swapRes.ok) throw new Error(`Sell swap build failed: ${swapRes.status}`);
-  const { swapTransaction } = await swapRes.json();
+  const swapJson = await swapRes.json();
+  if (swapJson.error) throw new Error(`Sell swap error: ${swapJson.error}`);
+  const { swapTransaction } = swapJson;
+
+  onStatus?.("Signing & sending sell transaction…");
   const tx = VersionedTransaction.deserialize(
     Buffer.from(swapTransaction, "base64"),
   );
   tx.sign([keypair]);
+
   const sig = await conn.sendRawTransaction(tx.serialize(), {
-    skipPreflight: true,
-    maxRetries: 3,
+    skipPreflight: false,
+    preflightCommitment: "processed",
+    maxRetries: 5,
   });
-  const confirmed = await pollConfirm(conn, sig, 90000);
-  if (!confirmed) throw new Error("Sell not confirmed within 90s");
+
+  onStatus?.(`Sell tx sent: ${sig.slice(0, 10)}… confirming`);
+
+  const confirmed = await pollConfirm(conn, sig, 120000, onStatus);
+  if (!confirmed) {
+    throw new Error(
+      `Sell tx sent (${sig.slice(0, 8)}…) but not confirmed in 120s. Check: https://solscan.io/tx/${sig}`,
+    );
+  }
   return sig;
 }
 
@@ -744,7 +793,6 @@ function NoFillPasswordInput({
   inputId: string;
 }) {
   const [focused, setFocused] = useState(false);
-
   return (
     <div style={{ position: "relative", width: "100%" }}>
       <input
@@ -889,8 +937,7 @@ function HotWalletSetup({
     setBusy(true);
     try {
       const kp = Keypair.generate();
-      const phrase = secretToPhrase(kp.secretKey);
-      setBackupPhrase(phrase);
+      setBackupPhrase(secretToPhrase(kp.secretKey));
       setPendingKp(kp);
       setMode("backup");
     } catch {
@@ -903,9 +950,8 @@ function HotWalletSetup({
     if (!pendingKp) return;
     setBusy(true);
     try {
-      const phrase = secretToPhrase(pendingKp.secretKey);
       saveHW(await encryptKeypair(pendingKp.secretKey, pw));
-      saveRecovery(phrase);
+      saveRecovery(secretToPhrase(pendingKp.secretKey));
       onUnlocked(pendingKp, pendingKp.publicKey.toString());
     } catch {
       setErr("Encryption failed");
@@ -1111,8 +1157,8 @@ function HotWalletSetup({
           ⚠ WRITE DOWN YOUR BACKUP PHRASE
         </div>
         <div style={{ color: C.dim, fontSize: 8, ...MONO, lineHeight: 1.6 }}>
-          This is the only way to recover your wallet if you forget your
-          password. Store it offline — never screenshot or share it.
+          This is the only way to recover your wallet. Store offline — never
+          screenshot or share it.
         </div>
         <div
           style={{
@@ -1392,9 +1438,9 @@ function HotWalletSetup({
       {mode === "unlock" && loadRecovery() && (
         <button
           onClick={() => {
-            const phrase = loadRecovery();
-            if (phrase) {
-              setBackupPhrase(phrase);
+            const p = loadRecovery();
+            if (p) {
+              setBackupPhrase(p);
               setMode("backup");
             }
           }}
@@ -1710,14 +1756,12 @@ export default function PaperTrader({ selectedMeme }: Props) {
       mountedRef.current = false;
     };
   }, []);
-
   useEffect(() => {
     hotKeypairRef.current = hotKeypair;
   }, [hotKeypair]);
   useEffect(() => {
     trailPctRef.current = trailPct;
   }, [trailPct]);
-
   useEffect(() => {
     setLog(loadLog());
     setPositions(loadPositions().filter((p) => p.status === "watching"));
@@ -1805,7 +1849,11 @@ export default function PaperTrader({ selectedMeme }: Props) {
       try {
         const rawBal = await getRawTokenBalance(kp.publicKey, pos.mint);
         if (rawBal <= 0) throw new Error("No token balance to sell");
-        const sig = await jupiterSell(kp, pos.mint, rawBal);
+
+        const sig = await jupiterSell(kp, pos.mint, rawBal, (msg) => {
+          if (mountedRef.current) setStatus({ msg, type: "pending" });
+        });
+
         const exitMcap = await fetchMcap(pos.mint);
         const exitPnl =
           exitMcap > 0
@@ -1880,10 +1928,10 @@ export default function PaperTrader({ selectedMeme }: Props) {
             savePositions(u);
             return u;
           });
-          setStatus({ msg: `✕ Sell failed: ${msg.slice(0, 44)}`, type: "err" });
+          setStatus({ msg: `✕ Sell failed: ${msg.slice(0, 60)}`, type: "err" });
           setTimeout(() => {
             if (mountedRef.current) setStatus(null);
-          }, 8000);
+          }, 10000);
         }
       }
       sellingRef.current.delete(posId);
@@ -1965,12 +2013,25 @@ export default function PaperTrader({ selectedMeme }: Props) {
   const handleBuy = useCallback(async () => {
     if (!canBuy || !hotKeypair) return;
     setBuying(true);
-    setStatus({ msg: "Building swap…", type: "pending" });
+    setStatus({ msg: "Starting buy…", type: "pending" });
     const amt = parseFloat(amountSol);
     try {
-      const sig = await jupiterBuy(hotKeypair, ca, Math.floor(amt * 1e9));
-      setStatus({ msg: "Confirmed! Reading token balance…", type: "pending" });
+      const sig = await jupiterBuy(
+        hotKeypair,
+        ca,
+        Math.floor(amt * 1e9),
+        (msg) => {
+          if (mountedRef.current) setStatus({ msg, type: "pending" });
+        },
+      );
+
+      if (mountedRef.current)
+        setStatus({
+          msg: "Confirmed! Reading token balance…",
+          type: "pending",
+        });
       await sleep(3000);
+
       const rawBal = await getRawTokenBalance(hotKeypair.publicKey, ca);
       const uiBal = await getTokenBalance(hotKeypair.publicKey, ca);
       const entryMcap = tokenData?.mcap || mcap;
@@ -2000,17 +2061,11 @@ export default function PaperTrader({ selectedMeme }: Props) {
         savePositions(u);
         return u;
       });
-
-      // ── AUTO-SYNC TO WINS PANEL ──────────────────────────────────────────
-      // Mark the keyword (lowercased) as bought so WinsPanel shows "✓ IN"
-      // without the user having to manually tap BUY? in the wins panel.
-      const winKeyword = (sym || "").toLowerCase();
-      markBoughtInWinsPanel(winKeyword);
-      // ────────────────────────────────────────────────────────────────────
+      markBoughtInWinsPanel((sym || "").toLowerCase());
 
       if (mountedRef.current) {
         setStatus({
-          msg: `✓ Bought ${uiBal > 0 ? uiBal.toFixed(0) : "?"} $${sym} · auto-sell armed · marked IN on Win Tracker`,
+          msg: `✓ Bought ${uiBal > 0 ? uiBal.toFixed(0) : "?"} $${sym} · auto-sell armed`,
           type: "ok",
         });
         setTab("positions");
@@ -2018,6 +2073,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
           if (mountedRef.current) setStatus(null);
         }, 6000);
       }
+
       setTimeout(async () => {
         if (!mountedRef.current) return;
         try {
@@ -2032,10 +2088,10 @@ export default function PaperTrader({ selectedMeme }: Props) {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       if (mountedRef.current) {
-        setStatus({ msg: `✕ ${msg.slice(0, 50)}`, type: "err" });
+        setStatus({ msg: `✕ ${msg.slice(0, 80)}`, type: "err" });
         setTimeout(() => {
           if (mountedRef.current) setStatus(null);
-        }, 8000);
+        }, 12000);
       }
     }
     if (mountedRef.current) setBuying(false);
@@ -2205,7 +2261,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
           flexDirection: "column",
         }}
       >
-        {/* WALLET SETUP */}
         {!collapsed && !hotKeypair && (
           <HotWalletSetup onUnlocked={handleUnlocked} />
         )}
@@ -2462,7 +2517,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
               ))}
             </div>
 
-            {/* SL / TP presets */}
+            {/* SL / TP */}
             <div style={{ display: "flex", gap: 5 }}>
               <div style={{ flex: 1 }}>
                 <div

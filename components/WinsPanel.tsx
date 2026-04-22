@@ -691,12 +691,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
   }, [runRefresh]);
 
   // ── Derived state
+  // Only show tokens that have hit 2x peak — no-movement trash is hidden
   const list = useMemo(
     () =>
-      Object.values(history).sort(
-        (a, b) =>
-          calcX(b.initialMcap, b.peakMcap) - calcX(a.initialMcap, a.peakMcap),
-      ),
+      Object.values(history)
+        .filter((e) => calcX(e.initialMcap, e.peakMcap) >= 2)
+        .sort(
+          (a, b) =>
+            calcX(b.initialMcap, b.peakMcap) - calcX(a.initialMcap, a.peakMcap),
+        ),
     [history],
   );
 
@@ -1032,7 +1035,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               ...MONO,
             }}
           >
-            NO TRACKED TOKENS
+            NO WINS YET
           </div>
           <div
             style={{
@@ -1044,8 +1047,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               lineHeight: 1.6,
             }}
           >
-            Tokens with on-chain mcap data are tracked automatically on each
-            scan
+            Tokens appear here once they hit 2x from their spotted mcap
           </div>
         </div>
       )}

@@ -173,6 +173,8 @@ function isDeadEntry(e: HistoryEntry, nowMs: number): boolean {
   return false;
 }
 
+// FIX: purgeDead is now only called when the user explicitly confirms.
+// It is NOT called automatically on load or refresh anymore.
 function purgeDead(
   h: Record<string, HistoryEntry>,
 ): Record<string, HistoryEntry> {
@@ -182,6 +184,12 @@ function purgeDead(
     if (!isDeadEntry(e, now)) out[k] = e;
   }
   return out;
+}
+
+// Count dead entries without removing them — used to prompt the user
+function countDead(h: Record<string, HistoryEntry>): number {
+  const now = Date.now();
+  return Object.values(h).filter((e) => isDeadEntry(e, now)).length;
 }
 
 // ─── FORMATTERS ───────────────────────────────────────────────────────────────
@@ -404,6 +412,10 @@ export default function WinsPanel({ onSelectMeme }: Props) {
   const [selKey, setSelKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
+  // FIX: dead purge prompt state — shown when dead tokens are detected
+  const [deadCount, setDeadCount] = useState(0);
+  const [purgeDismissed, setPurgeDismissed] = useState(false);
+
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
@@ -420,22 +432,18 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     setDismissed(loadDismissedKeys());
   }, []);
 
-  // ── Listen for PaperTrader buy events via localStorage storage event
+  // Listen for PaperTrader buy events via localStorage storage event
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === BOUGHT_KEY) {
-        setBoughtKeys(loadBoughtKeys());
-      }
+      if (e.key === BOUGHT_KEY) setBoughtKeys(loadBoughtKeys());
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
-  // ── Also poll BOUGHT_KEY every 5s to catch same-tab updates from PaperTrader
+  // Poll BOUGHT_KEY every 5s to catch same-tab updates from PaperTrader
   useEffect(() => {
-    const t = setInterval(() => {
-      setBoughtKeys(loadBoughtKeys());
-    }, 5000);
+    const t = setInterval(() => setBoughtKeys(loadBoughtKeys()), 5000);
     return () => clearInterval(t);
   }, []);
 
@@ -449,10 +457,14 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         continue;
       filtered[k] = e;
     }
-    const clean = purgeDead(filtered);
-    if (Object.keys(clean).length !== Object.keys(h).length) saveHistory(clean);
-    setHistory(clean);
-    backfill(clean);
+
+    // FIX: do NOT auto-purge dead tokens on load.
+    // Instead count them and show a prompt banner.
+    const dead = countDead(filtered);
+    if (dead > 0) setDeadCount(dead);
+
+    setHistory(filtered);
+    backfill(filtered);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -503,14 +515,11 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     saveBoughtKeys(next);
   };
 
-  // FIX #4 / #8: markSold only removes from bought — does NOT dismiss.
-  // Dismissal is a separate explicit action via the ✕ button or dismissEntry().
   const markSold = (kw: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const nextBought = new Set([...boughtKeys].filter((k) => k !== kw));
     setBoughtKeys(nextBought);
     saveBoughtKeys(nextBought);
-    // ← intentionally NOT calling dismissEntry here
   };
 
   const dismissEntry = (kw: string) => {
@@ -566,7 +575,18 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     setSelKey(null);
   };
 
-  // ── Open token in chart / token panel
+  // FIX: user-initiated purge — only runs when user clicks "PURGE DEAD"
+  const confirmPurge = () => {
+    const cur = loadSafeHistory();
+    startUndo({ ...cur }); // allow undo
+    const cleaned = purgeDead(cur);
+    saveHistory(cleaned);
+    setHistory(cleaned);
+    setDeadCount(0);
+    setPurgeDismissed(false);
+    if (selKey && !cleaned[selKey]) setSelKey(null);
+  };
+
   const openInPanel = (entry: HistoryEntry, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!onSelectMeme) return;
@@ -652,11 +672,16 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       }),
     );
 
+    // FIX: after refresh, recount dead tokens and update the prompt.
+    // Do NOT auto-purge — just update the count so the banner stays accurate.
     setHistory((prev) => {
       const merged = { ...prev, ...updates };
-      const clean = purgeDead(merged);
-      saveHistory(clean);
-      return clean;
+      // Only save — no silent purge
+      saveHistory(merged);
+      const dead = countDead(merged);
+      setDeadCount(dead);
+      if (dead === 0) setPurgeDismissed(false);
+      return merged;
     });
 
     setRefreshing(false);
@@ -690,9 +715,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     };
   }, [runRefresh]);
 
-  // ── Derived state
-  // FIX #6: removed dead `winners` memo — list is already filtered to >= 2x,
-  // so winners === list always. Stats bar now uses list.length directly.
   const list = useMemo(
     () =>
       Object.values(history)
@@ -725,6 +747,9 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       ),
     [list, boughtKeys, dismissed],
   );
+
+  // Whether to show the dead purge banner
+  const showPurgeBanner = deadCount > 0 && !purgeDismissed;
 
   return (
     <div
@@ -864,8 +889,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               color: C.orange,
             },
             {
-              // FIX #6: was winners.length (dead memo, always === list.length)
-              // now correctly uses list.length since list is already 2x-filtered
               label: "2X+ WINS",
               value: list.length.toString(),
               color: C.green,
@@ -933,6 +956,79 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── DEAD TOKEN PURGE BANNER (opt-in) ─────────────────────────────────
+           FIX: replaces the old silent auto-purge. User sees how many tokens
+           are considered dead/stale and can choose to purge or keep them.
+           Dismissing the banner hides it for this session without deleting anything. */}
+      {showPurgeBanner && (
+        <div
+          style={{
+            background: "#0d0600",
+            borderBottom: `1px solid ${C.amber}22`,
+            padding: "9px 14px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexShrink: 0,
+            gap: 8,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: C.amber,
+                fontSize: 10,
+                fontWeight: 700,
+                ...MONO,
+                letterSpacing: "0.08em",
+              }}
+            >
+              🗑 {deadCount} dead / stale token{deadCount !== 1 ? "s" : ""}{" "}
+              detected
+            </div>
+            <div style={{ color: C.dim, fontSize: 8, ...MONO, marginTop: 2 }}>
+              Down {(DEAD_THRESHOLD * 100).toFixed(0)}%+ from entry or older
+              than 3 days
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+            <button
+              onClick={confirmPurge}
+              style={{
+                background: "#1a0800",
+                border: `1px solid ${C.amber}44`,
+                color: C.amber,
+                fontSize: 9,
+                fontWeight: 700,
+                ...MONO,
+                padding: "5px 10px",
+                borderRadius: 3,
+                cursor: "pointer",
+                letterSpacing: "0.08em",
+              }}
+            >
+              PURGE
+            </button>
+            <button
+              onClick={() => setPurgeDismissed(true)}
+              style={{
+                background: "transparent",
+                border: `1px solid ${C.border}`,
+                color: C.dim,
+                fontSize: 9,
+                ...MONO,
+                padding: "5px 8px",
+                borderRadius: 3,
+                cursor: "pointer",
+              }}
+              title="Keep dead tokens and hide this banner"
+            >
+              KEEP
+            </button>
+          </div>
         </div>
       )}
 
@@ -1064,8 +1160,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           const isUpd = updating.has(entry.keyword);
           const isSel = selKey === entry.keyword;
           const hasBought = boughtKeys.has(entry.keyword);
-
-          // TAKE PROFIT: only show for tokens you've marked as bought
           const showTP =
             xNow >= 2 && hasBought && !dismissed.has(entry.keyword);
 
@@ -1078,7 +1172,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 : isDead
                   ? C.red
                   : C.border;
-
           const drop =
             xPeak > 0
               ? ((entry.peakMcap - entry.currentMcap) / entry.peakMcap) * 100
@@ -1143,9 +1236,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       {fmtMcap(entry.currentMcap)}
                     </div>
                   </div>
-                  {/* FIX #4 / #8: DEX link and SOLD button are now separate.
-                      The link opens DexScreener. The SOLD button only marks
-                      as sold (removes ✓ IN badge). Neither auto-dismisses. */}
                   <div
                     style={{
                       display: "flex",
@@ -1236,7 +1326,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                     symbol={sym}
                     size={40}
                   />
-
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {/* Name + badges */}
                     <div
@@ -1366,7 +1455,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       )}
                     </div>
 
-                    {/* AI context */}
                     {entry.aiContext && (
                       <div
                         style={{
@@ -1461,7 +1549,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                       })}
                     </div>
                   </div>
-
                   <XBadge xNow={xNow} xPeak={xPeak} updating={isUpd} />
                 </div>
 
@@ -1520,8 +1607,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           : `-${((1 - xNow) * 100).toFixed(0)}%`}
                       </span>
                     )}
-
-                    {/* CHART button */}
                     {entry.contractAddress && onSelectMeme && (
                       <button
                         onClick={(e) => openInPanel(entry, e)}
@@ -1541,7 +1626,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         CHART↗
                       </button>
                     )}
-
                     {entry.contractAddress && (
                       <>
                         <a
@@ -1580,7 +1664,6 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         </a>
                       </>
                     )}
-
                     <button
                       onClick={(e) =>
                         hasBought

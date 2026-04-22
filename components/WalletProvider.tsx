@@ -1,6 +1,5 @@
 "use client";
 
-import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import {
   ConnectionProvider,
   WalletProvider as SolanaWalletProvider,
@@ -19,10 +18,9 @@ export default function WalletProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const network = WalletAdapterNetwork.Mainnet;
   const wallets = useMemo(
     () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
-    [network],
+    [], // adapters are stateless singletons — no deps needed
   );
 
   return (

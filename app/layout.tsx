@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import WalletProvider from "@/components/WalletProvider";
+import SessionProvider from "@/components/SessionProvider";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 const mono = IBM_Plex_Mono({
   weight: ["400", "500", "700"],
@@ -15,15 +18,19 @@ export const metadata: Metadata = {
   description: "Scan viral memes, find Solana tokens, buy instantly.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await getServerSession(authOptions);
+
   return (
     <html lang="en" className={mono.variable}>
       <body style={{ fontFamily: "var(--font-mono)" }}>
-        <WalletProvider>{children}</WalletProvider>
+        <SessionProvider session={session}>
+          <WalletProvider>{children}</WalletProvider>
+        </SessionProvider>
       </body>
     </html>
   );

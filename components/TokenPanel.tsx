@@ -535,7 +535,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
       setBuyMsg("");
       fetchEvidence(selectedMeme);
     }
-  }, [selectedMeme?.keyword]);
+  }, [selectedMeme?.contractAddress ?? selectedMeme?.keyword]);
 
   // FIX #1: Jupiter swap now routes through /api/jupiter proxy (no CORS),
   // and uses VersionedTransaction instead of the legacy Transaction class

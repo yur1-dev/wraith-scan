@@ -64,8 +64,6 @@ interface TradeLog {
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-const LOG_KEY = "wraith_sniper_log_v2";
-const POS_KEY = "wraith_positions_v2";
 const HW_KEY = "wraith_hot_wallet_v1";
 const WINS_BOUGHT_KEY = "wraith_bought_keys";
 const MONO = {
@@ -73,9 +71,6 @@ const MONO = {
 };
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
-// FIX: getRpcEndpoint() returns a full absolute URL — safe for both SSR and client.
-// During SSR window is undefined so we fall back to a public RPC; on the client
-// we use our own /api/rpc proxy (which has its own fallback chain).
 function getRpcEndpoint(): string {
   if (typeof window === "undefined") return "https://solana-rpc.publicnode.com";
   return `${window.location.origin}/api/rpc`;
@@ -104,7 +99,7 @@ const C = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WINS PANEL BOUGHT SYNC
+// WINS PANEL BOUGHT SYNC — stays in localStorage (local UI state only)
 // ─────────────────────────────────────────────────────────────────────────────
 function markBoughtInWinsPanel(keyword: string) {
   if (typeof window === "undefined") return;
@@ -121,7 +116,59 @@ function markBoughtInWinsPanel(keyword: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CRYPTO HELPERS
+// MONGODB PERSISTENCE — replaces loadPositions/savePositions/loadLog/saveLog
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function fetchPositions(): Promise<Position[]> {
+  try {
+    const res = await fetch("/api/positions");
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.positions ?? []).filter(
+      (p: Position) => p.status === "watching",
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function persistPositions(positions: Position[]): Promise<void> {
+  try {
+    await fetch("/api/positions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ positions }),
+    });
+  } catch {
+    /* non-critical — positions are live in state */
+  }
+}
+
+async function fetchTrades(): Promise<TradeLog[]> {
+  try {
+    const res = await fetch("/api/trades");
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.trades ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendTrade(trade: TradeLog): Promise<void> {
+  try {
+    await fetch("/api/trades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trade }),
+    });
+  } catch {
+    /* non-critical */
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRYPTO HELPERS — hot wallet stays encrypted in localStorage (correct place)
 // ─────────────────────────────────────────────────────────────────────────────
 async function deriveKey(
   password: string,
@@ -190,7 +237,7 @@ function clearHW() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RECOVERY KEY STORAGE — encrypted with keypair-derived key
+// RECOVERY KEY STORAGE
 // ─────────────────────────────────────────────────────────────────────────────
 const RK_KEY = "wraith_recovery_v2";
 
@@ -276,7 +323,7 @@ function phraseToSecret(phrase: string): Uint8Array {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POLL CONFIRM — surfaces RPC errors after 3 consecutive failures
+// POLL CONFIRM
 // ─────────────────────────────────────────────────────────────────────────────
 async function pollConfirm(
   conn: Connection,
@@ -324,14 +371,22 @@ async function pollConfirm(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JUPITER — BUY
+// Returns { sig, rawTokenAmount } — rawTokenAmount comes from quote.outAmount,
+// no RPC polling needed to read the balance after confirmation.
 // ─────────────────────────────────────────────────────────────────────────────
+interface BuyResult {
+  sig: string;
+  /** Raw token units (no decimals applied) from Jupiter quote.outAmount */
+  rawTokenAmount: number;
+}
+
 async function jupiterBuy(
   conn: Connection,
   keypair: Keypair,
   outputMint: string,
   amountLamports: number,
   onStatus?: (msg: string) => void,
-): Promise<string> {
+): Promise<BuyResult> {
   onStatus?.("Fetching quote…");
   const quoteRes = await fetch(
     `/api/jupiter?endpoint=quote&inputMint=${SOL_MINT}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=500`,
@@ -339,6 +394,10 @@ async function jupiterBuy(
   if (!quoteRes.ok) throw new Error(`Quote failed: ${quoteRes.status}`);
   const quote = await quoteRes.json();
   if (quote.error) throw new Error(`Quote error: ${quote.error}`);
+
+  // outAmount is a string representing raw token units (no decimal scaling).
+  // We capture it here so handleBuy never has to poll RPC for the balance.
+  const rawTokenAmount = Number(quote.outAmount ?? "0");
 
   onStatus?.("Building swap transaction…");
   const swapRes = await fetch("/api/jupiter?endpoint=swap", {
@@ -377,7 +436,7 @@ async function jupiterBuy(
       `Tx sent (${sig.slice(0, 8)}…) but not confirmed in 120s. Check Solscan: https://solscan.io/tx/${sig}`,
     );
   }
-  return sig;
+  return { sig, rawTokenAmount };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -439,7 +498,7 @@ async function jupiterSell(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOKEN BALANCE
+// TOKEN BALANCE — still used by triggerSell to get exact on-chain raw amount
 // ─────────────────────────────────────────────────────────────────────────────
 async function getTokenBalance(
   conn: Connection,
@@ -517,38 +576,6 @@ async function fetchTokenData(
 async function fetchMcap(ca: string): Promise<number> {
   const d = await fetchTokenData(ca);
   return d?.mcap ?? 0;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PERSISTENCE
-// ─────────────────────────────────────────────────────────────────────────────
-function loadPositions(): Position[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(POS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-function savePositions(p: Position[]) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(POS_KEY, JSON.stringify(p));
-  } catch {}
-}
-function loadLog(): TradeLog[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(LOG_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-function saveLog(l: TradeLog[]) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(LOG_KEY, JSON.stringify(l.slice(0, 200)));
-  } catch {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1850,10 +1877,7 @@ function PositionCard({
 export default function PaperTrader({ selectedMeme }: Props) {
   const { connection } = useConnection();
 
-  // FIX: connRef is initialized lazily on first client render via getConn().
-  // This avoids calling `new Connection()` during SSR where window.location is undefined.
   const connRef = useRef<Connection | null>(null);
-
   const getConn = useCallback((): Connection => {
     if (!connRef.current) {
       connRef.current = new Connection(getRpcEndpoint(), {
@@ -1864,7 +1888,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
     return connRef.current;
   }, []);
 
-  // Keep connRef in sync when wallet adapter's connection changes (e.g. network switch)
   useEffect(() => {
     if (connection) connRef.current = connection;
   }, [connection]);
@@ -1899,6 +1922,8 @@ export default function PaperTrader({ selectedMeme }: Props) {
   const [flashPos, setFlashPos] = useState<string | null>(null);
   const [borderFlash, setBorderFlash] = useState(false);
 
+  const [dbLoaded, setDbLoaded] = useState(false);
+
   const fetchAbortRef = useRef<AbortController | null>(null);
   const balTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const monitorTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1910,11 +1935,19 @@ export default function PaperTrader({ selectedMeme }: Props) {
   );
   const mountedRef = useRef(true);
 
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const setPositionsSync = useCallback(
     (updater: Position[] | ((prev: Position[]) => Position[])) => {
       setPositions((prev) => {
         const next = typeof updater === "function" ? updater(prev) : updater;
         positionsRef.current = next;
+
+        if (persistTimer.current) clearTimeout(persistTimer.current);
+        persistTimer.current = setTimeout(() => {
+          persistPositions(next.filter((p) => p.status === "watching"));
+        }, 1000);
+
         return next;
       });
     },
@@ -1925,19 +1958,32 @@ export default function PaperTrader({ selectedMeme }: Props) {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (persistTimer.current) clearTimeout(persistTimer.current);
     };
   }, []);
+
   useEffect(() => {
     hotKeypairRef.current = hotKeypair;
   }, [hotKeypair]);
   useEffect(() => {
     trailPctRef.current = trailPct;
   }, [trailPct]);
+
+  // Load positions + trades from MongoDB on mount
   useEffect(() => {
-    const saved = loadPositions().filter((p) => p.status === "watching");
-    positionsRef.current = saved;
-    setPositions(saved);
-    setLog(loadLog());
+    let cancelled = false;
+    Promise.all([fetchPositions(), fetchTrades()]).then(
+      ([savedPositions, savedTrades]) => {
+        if (cancelled) return;
+        positionsRef.current = savedPositions;
+        setPositions(savedPositions);
+        setLog(savedTrades);
+        setDbLoaded(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Balance polling
@@ -1990,13 +2036,11 @@ export default function PaperTrader({ selectedMeme }: Props) {
         return;
       }
 
-      setPositionsSync((prev) => {
-        const u = prev.map((p) =>
+      setPositionsSync((prev) =>
+        prev.map((p) =>
           p.id === posId ? { ...p, status: "selling" as const } : p,
-        );
-        savePositions(u);
-        return u;
-      });
+        ),
+      );
 
       if (borderFlashTimerRef.current)
         clearTimeout(borderFlashTimerRef.current);
@@ -2033,8 +2077,8 @@ export default function PaperTrader({ selectedMeme }: Props) {
             : pos.currentPnlPct;
 
         if (mountedRef.current) {
-          setPositionsSync((prev) => {
-            const u = prev.map((p) =>
+          setPositionsSync((prev) =>
+            prev.map((p) =>
               p.id === posId
                 ? {
                     ...p,
@@ -2045,10 +2089,8 @@ export default function PaperTrader({ selectedMeme }: Props) {
                     exitTxSig: sig,
                   }
                 : p,
-            );
-            savePositions(u);
-            return u;
-          });
+            ),
+          );
         }
 
         const logEntry: TradeLog = {
@@ -2068,10 +2110,13 @@ export default function PaperTrader({ selectedMeme }: Props) {
           imageUrl: pos.imageUrl,
           ts: pos.ts,
         };
-        const updated = [logEntry, ...loadLog()];
-        saveLog(updated);
+
         if (mountedRef.current) {
-          setLog(updated);
+          setLog((prev) => [logEntry, ...prev]);
+        }
+        appendTrade(logEntry);
+
+        if (mountedRef.current) {
           setStatus({
             msg: `✓ ${reason} — SOLD $${pos.symbol} ${fmtPnl(exitPnl)}`,
             type: "ok",
@@ -2094,13 +2139,11 @@ export default function PaperTrader({ selectedMeme }: Props) {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Unknown error";
         if (mountedRef.current) {
-          setPositionsSync((prev) => {
-            const u = prev.map((p) =>
+          setPositionsSync((prev) =>
+            prev.map((p) =>
               p.id === posId ? { ...p, status: "watching" as const } : p,
-            );
-            savePositions(u);
-            return u;
-          });
+            ),
+          );
           setStatus({ msg: `✕ Sell failed: ${msg.slice(0, 60)}`, type: "err" });
           setTimeout(() => {
             if (mountedRef.current) setStatus(null);
@@ -2141,11 +2184,9 @@ export default function PaperTrader({ selectedMeme }: Props) {
               trailStopMcap: trailStop,
             };
             if (mountedRef.current) {
-              setPositionsSync((prev) => {
-                const u = prev.map((p) => (p.id === pos.id ? updated : p));
-                savePositions(u);
-                return u;
-              });
+              setPositionsSync((prev) =>
+                prev.map((p) => (p.id === pos.id ? updated : p)),
+              );
             }
             if (mcap >= tpMcap) triggerSell(pos.id, "TP");
             else if (slValid && mcap <= slMcap) triggerSell(pos.id, "SL");
@@ -2200,7 +2241,12 @@ export default function PaperTrader({ selectedMeme }: Props) {
     const amt = parseFloat(amountSol);
     try {
       const conn = getConn();
-      const sig = await jupiterBuy(
+
+      // ── jupiterBuy now returns { sig, rawTokenAmount } from quote.outAmount.
+      // No RPC polling loop needed — the quote already tells us exactly how
+      // many raw token units we'll receive (before slippage adjustments, but
+      // accurate enough for position tracking).
+      const { sig, rawTokenAmount } = await jupiterBuy(
         conn,
         hotKeypair,
         ca,
@@ -2211,19 +2257,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
       );
 
       if (mountedRef.current)
-        setStatus({
-          msg: "Confirmed! Reading token balance…",
-          type: "pending",
-        });
-
-      let rawBal = 0;
-      let uiBal = 0;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        await sleep(2000);
-        rawBal = await getRawTokenBalance(conn, hotKeypair.publicKey, ca);
-        uiBal = await getTokenBalance(conn, hotKeypair.publicKey, ca);
-        if (rawBal > 0) break;
-      }
+        setStatus({ msg: "Confirmed! Building position…", type: "pending" });
 
       const entryMcap = tokenData?.mcap || mcap;
       const trailFrac = trailPct / 100;
@@ -2233,7 +2267,8 @@ export default function PaperTrader({ selectedMeme }: Props) {
         mint: ca,
         entryMcap,
         entryPrice: tokenData?.price || 0,
-        tokenAmount: rawBal,
+        // rawTokenAmount from quote.outAmount — no RPC polling required
+        tokenAmount: rawTokenAmount,
         amountSol: amt,
         slPct,
         tpX,
@@ -2247,16 +2282,23 @@ export default function PaperTrader({ selectedMeme }: Props) {
         imageUrl: tokenData?.imageUrl,
         ts: Date.now(),
       };
-      setPositionsSync((prev) => {
-        const u = [pos, ...prev];
-        savePositions(u);
-        return u;
-      });
+      setPositionsSync((prev) => [pos, ...prev]);
       markBoughtInWinsPanel((sym || "").toLowerCase());
+
+      // Derive a human-readable display amount from rawTokenAmount.
+      // We don't have decimals here so show it as a large integer — good enough
+      // for the status message. The monitor loop uses getRawTokenBalance on sell
+      // so the actual on-chain amount is always used when it matters.
+      const displayAmt =
+        rawTokenAmount > 1e6
+          ? `${(rawTokenAmount / 1e6).toFixed(1)}M`
+          : rawTokenAmount > 1e3
+            ? `${(rawTokenAmount / 1e3).toFixed(1)}K`
+            : rawTokenAmount.toFixed(0);
 
       if (mountedRef.current) {
         setStatus({
-          msg: `✓ Bought ${uiBal > 0 ? uiBal.toFixed(0) : "?"} $${sym} · auto-sell armed`,
+          msg: `✓ Bought ~${displayAmt} $${sym} · auto-sell armed`,
           type: "ok",
         });
         setTab("positions");
@@ -2410,6 +2452,9 @@ export default function PaperTrader({ selectedMeme }: Props) {
             >
               {watchingPositions.length} LIVE
             </span>
+          )}
+          {!dbLoaded && (
+            <span style={{ fontSize: 7, color: C.dim, ...MONO }}>loading…</span>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>

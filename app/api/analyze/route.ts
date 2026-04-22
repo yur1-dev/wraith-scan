@@ -1,10 +1,46 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { analyzeLimiter } from "@/lib/ratelimit";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-async function safeFetch(url: string, ms = 8000): Promise<Response | null> {
+// ─── INPUT VALIDATION CONSTANTS ───────────────────────────────────────────────
+const KEYWORD_RE = /^[a-zA-Z0-9]{1,20}$/;
+const CONTRACT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const PLATFORM_RE = /^[a-z0-9\-]{1,30}$/;
+const CELEB_RE = /^[a-zA-Z0-9 ]{1,60}$/;
+const MAX_CONTEXT_LEN = 300;
+const MAX_PLATFORMS = 20;
+
+// ─── SANITIZE FOR PROMPT ──────────────────────────────────────────────────────
+// Strips characters that enable prompt injection before any value
+// is embedded into a Gemini prompt string.
+function sanitizeForPrompt(input: string, maxLength: number): string {
+  return (
+    input
+      .slice(0, maxLength)
+      // Remove backticks (code fences used to escape prompt context)
+      .replace(/`/g, "'")
+      // Remove backslashes (escape sequences)
+      .replace(/\\/g, "")
+      // Collapse excessive newlines — 3+ lines → 2
+      .replace(/\n{3,}/g, "\n\n")
+      // Strip null bytes
+      .replace(/\0/g, "")
+      // Strip angle brackets — prevents HTML/XML injection into prompt
+      .replace(/[<>]/g, "")
+      .trim()
+  );
+}
+
+// ─── SAFE FETCH ───────────────────────────────────────────────────────────────
+// 4.1 FIX: increased default timeout from 8000ms → 12000ms
+// Evidence fetches (Reddit, Google News, YouTube) were timing out on slow
+// connections. 12s gives them a fair chance without blocking the response.
+async function safeFetch(url: string, ms = 12000): Promise<Response | null> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
@@ -23,6 +59,7 @@ async function safeFetch(url: string, ms = 8000): Promise<Response | null> {
   }
 }
 
+// ─── SAFETY SCORE ─────────────────────────────────────────────────────────────
 function computeSafetyScore(params: {
   rugRisk: string;
   liquidity: number;
@@ -116,6 +153,7 @@ function computeSafetyScore(params: {
   };
 }
 
+// ─── PREDICTION ───────────────────────────────────────────────────────────────
 function buildPrediction(
   safetyScore: number,
   crossPlatforms: number,
@@ -159,32 +197,116 @@ function buildPrediction(
   };
 }
 
+// ─── HANDLER ──────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
+  // ── AUTH ────────────────────────────────────────────────────────────────────
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // ── RATE LIMIT ──────────────────────────────────────────────────────────────
+  const { success } = await analyzeLimiter.limit(session.user.id);
+  if (!success) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
+
+  // ── PARSE & VALIDATE QUERY PARAMS ───────────────────────────────────────────
   const { searchParams } = new URL(req.url);
-  const keyword = searchParams.get("keyword") || "";
-  const contract = searchParams.get("contract") || "";
-  const platformsStr = searchParams.get("platforms") || "";
-  const context = searchParams.get("context") || "";
-  const celebMention = searchParams.get("celebMention") || "";
-  const mcap = parseFloat(searchParams.get("mcap") || "0");
-  const liquidity = parseFloat(searchParams.get("liquidity") || "0");
-  const rugRisk = searchParams.get("rugRisk") || "unknown";
-  const priceChange1h = parseFloat(searchParams.get("priceChange1h") || "0");
-  const platforms = platformsStr ? platformsStr.split(",") : [];
+
+  const rawKeyword = searchParams.get("keyword") ?? "";
+  const rawContract = searchParams.get("contract") ?? "";
+  const rawPlatforms = searchParams.get("platforms") ?? "";
+  const rawContext = searchParams.get("context") ?? "";
+  const rawCeleb = searchParams.get("celebMention") ?? "";
+  const rawMcap = searchParams.get("mcap") ?? "0";
+  const rawLiquidity = searchParams.get("liquidity") ?? "0";
+  const rawRugRisk = searchParams.get("rugRisk") ?? "unknown";
+  const rawPriceChange1h = searchParams.get("priceChange1h") ?? "0";
+
+  // Validate keyword — must match alphanumeric 1-20 chars
+  if (!KEYWORD_RE.test(rawKeyword)) {
+    return NextResponse.json({ error: "Invalid keyword" }, { status: 400 });
+  }
+
+  // Validate contract address if provided
+  if (rawContract && !CONTRACT_RE.test(rawContract)) {
+    return NextResponse.json(
+      { error: "Invalid contract address" },
+      { status: 400 },
+    );
+  }
+
+  // Validate rugRisk enum
+  const VALID_RUG_RISKS = new Set(["low", "medium", "high", "unknown"]);
+  if (!VALID_RUG_RISKS.has(rawRugRisk)) {
+    return NextResponse.json(
+      { error: "Invalid rugRisk value" },
+      { status: 400 },
+    );
+  }
+
+  // Validate numeric params — reject NaN and out-of-range values
+  const mcap = parseFloat(rawMcap);
+  const liquidity = parseFloat(rawLiquidity);
+  const priceChange1h = parseFloat(rawPriceChange1h);
+  if (isNaN(mcap) || mcap < 0 || mcap > 1e12) {
+    return NextResponse.json({ error: "Invalid mcap" }, { status: 400 });
+  }
+  if (isNaN(liquidity) || liquidity < 0 || liquidity > 1e12) {
+    return NextResponse.json({ error: "Invalid liquidity" }, { status: 400 });
+  }
+  if (isNaN(priceChange1h) || Math.abs(priceChange1h) > 100000) {
+    return NextResponse.json(
+      { error: "Invalid priceChange1h" },
+      { status: 400 },
+    );
+  }
+
+  // Validate celebMention if provided
+  if (rawCeleb && !CELEB_RE.test(rawCeleb)) {
+    return NextResponse.json(
+      { error: "Invalid celebMention" },
+      { status: 400 },
+    );
+  }
+
+  // Validate and filter platforms array
+  const platforms = rawPlatforms
+    ? rawPlatforms
+        .split(",")
+        .slice(0, MAX_PLATFORMS)
+        .filter((p) => PLATFORM_RE.test(p))
+    : [];
+
   const crossPlatforms = platforms.length;
-  const isCeleb = !!celebMention;
+  const isCeleb = !!rawCeleb;
+
+  // 4.6 FIX: removed dead "tiktok" platform value (never emitted by scanner),
+  // replaced with "google-news" which is actually in the platforms array.
   const isViral = platforms.some((p) =>
-    ["google-trends", "youtube", "kym", "tiktok", "celebrity"].includes(p),
+    ["google-trends", "youtube", "kym", "celebrity", "google-news"].includes(p),
   );
 
+  // ── SANITIZE FOR PROMPT EMBEDDING ───────────────────────────────────────────
+  // All values that will be embedded into the Gemini prompt are sanitized here.
+  // Values that passed regex validation above are sanitized again as
+  // defence-in-depth — the regex ensures shape, sanitize ensures no
+  // injection characters survive into the prompt string.
+  const safeKeyword = sanitizeForPrompt(rawKeyword, 20);
+  const safeContext = sanitizeForPrompt(rawContext, MAX_CONTEXT_LEN);
+  const safeCeleb = sanitizeForPrompt(rawCeleb, 60);
+  const safePlatforms = platforms.map((p) => sanitizeForPrompt(p, 30));
+
+  // ── SCORES ──────────────────────────────────────────────────────────────────
   const { score: safetyScore, breakdown: safetyBreakdown } = computeSafetyScore(
     {
-      rugRisk,
+      rugRisk: rawRugRisk,
       liquidity,
       mcap,
       priceChange1h,
       crossPlatforms,
-      hasContract: !!contract,
+      hasContract: !!rawContract,
     },
   );
 
@@ -196,22 +318,22 @@ export async function GET(req: Request) {
     isCeleb,
   );
 
-  // Evidence links
+  // ── EVIDENCE LINKS ──────────────────────────────────────────────────────────
   const evidenceLinks: { url: string; platform: string; title: string }[] = [];
 
   const [redditRes, newsRes, ytRes, ytSearch] = await Promise.all([
     safeFetch(
-      `https://www.reddit.com/search.json?q=${encodeURIComponent(keyword)}&sort=hot&limit=5&raw_json=1`,
+      `https://www.reddit.com/search.json?q=${encodeURIComponent(safeKeyword)}&sort=hot&limit=5&raw_json=1`,
     ),
     safeFetch(
-      `https://news.google.com/rss/search?q=${encodeURIComponent(keyword + (celebMention ? ` ${celebMention}` : " coin OR meme OR viral"))}&hl=en-US&gl=US&ceid=US:en`,
+      `https://news.google.com/rss/search?q=${encodeURIComponent(safeKeyword + (safeCeleb ? ` ${safeCeleb}` : " coin OR meme OR viral"))}&hl=en-US&gl=US&ceid=US:en`,
     ),
     safeFetch(
-      `https://www.youtube.com/feeds/videos.xml?search_query=${encodeURIComponent(keyword + (celebMention ? ` ${celebMention}` : ""))}`,
+      `https://www.youtube.com/feeds/videos.xml?search_query=${encodeURIComponent(safeKeyword + (safeCeleb ? ` ${safeCeleb}` : ""))}`,
     ),
-    celebMention
+    safeCeleb
       ? safeFetch(
-          `https://news.google.com/rss/search?q=${encodeURIComponent(celebMention + " tweet post today")}&hl=en-US&gl=US&ceid=US:en`,
+          `https://news.google.com/rss/search?q=${encodeURIComponent(safeCeleb + " tweet post today")}&hl=en-US&gl=US&ceid=US:en`,
         )
       : Promise.resolve(null),
   ]);
@@ -225,7 +347,7 @@ export async function GET(req: Request) {
         evidenceLinks.push({
           url: `https://reddit.com${p.permalink}`,
           platform: "reddit",
-          title: `r/${p.subreddit} — ${p.title.slice(0, 80)} (${p.score} upvotes)`,
+          title: `r/${p.subreddit} — ${String(p.title).slice(0, 80)} (${p.score} upvotes)`,
         });
       }
     } catch {
@@ -296,7 +418,7 @@ export async function GET(req: Request) {
           evidenceLinks.push({
             url: link,
             platform: "celebrity",
-            title: `🌟 ${celebMention}: ${title.slice(0, 80)}`,
+            title: `🌟 ${safeCeleb}: ${title.slice(0, 80)}`,
           });
       }
     } catch {
@@ -304,46 +426,48 @@ export async function GET(req: Request) {
     }
   }
 
-  if (contract) {
+  if (rawContract) {
     evidenceLinks.push({
-      url: `https://dexscreener.com/solana/${contract}`,
+      url: `https://dexscreener.com/solana/${rawContract}`,
       platform: "dexscreener",
-      title: `$${keyword.toUpperCase()} on DexScreener — live chart & trades`,
+      title: `$${safeKeyword.toUpperCase()} on DexScreener — live chart & trades`,
     });
   }
 
-  // Gemini AI analysis — REAL analysis, not echo
+  // ── GEMINI AI ANALYSIS ──────────────────────────────────────────────────────
   let aiAnalysis = "";
-  if (GEMINI_API_KEY && keyword) {
+  if (GEMINI_API_KEY && safeKeyword) {
     try {
-      const celebContext = celebMention
-        ? `\nKEY FACT: ${celebMention} is connected to this trend. Find EXACTLY what they said/did and when.`
+      const celebContext = safeCeleb
+        ? `\nKEY FACT: ${safeCeleb} is connected to this trend. Find EXACTLY what they said/did and when.`
         : "";
 
-      // Build a prompt that forces real research, not just echoing context
-      const prompt = `You are a Solana meme coin analyst. Search the web for current information about "$${keyword.toUpperCase()}" RIGHT NOW.
-
-DO NOT just repeat this context string back to me: "${context}"
-Instead, SEARCH FOR and find NEW information about this token/trend.
+      // All user-supplied values embedded in the prompt have been:
+      // 1. Validated by regex (shape check)
+      // 2. Sanitized by sanitizeForPrompt (injection character removal)
+      // None of the values can contain backticks, backslashes, angle brackets,
+      // null bytes, or more than their capped length.
+      const prompt = `You are a Solana meme coin analyst. Search the web for current information about "$${safeKeyword.toUpperCase()}" RIGHT NOW.
 
 Known data:
-- Token: $${keyword.toUpperCase()}
+- Token: $${safeKeyword.toUpperCase()}
 - Market cap: ${mcap ? `$${(mcap / 1000).toFixed(0)}K` : "unknown"}
 - Liquidity: ${liquidity ? `$${(liquidity / 1000).toFixed(0)}K` : "unknown"}
-- Platforms found on: ${platforms.join(", ") || "unknown"}
+- Platforms found on: ${safePlatforms.join(", ") || "unknown"}
 - Safety score: ${safetyScore}/100
-- Rug risk: ${rugRisk}
+- Rug risk: ${rawRugRisk}
 - 1h price change: ${priceChange1h ? `${priceChange1h > 0 ? "+" : ""}${priceChange1h.toFixed(0)}%` : "unknown"}${celebContext}
 
-Write 3 paragraphs of ORIGINAL analysis based on what you find:
+Write 3 paragraphs of ORIGINAL analysis:
 
-PARAGRAPH 1 — VIRAL ORIGIN: What is the EXACT viral moment, tweet, TikTok, news event, or meme that created buzz around "$${keyword.toUpperCase()}"? Search for it. Name dates, accounts, view counts. If it's a new coin, where was it launched and what is the theme?
+PARAGRAPH 1 — VIRAL ORIGIN: What is the EXACT viral moment, tweet, TikTok, news event, or meme that created buzz around "$${safeKeyword.toUpperCase()}"? Name dates, accounts, view counts. If it is a new coin, where was it launched and what is the theme?
 
-PARAGRAPH 2 — RISK REALITY CHECK: Look at the on-chain data. Is the liquidity real? What does the price action tell you? Is this coin already 10x'd (too late) or early (opportunity)? Any red flags? Be brutally specific.
+PARAGRAPH 2 — RISK REALITY CHECK: Look at the on-chain data. Is the liquidity real? What does the price action tell you? Is this coin already 10x'd (too late) or early (opportunity)? Any red flags?
 
-PARAGRAPH 3 — TRADER'S VERDICT: Based on market cap (${mcap ? `$${(mcap / 1000).toFixed(0)}K` : "unknown"}), should someone buy NOW, WAIT, or AVOID? If buy, at what conditions? Give a real recommendation with numbers.
+PARAGRAPH 3 — TRADER VERDICT: Based on market cap ($${mcap ? `${(mcap / 1000).toFixed(0)}K` : "unknown"}), should someone buy NOW, WAIT, or AVOID? Give a real recommendation with numbers.
 
-Max 220 words. Be direct. No hedging. No fluff.`;
+Max 220 words. Be direct. No hedging. No fluff.
+${safeContext ? `\nAdditional context: ${safeContext}` : ""}`;
 
       const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
         method: "POST",
@@ -359,20 +483,19 @@ Max 220 words. Be direct. No hedging. No fluff.`;
       if (res.ok) {
         const data = await res.json();
         const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        // Ensure we got actual analysis and not just a repeat of context
-        if (raw.length > 100 && !raw.startsWith(context.slice(0, 30))) {
+        if (raw.length > 100) {
           aiAnalysis = raw;
-        } else if (raw.length > 100) {
-          // It echoed context, try to strip it and use what's left
-          aiAnalysis = raw.replace(context.slice(0, 50), "").trim() || raw;
         }
       }
     } catch {
-      /* silent */
+      /* silent — fallback below */
     }
   }
 
-  // Fallback: build a meaningful analysis from the data we have
+  // ── FALLBACK ANALYSIS ────────────────────────────────────────────────────────
+  // 4.2 FIX: when safeContext is empty, the old fallback echoed back the
+  // user's own inputs as if they were analysis. Now it explicitly states that
+  // AI analysis is unavailable so the user knows why they're seeing plain data.
   if (!aiAnalysis || aiAnalysis.length < 80) {
     const mcapLabel =
       mcap >= 1_000_000
@@ -388,11 +511,10 @@ Max 220 words. Be direct. No hedging. No fluff.`;
         : liquidity
           ? `$${liquidity}`
           : "unknown";
-    const platformList = platforms.join(", ") || "unknown";
 
     aiAnalysis =
-      `$${keyword.toUpperCase()} was detected across ${crossPlatforms} platform(s): ${platformList}. ${context ? context : "No specific viral trigger identified — may be purely on-chain activity."}\n\n` +
-      `On-chain snapshot: market cap ${mcapLabel}, liquidity ${liqLabel}, rug risk ${rugRisk}. ` +
+      `$${safeKeyword.toUpperCase()} was detected across ${crossPlatforms} platform(s)${safePlatforms.length ? `: ${safePlatforms.join(", ")}` : ""}. No AI analysis available — Gemini key may be missing or quota exceeded.\n\n` +
+      `On-chain snapshot: market cap ${mcapLabel}, liquidity ${liqLabel}, rug risk ${rawRugRisk}. ` +
       `${liquidity < 10000 && liquidity > 0 ? "⚠ Liquidity is very low — this can be drained in seconds. " : ""}` +
       `${priceChange1h > 200 ? `⚠ Already up ${priceChange1h.toFixed(0)}% in 1h — may be late. ` : ""}` +
       `Safety score ${safetyScore}/100 — ${safetyScore >= 70 ? "passes basic checks" : safetyScore >= 40 ? "use caution" : "high risk, do not buy"}.\n\n` +

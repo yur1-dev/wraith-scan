@@ -153,67 +153,47 @@ function isGarbageKeyword(kw: string): boolean {
 }
 
 // ─── WIN TRACKER ENTRY GATES ──────────────────────────────────────────────────
-// Only HIGH/ULTRA conviction tokens with real on-chain data make it in.
-// This keeps the Win Tracker as a curated list of actual gems, not a dump
-// of every random pump.fun coin that crossed the scanner.
-
-const MIN_TRACK_MCAP = 2_000; // need real mcap, not dust
-const MIN_TRACK_LIQUIDITY = 300; // need actual trading happening
-const MIN_24H_CHANGE = -85; // kill already-rugged tokens
-const MAX_LIQ_TO_MCAP_RATIO = 0.6; // empty shell check
+const MIN_TRACK_MCAP = 2_000;
+const MIN_TRACK_LIQUIDITY = 300;
+const MIN_24H_CHANGE = -85;
+const MAX_LIQ_TO_MCAP_RATIO = 0.6;
 
 export function recordTokenSighting(result: ScanResult) {
-  // ── HARD REQUIREMENTS ────────────────────────────────────────────────────
-  // Must have a CA — we track on-chain tokens only
   if (!result.contractAddress) return;
-
-  // Must not be garbage ticker
   if (isGarbageKeyword(result.keyword)) return;
 
-  // Must have real mcap data
   const mcap = result.mcap || 0;
   if (mcap > 0 && mcap < MIN_TRACK_MCAP) return;
   if (mcap > 500_000) return;
 
-  // Must have on-chain source — pure social signals don't belong in Win Tracker
   const hasOnchain = (result.platforms || []).some((p) =>
     ["pumpfun", "dexscreener", "birdeye"].includes(p),
   );
   const isCeleb = !!result.celebMention || result.onCeleb;
   if (!hasOnchain && !isCeleb) return;
 
-  // ── CONVICTION GATE ───────────────────────────────────────────────────────
-  // Non-celeb tokens must be HIGH or ULTRA conviction from the scan engine.
-  // MEDIUM is allowed only if it also has cross-platform confirmation (2+ sources).
-  // LOW and SKIP are always rejected.
   const tier = result.twoXTier;
   if (!isCeleb) {
     if (!tier || tier === "LOW" || tier === "SKIP") return;
     if (tier === "MEDIUM" && (result.crossPlatforms ?? 0) < 2) return;
   } else {
-    // Celeb tokens still need at least MEDIUM conviction or a real on-chain signal
     if (tier === "SKIP") return;
     if (!hasOnchain && tier === "LOW") return;
   }
 
-  // ── QUALITY GATES ─────────────────────────────────────────────────────────
-  // Already dumped 85%+ in 24h — skip
   if ((result.priceChange24h ?? 0) < MIN_24H_CHANGE) return;
 
-  // Liquidity floor — if we have liq data and it's below $300, skip
   if (
     (result.liquidity ?? 0) > 0 &&
     (result.liquidity ?? 0) < MIN_TRACK_LIQUIDITY
   )
     return;
 
-  // Empty shell: liquidity ≈ mcap = nothing left to pump
   if (mcap > 0 && (result.liquidity ?? 0) > 0) {
     const liqRatio = (result.liquidity ?? 0) / mcap;
     if (liqRatio > MAX_LIQ_TO_MCAP_RATIO) return;
   }
 
-  // ── RECORD ────────────────────────────────────────────────────────────────
   const h = loadHistory();
   const key = result.keyword;
   const now = Date.now();
@@ -488,48 +468,81 @@ function DecisionChain({ item }: { item: ScanResult }) {
       reason: "In Google News or X trending",
     });
 
-  const hasCeleb = item.onCeleb;
-  const hasAI = item.onAI;
-  const hasOnchain = platforms.some((p) =>
-    ["pumpfun", "dexscreener"].includes(p),
-  );
-  const hasSocial = platforms.some((p) =>
-    ["reddit", "twitter", "google-trends", "youtube", "kym"].includes(p),
-  );
-  const platformCount = platforms.length;
+  // 4.12 FIX: use backend twoXScore/twoXTier when available instead of
+  // recomputing confidence locally from platform signals. Local computation
+  // diverged from the scan engine's scoring because it doesn't have access
+  // to velocity, age weighting, or the full conviction formula.
+  const backendScore = item.twoXScore;
+  const backendTier = item.twoXTier;
 
-  let confidence = 20,
-    confidenceLabel = "SPECULATIVE",
+  let confidence: number;
+  let confidenceLabel: string;
+  let confidenceColor: string;
+
+  if (backendScore !== undefined && backendTier && backendTier !== "SKIP") {
+    // Backend score is authoritative — use it directly
+    confidence = backendScore;
+    if (backendTier === "ULTRA") {
+      confidenceLabel = "ULTRA HIGH";
+      confidenceColor = "#ffd700";
+    } else if (backendTier === "HIGH") {
+      confidenceLabel = "HIGH";
+      confidenceColor = "#00c47a";
+    } else if (backendTier === "MEDIUM") {
+      confidenceLabel = "MODERATE";
+      confidenceColor = "#ffaa00";
+    } else {
+      confidenceLabel = "LOW";
+      confidenceColor = "#ff6600";
+    }
+  } else {
+    // Fallback: derive from platform signals when no backend score available
+    const hasCeleb = item.onCeleb;
+    const hasAI = item.onAI;
+    const hasOnchain = platforms.some((p) =>
+      ["pumpfun", "dexscreener"].includes(p),
+    );
+    const hasSocial = platforms.some((p) =>
+      ["reddit", "twitter", "google-trends", "youtube", "kym"].includes(p),
+    );
+    const platformCount = platforms.length;
+
+    confidence = 20;
+    confidenceLabel = "SPECULATIVE";
     confidenceColor = "#ff4444";
-  if (hasCeleb && hasOnchain) {
-    confidence = 95;
-    confidenceLabel = "EXTREMELY HIGH";
-    confidenceColor = "#ffd700";
-  } else if (hasCeleb && hasSocial) {
-    confidence = 88;
-    confidenceLabel = "VERY HIGH";
-    confidenceColor = "#ffd700";
-  } else if (hasAI && hasOnchain && hasSocial && platformCount >= 4) {
-    confidence = 82;
-    confidenceLabel = "HIGH";
-    confidenceColor = "#00c47a";
-  } else if (hasAI && hasOnchain && platformCount >= 3) {
-    confidence = 70;
-    confidenceLabel = "GOOD";
-    confidenceColor = "#00c47a";
-  } else if (hasOnchain && hasSocial) {
-    confidence = 58;
-    confidenceLabel = "MODERATE";
-    confidenceColor = "#ffaa00";
-  } else if (hasOnchain && platformCount >= 2) {
-    confidence = 45;
-    confidenceLabel = "LOW-MODERATE";
-    confidenceColor = "#ffaa00";
-  } else if (hasCeleb) {
-    confidence = 40;
-    confidenceLabel = "LOW (no coin yet)";
-    confidenceColor = "#ff6600";
+
+    if (hasCeleb && hasOnchain) {
+      confidence = 95;
+      confidenceLabel = "EXTREMELY HIGH";
+      confidenceColor = "#ffd700";
+    } else if (hasCeleb && hasSocial) {
+      confidence = 88;
+      confidenceLabel = "VERY HIGH";
+      confidenceColor = "#ffd700";
+    } else if (hasAI && hasOnchain && hasSocial && platformCount >= 4) {
+      confidence = 82;
+      confidenceLabel = "HIGH";
+      confidenceColor = "#00c47a";
+    } else if (hasAI && hasOnchain && platformCount >= 3) {
+      confidence = 70;
+      confidenceLabel = "GOOD";
+      confidenceColor = "#00c47a";
+    } else if (hasOnchain && hasSocial) {
+      confidence = 58;
+      confidenceLabel = "MODERATE";
+      confidenceColor = "#ffaa00";
+    } else if (hasOnchain && platformCount >= 2) {
+      confidence = 45;
+      confidenceLabel = "LOW-MODERATE";
+      confidenceColor = "#ffaa00";
+    } else if (hasCeleb) {
+      confidence = 40;
+      confidenceLabel = "LOW (no coin yet)";
+      confidenceColor = "#ff6600";
+    }
   }
+
+  // Rug risk penalty applies regardless of score source
   if (item.rugRisk === "medium") confidence = Math.max(confidence - 15, 5);
 
   return (
@@ -705,7 +718,10 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
   const [enriching, setEnriching] = useState(false);
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasMounted = useRef(false);
+  // 4.9 FIX: removed hasMounted ref — it was redundant with useEffect([]).
+  // React StrictMode double-invokes effects in development; the ref pattern
+  // was masking this without actually preventing the double-fetch in prod.
+  // useEffect with [] already runs exactly once after mount in production.
   const loadingRef = useRef(false);
 
   const enrichWithTokenMeta = useCallback(
@@ -794,11 +810,10 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     [selectedMeme, onSelectMeme, enrichWithTokenMeta],
   );
 
+  // 4.9 FIX: plain useEffect([]) — no hasMounted guard needed
   useEffect(() => {
-    if (!hasMounted.current) {
-      hasMounted.current = true;
-      fetchTrends();
-    }
+    fetchTrends();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1341,7 +1356,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                           {displayName}
                         </span>
                       )}
-                      {/* Conviction badge — now visible in scanner list */}
                       <ConvictionBadge tier={t.twoXTier} score={t.twoXScore} />
                       {ageDisplay.label && (
                         <span

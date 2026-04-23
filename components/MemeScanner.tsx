@@ -55,6 +55,11 @@ interface HistoryEntry {
   snapshots: McapSnapshot[];
   lastChecked: number;
   tookProfitAt?: number;
+  twoXTier?: string;
+  twoXScore?: number;
+  crossPlatforms?: number;
+  aiScore?: number;
+  aiTier?: "HOT" | "WATCH" | "SKIP";
 }
 
 export const HISTORY_KEY = "wraith_token_history_v2";
@@ -72,6 +77,55 @@ export function saveHistory(h: Record<string, HistoryEntry>) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
+  } catch {}
+}
+
+// ─── STALE TOKEN CLEANUP ──────────────────────────────────────────────────────
+// Called at the top of every fetchTrends() to keep localStorage clean.
+// Only removes tokens that: are >40min old AND haven't moved meaningfully.
+// Winners (2x+), active movers, and celeb tokens are ALWAYS preserved.
+function pruneStaleTokens() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || "{}");
+    const now = Date.now();
+    const SCAN_STALE_MS = 40 * 60 * 1000; // 40 min — prune window for dead tokens
+    const MAX_KEEP_MS = 3 * 24 * 60 * 60 * 1000; // 3 days — hard cap for everything
+    let pruned = 0;
+    for (const [key, v] of Object.entries(raw)) {
+      const e = v as Record<string, unknown>;
+      const seenAt = typeof e.seenAt === "number" ? e.seenAt : 0;
+      const initialMcap = typeof e.initialMcap === "number" ? e.initialMcap : 0;
+      const currentMcap = typeof e.currentMcap === "number" ? e.currentMcap : 0;
+      const peakMcap = typeof e.peakMcap === "number" ? e.peakMcap : 0;
+      const celebMention = !!e.celebMention;
+      const age = now - seenAt;
+
+      // Hard cap: nothing lives longer than 3 days
+      if (age > MAX_KEEP_MS) {
+        delete raw[key];
+        pruned++;
+        continue;
+      }
+
+      // Keep everything under 40min
+      if (age <= SCAN_STALE_MS) continue;
+
+      // Always keep winners (1.5x+ current or 2x+ peak)
+      if (initialMcap > 0) {
+        if (currentMcap >= initialMcap * 1.5) continue;
+        if (peakMcap >= initialMcap * 2.0) continue;
+      }
+
+      // Always keep celeb tokens — they can pump days later
+      if (celebMention) continue;
+
+      // Token is >40min old with no meaningful price movement — prune it
+      delete raw[key];
+      pruned++;
+    }
+    if (pruned > 0) {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(raw));
+    }
   } catch {}
 }
 
@@ -137,7 +191,8 @@ export async function fetchCurrentMcap(ca: string): Promise<number | null> {
         ) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0),
       );
     if (!pairs.length) return null;
-    return pairs[0].fdv || pairs[0].marketCap || null;
+    const best = pairs[0];
+    return best.marketCap || best.fdv || null;
   } catch {
     return null;
   }
@@ -152,7 +207,6 @@ function isGarbageKeyword(kw: string): boolean {
   return false;
 }
 
-// ─── WIN TRACKER ENTRY GATES ──────────────────────────────────────────────────
 const MIN_TRACK_MCAP = 2_000;
 const MIN_TRACK_LIQUIDITY = 300;
 const MIN_24H_CHANGE = -85;
@@ -197,6 +251,8 @@ export function recordTokenSighting(result: ScanResult) {
   const h = loadHistory();
   const key = result.keyword;
   const now = Date.now();
+  const crossPlatforms =
+    result.crossPlatforms ?? (result.platforms || []).length;
 
   if (!h[key]) {
     h[key] = {
@@ -214,6 +270,9 @@ export function recordTokenSighting(result: ScanResult) {
       currentMcap: mcap,
       snapshots: mcap > 0 ? [{ ts: now, mcap }] : [],
       lastChecked: now,
+      twoXTier: tier,
+      twoXScore: result.twoXScore,
+      crossPlatforms,
     };
   } else {
     if (mcap > 0) {
@@ -235,6 +294,13 @@ export function recordTokenSighting(result: ScanResult) {
         }
       }
     }
+    if (tier) h[key].twoXTier = tier;
+    if (result.twoXScore !== undefined) h[key].twoXScore = result.twoXScore;
+    h[key].crossPlatforms = Math.max(
+      h[key].crossPlatforms ?? 0,
+      crossPlatforms,
+    );
+
     if (result.celebMention && !h[key].celebMention)
       h[key].celebMention = result.celebMention;
     if (result.aiContext && !h[key].aiContext)
@@ -247,6 +313,120 @@ export function recordTokenSighting(result: ScanResult) {
       h[key].tokenImageUrl = result.tokenImageUrl;
   }
   saveHistory(h);
+
+  postToServerHistory(result, mcap, tier, crossPlatforms);
+}
+
+async function postToServerHistory(
+  result: ScanResult,
+  mcap: number,
+  tier: string | undefined,
+  crossPlatforms: number,
+) {
+  const payload = {
+    keyword: result.keyword,
+    displayName: result.tokenName,
+    tokenSymbol: result.tokenSymbol,
+    tokenImageUrl: result.tokenImageUrl,
+    contractAddress: result.contractAddress,
+    celebMention: result.celebMention,
+    aiContext: result.aiContext,
+    platforms: result.platforms ?? [],
+    mcap,
+    twoXTier: tier ?? "MEDIUM",
+    crossPlatforms,
+  };
+
+  let isNewToken = false;
+  try {
+    const res = await fetch("/api/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      isNewToken = data.isNew === true;
+    }
+  } catch {
+    return;
+  }
+
+  if (!isNewToken) return;
+
+  let aiScore = 50;
+  let aiTier: "HOT" | "WATCH" | "SKIP" = "WATCH";
+  let aiReason = "";
+
+  try {
+    const scoreRes = await fetch("/api/ai-score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        keyword: result.keyword,
+        contractAddress: result.contractAddress,
+        mcap,
+        tier: tier ?? "MEDIUM",
+        platforms: result.platforms ?? [],
+        celebMention: result.celebMention,
+        aiContext: result.aiContext,
+        liquidity: result.liquidity,
+        priceChange24h: result.priceChange24h,
+        crossPlatforms,
+      }),
+    });
+    if (scoreRes.ok) {
+      const scoreData = await scoreRes.json();
+      if (typeof scoreData.score === "number") aiScore = scoreData.score;
+      if (
+        scoreData.tier === "HOT" ||
+        scoreData.tier === "WATCH" ||
+        scoreData.tier === "SKIP"
+      ) {
+        aiTier = scoreData.tier;
+      }
+      if (typeof scoreData.reason === "string") aiReason = scoreData.reason;
+    }
+  } catch {}
+
+  const h = loadHistory();
+  if (h[result.keyword]) {
+    h[result.keyword].aiScore = aiScore;
+    h[result.keyword].aiTier = aiTier;
+    saveHistory(h);
+  }
+
+  try {
+    await fetch("/api/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, aiScore, aiTier }),
+    });
+  } catch {}
+
+  if (aiTier === "SKIP") return;
+
+  try {
+    await fetch("/api/alert/telegram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "entry",
+        symbol: (result.tokenSymbol ?? result.keyword).toUpperCase(),
+        keyword: result.keyword,
+        mcap,
+        contractAddress: result.contractAddress,
+        celebMention: result.celebMention,
+        aiContext: result.aiContext,
+        platforms: result.platforms ?? [],
+        twoXTier: tier ?? "MEDIUM",
+        seenAt: Date.now(),
+        aiScore,
+        aiTier,
+        aiReason,
+      }),
+    });
+  } catch {}
 }
 
 function getAgeDisplay(ageMinutes: number | undefined) {
@@ -323,7 +503,6 @@ const RUG_COLOR: Record<string, string> = {
   unknown: "#555",
 };
 
-// ─── TOKEN AVATAR ─────────────────────────────────────────────────────────────
 function TokenAvatar({
   imageUrl,
   symbol,
@@ -388,7 +567,6 @@ function TokenAvatar({
   );
 }
 
-// ─── CONVICTION BADGE ─────────────────────────────────────────────────────────
 function ConvictionBadge({ tier, score }: { tier?: string; score?: number }) {
   if (!tier || tier === "SKIP" || tier === "LOW") return null;
   const cfg =
@@ -417,7 +595,6 @@ function ConvictionBadge({ tier, score }: { tier?: string; score?: number }) {
   );
 }
 
-// ─── DECISION CHAIN ───────────────────────────────────────────────────────────
 function DecisionChain({ item }: { item: ScanResult }) {
   const platforms = item.platforms || [];
   const signals: { label: string; color: string; reason: string }[] = [];
@@ -468,10 +645,6 @@ function DecisionChain({ item }: { item: ScanResult }) {
       reason: "In Google News or X trending",
     });
 
-  // 4.12 FIX: use backend twoXScore/twoXTier when available instead of
-  // recomputing confidence locally from platform signals. Local computation
-  // diverged from the scan engine's scoring because it doesn't have access
-  // to velocity, age weighting, or the full conviction formula.
   const backendScore = item.twoXScore;
   const backendTier = item.twoXTier;
 
@@ -480,7 +653,6 @@ function DecisionChain({ item }: { item: ScanResult }) {
   let confidenceColor: string;
 
   if (backendScore !== undefined && backendTier && backendTier !== "SKIP") {
-    // Backend score is authoritative — use it directly
     confidence = backendScore;
     if (backendTier === "ULTRA") {
       confidenceLabel = "ULTRA HIGH";
@@ -496,7 +668,6 @@ function DecisionChain({ item }: { item: ScanResult }) {
       confidenceColor = "#ff6600";
     }
   } else {
-    // Fallback: derive from platform signals when no backend score available
     const hasCeleb = item.onCeleb;
     const hasAI = item.onAI;
     const hasOnchain = platforms.some((p) =>
@@ -542,7 +713,6 @@ function DecisionChain({ item }: { item: ScanResult }) {
     }
   }
 
-  // Rug risk penalty applies regardless of score source
   if (item.rugRisk === "medium") confidence = Math.max(confidence - 15, 5);
 
   return (
@@ -687,7 +857,8 @@ function DecisionChain({ item }: { item: ScanResult }) {
   );
 }
 
-const REFRESH_INTERVAL = 90;
+// ─── 10 MINUTE SCAN INTERVAL ──────────────────────────────────────────────────
+const REFRESH_INTERVAL = 600; // 10 minutes (was 90s)
 
 interface Props {
   onSelectMeme: (meme: MemeTrend) => void;
@@ -718,10 +889,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
   const [enriching, setEnriching] = useState(false);
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // 4.9 FIX: removed hasMounted ref — it was redundant with useEffect([]).
-  // React StrictMode double-invokes effects in development; the ref pattern
-  // was masking this without actually preventing the double-fetch in prod.
-  // useEffect with [] already runs exactly once after mount in production.
   const loadingRef = useRef(false);
 
   const enrichWithTokenMeta = useCallback(
@@ -754,6 +921,10 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       if (loadingRef.current) return;
       loadingRef.current = true;
       setLoading(true);
+
+      // ─── PRUNE STALE TOKENS BEFORE EACH SCAN ──────────────────────────────
+      pruneStaleTokens();
+
       if (!silent) {
         setError("");
         setScanLog([]);
@@ -800,7 +971,12 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         const msg = axios.isAxiosError(err)
           ? err.response?.data?.error || err.message
           : "Unknown error";
-        setError(`Scan failed: ${msg}`);
+        if (axios.isAxiosError(err) && err.response?.status === 429) {
+          setError("Rate limit — wait ~2 min before next scan");
+          setAutoScan(false);
+        } else {
+          setError(`Scan failed: ${msg}`);
+        }
       } finally {
         setLoading(false);
         loadingRef.current = false;
@@ -810,9 +986,20 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     [selectedMeme, onSelectMeme, enrichWithTokenMeta],
   );
 
-  // 4.9 FIX: plain useEffect([]) — no hasMounted guard needed
   useEffect(() => {
-    fetchTrends();
+    const cached =
+      typeof window !== "undefined"
+        ? JSON.parse(localStorage.getItem("wraith_token_history_v2") || "{}")
+        : {};
+    const hasRecent = Object.values(cached).some(
+      (e: any) => Date.now() - (e as any).seenAt < 5 * 60 * 1000,
+    );
+    if (!hasRecent) {
+      fetchTrends();
+    } else {
+      setLastScan("cached");
+      setCountdown(REFRESH_INTERVAL);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -913,6 +1100,12 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     "Rugcheck",
     "Age filter",
   ];
+
+  // Format countdown as mm:ss for 10min display
+  const countdownDisplay =
+    countdown >= 60
+      ? `${Math.floor(countdown / 60)}m ${countdown % 60}s`
+      : `${countdown}s`;
 
   return (
     <div
@@ -1040,7 +1233,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
               : enriching
                 ? "Fetching real token names + images from DexScreener..."
                 : lastScan
-                  ? `${lastScan} · ${trends.length} signals · refresh ${countdown}s`
+                  ? `${lastScan} · ${trends.length} signals · next scan ${countdownDisplay}`
                   : "Elon · Trump · TikTok · YouTube · Reddit · Pump.fun · DexScreener"}
           </div>
         </div>
@@ -1296,7 +1489,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                     flex: 1,
                   }}
                 >
-                  {/* Rank number */}
                   <span
                     style={{
                       color: "#444",
@@ -1317,7 +1509,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                   />
 
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    {/* Name row */}
                     <div
                       style={{
                         display: "flex",
@@ -1472,7 +1663,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       )}
                     </div>
 
-                    {/* AI context */}
                     {isCeleb && t.aiContext && (
                       <div
                         style={{
@@ -1506,7 +1696,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       </div>
                     )}
 
-                    {/* Stats row */}
                     <div
                       style={{
                         display: "flex",
@@ -1549,7 +1738,6 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                   </div>
                 </div>
 
-                {/* Right side — signal badge + score */}
                 <div
                   style={{
                     display: "flex",
@@ -1634,7 +1822,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
               ...MONO,
             }}
           >
-            {autoScan ? `AUTO ${countdown}s` : "AUTO OFF"}
+            {autoScan ? `AUTO ${countdownDisplay}` : "AUTO OFF"}
           </span>
         </div>
       )}

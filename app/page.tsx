@@ -16,6 +16,9 @@ const WinsPanel = dynamic(() => import("@/components/WinsPanel"), {
 const PaperTrader = dynamic(() => import("@/components/PaperTrader"), {
   ssr: false,
 });
+const LiveSignalsBar = dynamic(() => import("@/components/LiveSignalsBar"), {
+  ssr: false,
+});
 
 export interface MemeTrend {
   keyword: string;
@@ -29,13 +32,18 @@ export interface MemeTrend {
   mcap?: number;
   volume?: number;
   platforms?: string[];
+  contractAddress?: string;
+  celebMention?: string;
+  aiContext?: string;
 }
 
 const MIN_PX = 220;
 const HANDLE_W = 6;
 const HANDLE_H = 6;
-const MIN_TRADER_H = 48;
+const MIN_TRADER_H = 48; // collapsed = just the header bar
+const COLLAPSED_H = 36; // exact header bar height when collapsed
 const MIN_WINS_H = 80;
+const DEFAULT_TRADER_H = 320;
 
 type MobileTab = "scan" | "token" | "wins" | "sniper";
 
@@ -52,7 +60,13 @@ export default function Home() {
   const [selectedMeme, setSelectedMeme] = useState<MemeTrend | null>(null);
   const [leftW, setLeftW] = useState(430);
   const [rightW, setRightW] = useState(420);
-  const [paperTraderH, setPaperTraderH] = useState<number>(320);
+
+  // PaperTrader collapse state — lifted here so we can control outer height
+  const [traderCollapsed, setTraderCollapsed] = useState(false);
+  // Remember the last expanded height so we restore it on expand
+  const lastExpandedH = useRef(DEFAULT_TRADER_H);
+  const [paperTraderH, setPaperTraderH] = useState<number>(DEFAULT_TRADER_H);
+
   const [mobileTab, setMobileTab] = useState<MobileTab>("scan");
   const [isMobile, setIsMobile] = useState(false);
 
@@ -66,7 +80,6 @@ export default function Home() {
   const vStartY = useRef(0);
   const vStartH = useRef(0);
 
-  // Detect mobile
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
     check();
@@ -74,7 +87,22 @@ export default function Home() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Auto-switch to token tab when a meme is selected on mobile
+  // When collapse toggles, animate the outer height
+  const handleCollapseChange = useCallback(
+    (collapsed: boolean) => {
+      setTraderCollapsed(collapsed);
+      if (collapsed) {
+        // Save current height before collapsing
+        lastExpandedH.current = paperTraderH;
+        setPaperTraderH(COLLAPSED_H);
+      } else {
+        // Restore previous expanded height
+        setPaperTraderH(lastExpandedH.current);
+      }
+    },
+    [paperTraderH],
+  );
+
   const handleSelectMeme = useCallback(
     (meme: MemeTrend) => {
       setSelectedMeme(meme);
@@ -95,13 +123,15 @@ export default function Home() {
 
   const onVMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      // Don't allow dragging when collapsed
+      if (traderCollapsed) return;
       e.preventDefault();
       e.stopPropagation();
       vDragging.current = true;
       vStartY.current = e.clientY;
       vStartH.current = paperTraderH;
     },
-    [paperTraderH],
+    [paperTraderH, traderCollapsed],
   );
 
   useEffect(() => {
@@ -137,6 +167,7 @@ export default function Home() {
           Math.min(vStartH.current + dy, colH - MIN_WINS_H - HANDLE_H),
         );
         setPaperTraderH(next);
+        lastExpandedH.current = next;
       }
     };
     const onUp = () => {
@@ -165,8 +196,6 @@ export default function Home() {
         }}
       >
         <Header />
-
-        {/* Mobile content area */}
         <main
           style={{
             flex: 1,
@@ -176,7 +205,6 @@ export default function Home() {
           }}
         >
           <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-            {/* SCAN */}
             <div
               style={{
                 display: mobileTab === "scan" ? "flex" : "none",
@@ -190,7 +218,6 @@ export default function Home() {
                 selectedMeme={selectedMeme}
               />
             </div>
-            {/* TOKEN */}
             <div
               style={{
                 display: mobileTab === "token" ? "flex" : "none",
@@ -201,7 +228,6 @@ export default function Home() {
             >
               <TokenPanel selectedMeme={selectedMeme} />
             </div>
-            {/* WINS */}
             <div
               style={{
                 display: mobileTab === "wins" ? "flex" : "none",
@@ -212,7 +238,6 @@ export default function Home() {
             >
               <WinsPanel onSelectMeme={handleSelectMeme} />
             </div>
-            {/* SNIPER */}
             <div
               style={{
                 display: mobileTab === "sniper" ? "flex" : "none",
@@ -221,11 +246,13 @@ export default function Home() {
                 overflow: "hidden",
               }}
             >
-              <PaperTrader selectedMeme={selectedMeme} />
+              <PaperTrader
+                selectedMeme={selectedMeme}
+                collapsed={traderCollapsed}
+                onCollapseChange={handleCollapseChange}
+              />
             </div>
           </div>
-
-          {/* Mobile bottom nav */}
           <nav
             style={{
               display: "flex",
@@ -288,16 +315,23 @@ export default function Home() {
             })}
           </nav>
         </main>
-
-        <style>{`
-          * { -webkit-tap-highlight-color: transparent; }
-          body { overflow: hidden; }
-        `}</style>
+        <style>{`* { -webkit-tap-highlight-color: transparent; } body { overflow: hidden; }`}</style>
       </div>
     );
   }
 
-  // ── DESKTOP LAYOUT (unchanged) ─────────────────────────────────────────────
+  // ── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
+  //
+  // Structure:
+  //   ┌────────────────────────────────────────────────────────┐
+  //   │  Header (full width)                                   │
+  //   ├──────────────────────────────────────┬─────────────────┤
+  //   │  LiveSignals (Scanner+Token only)    │  WinsPanel      │
+  //   ├──────────────────┬───────────────────┤  (full height)  │
+  //   │  Scanner         │  TokenPanel       ├─────────────────┤
+  //   │                  │                   │  PaperTrader    │
+  //   └──────────────────┴───────────────────┴─────────────────┘
+
   return (
     <div
       style={{
@@ -306,129 +340,84 @@ export default function Home() {
         color: "#e0e0e0",
         fontFamily: "'JetBrains Mono', 'Fira Mono', monospace",
         userSelect: hDragging.current || vDragging.current ? "none" : "auto",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <Header />
-      <main style={{ maxWidth: 1600, margin: "0 auto", padding: "12px 16px" }}>
+
+      <main
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "row",
+          padding: "8px 16px 12px",
+          overflow: "hidden",
+          height: "calc(100vh - 52px)",
+          maxHeight: "calc(100vh - 52px)",
+          gap: 0,
+        }}
+      >
+        {/* ── LEFT+CENTER: LiveSignals on top, Scanner+TokenPanel below ── */}
         <div
-          ref={containerRef}
-          style={{ display: "flex", gap: 0, height: "calc(100vh - 80px)" }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
         >
-          {/* LEFT — Meme Scanner */}
+          {/* LiveSignals only spans Scanner + TokenPanel columns */}
+          <LiveSignalsBar onSelectMeme={setSelectedMeme} />
+
+          {/* Scanner + TokenPanel side by side */}
           <div
+            ref={containerRef}
             style={{
-              width: leftW,
-              flexShrink: 0,
-              minWidth: MIN_PX,
+              display: "flex",
+              flex: 1,
               overflow: "hidden",
-            }}
-          >
-            <MemeScanner
-              onSelectMeme={setSelectedMeme}
-              selectedMeme={selectedMeme}
-            />
-          </div>
-
-          {/* Drag handle LEFT */}
-          <div
-            onMouseDown={onHMouseDown("left")}
-            style={{
-              width: HANDLE_W,
-              flexShrink: 0,
-              cursor: "col-resize",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 2,
-                height: "100%",
-                background: "#141414",
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={(e) =>
-                ((e.currentTarget as HTMLElement).style.background =
-                  "#e8490f66")
-              }
-              onMouseLeave={(e) =>
-                ((e.currentTarget as HTMLElement).style.background = "#141414")
-              }
-            />
-          </div>
-
-          {/* CENTER — Token Panel */}
-          <div style={{ flex: 1, minWidth: MIN_PX, overflow: "hidden" }}>
-            <TokenPanel selectedMeme={selectedMeme} />
-          </div>
-
-          {/* Drag handle RIGHT */}
-          <div
-            onMouseDown={onHMouseDown("right")}
-            style={{
-              width: HANDLE_W,
-              flexShrink: 0,
-              cursor: "col-resize",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 2,
-                height: "100%",
-                background: "#141414",
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={(e) =>
-                ((e.currentTarget as HTMLElement).style.background =
-                  "#e8490f66")
-              }
-              onMouseLeave={(e) =>
-                ((e.currentTarget as HTMLElement).style.background = "#141414")
-              }
-            />
-          </div>
-
-          {/* RIGHT — Win Tracker + Paper Trader */}
-          <div
-            ref={rightColRef}
-            style={{
-              width: rightW,
-              flexShrink: 0,
-              minWidth: MIN_PX,
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
+              minHeight: 0,
               gap: 0,
             }}
           >
-            <div style={{ flex: 1, minHeight: MIN_WINS_H, overflow: "hidden" }}>
-              <WinsPanel onSelectMeme={setSelectedMeme} />
+            {/* LEFT — Scanner */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                width: leftW,
+                flexShrink: 0,
+                minWidth: MIN_PX,
+                overflow: "hidden",
+              }}
+            >
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <MemeScanner
+                  onSelectMeme={setSelectedMeme}
+                  selectedMeme={selectedMeme}
+                />
+              </div>
             </div>
 
-            {/* Vertical drag handle */}
+            {/* Drag handle Scanner↔TokenPanel */}
             <div
-              onMouseDown={onVMouseDown}
+              onMouseDown={onHMouseDown("left")}
               style={{
-                height: HANDLE_H,
+                width: HANDLE_W,
                 flexShrink: 0,
-                cursor: "row-resize",
+                cursor: "col-resize",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 zIndex: 10,
-                position: "relative",
               }}
             >
               <div
                 style={{
-                  width: "100%",
-                  height: 2,
+                  width: 2,
+                  height: "100%",
                   background: "#141414",
                   transition: "background 0.15s",
                 }}
@@ -441,40 +430,133 @@ export default function Home() {
                     "#141414")
                 }
               />
-              <div
-                style={{
-                  position: "absolute",
-                  left: "50%",
-                  top: "50%",
-                  transform: "translate(-50%, -50%)",
-                  display: "flex",
-                  gap: 3,
-                  pointerEvents: "none",
-                }}
-              >
-                {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    style={{
-                      width: 3,
-                      height: 3,
-                      borderRadius: "50%",
-                      background: "#333",
-                    }}
-                  />
-                ))}
-              </div>
             </div>
 
+            {/* CENTER — Token Panel */}
+            <div style={{ flex: 1, minWidth: MIN_PX, overflow: "hidden" }}>
+              <TokenPanel selectedMeme={selectedMeme} />
+            </div>
+          </div>
+        </div>
+
+        {/* Drag handle (Scanner+Token)↔Right column */}
+        <div
+          onMouseDown={onHMouseDown("right")}
+          style={{
+            width: HANDLE_W,
+            flexShrink: 0,
+            cursor: "col-resize",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10,
+          }}
+        >
+          <div
+            style={{
+              width: 2,
+              height: "100%",
+              background: "#141414",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLElement).style.background = "#e8490f66")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLElement).style.background = "#141414")
+            }
+          />
+        </div>
+
+        {/* ── RIGHT — WinsPanel + PaperTrader, full height, no LiveSignals ── */}
+        <div
+          ref={rightColRef}
+          style={{
+            width: rightW,
+            flexShrink: 0,
+            minWidth: MIN_PX,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            gap: 0,
+          }}
+        >
+          {/* WinsPanel fills available space above PaperTrader */}
+          <div style={{ flex: 1, minHeight: MIN_WINS_H, overflow: "hidden" }}>
+            <WinsPanel onSelectMeme={setSelectedMeme} />
+          </div>
+
+          {/* Vertical drag handle — hidden when collapsed */}
+          <div
+            onMouseDown={onVMouseDown}
+            style={{
+              height: HANDLE_H,
+              flexShrink: 0,
+              cursor: traderCollapsed ? "default" : "row-resize",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 10,
+              position: "relative",
+              opacity: traderCollapsed ? 0.3 : 1,
+              transition: "opacity 0.2s",
+            }}
+          >
             <div
               style={{
-                height: paperTraderH,
-                flexShrink: 0,
-                overflow: "hidden",
+                width: "100%",
+                height: 2,
+                background: "#141414",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                if (!traderCollapsed)
+                  (e.currentTarget as HTMLElement).style.background =
+                    "#e8490f66";
+              }}
+              onMouseLeave={(e) =>
+                ((e.currentTarget as HTMLElement).style.background = "#141414")
+              }
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                transform: "translate(-50%, -50%)",
+                display: "flex",
+                gap: 3,
+                pointerEvents: "none",
               }}
             >
-              <PaperTrader selectedMeme={selectedMeme} />
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 3,
+                    height: 3,
+                    borderRadius: "50%",
+                    background: "#333",
+                  }}
+                />
+              ))}
             </div>
+          </div>
+
+          {/* PaperTrader — height controlled here, transitions smoothly */}
+          <div
+            style={{
+              height: paperTraderH,
+              flexShrink: 0,
+              overflow: "hidden",
+              transition: "height 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
+            }}
+          >
+            <PaperTrader
+              selectedMeme={selectedMeme}
+              collapsed={traderCollapsed}
+              onCollapseChange={handleCollapseChange}
+            />
           </div>
         </div>
       </main>

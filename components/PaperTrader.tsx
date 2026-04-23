@@ -16,6 +16,8 @@ import { MemeTrend } from "@/app/page";
 // ─────────────────────────────────────────────────────────────────────────────
 interface Props {
   selectedMeme: MemeTrend | null;
+  collapsed: boolean;
+  onCollapseChange: (collapsed: boolean) => void;
 }
 
 interface Position {
@@ -99,7 +101,7 @@ const C = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WINS PANEL BOUGHT SYNC — stays in localStorage (local UI state only)
+// WINS PANEL BOUGHT SYNC
 // ─────────────────────────────────────────────────────────────────────────────
 function markBoughtInWinsPanel(keyword: string) {
   if (typeof window === "undefined") return;
@@ -116,7 +118,7 @@ function markBoughtInWinsPanel(keyword: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MONGODB PERSISTENCE — replaces loadPositions/savePositions/loadLog/saveLog
+// MONGODB PERSISTENCE
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function fetchPositions(): Promise<Position[]> {
@@ -139,9 +141,7 @@ async function persistPositions(positions: Position[]): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ positions }),
     });
-  } catch {
-    /* non-critical — positions are live in state */
-  }
+  } catch {}
 }
 
 async function fetchTrades(): Promise<TradeLog[]> {
@@ -162,13 +162,11 @@ async function appendTrade(trade: TradeLog): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ trade }),
     });
-  } catch {
-    /* non-critical */
-  }
+  } catch {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CRYPTO HELPERS — hot wallet stays encrypted in localStorage (correct place)
+// CRYPTO HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 async function deriveKey(
   password: string,
@@ -371,12 +369,9 @@ async function pollConfirm(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // JUPITER — BUY
-// Returns { sig, rawTokenAmount } — rawTokenAmount comes from quote.outAmount,
-// no RPC polling needed to read the balance after confirmation.
 // ─────────────────────────────────────────────────────────────────────────────
 interface BuyResult {
   sig: string;
-  /** Raw token units (no decimals applied) from Jupiter quote.outAmount */
   rawTokenAmount: number;
 }
 
@@ -395,8 +390,6 @@ async function jupiterBuy(
   const quote = await quoteRes.json();
   if (quote.error) throw new Error(`Quote error: ${quote.error}`);
 
-  // outAmount is a string representing raw token units (no decimal scaling).
-  // We capture it here so handleBuy never has to poll RPC for the balance.
   const rawTokenAmount = Number(quote.outAmount ?? "0");
 
   onStatus?.("Building swap transaction…");
@@ -498,23 +491,8 @@ async function jupiterSell(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOKEN BALANCE — still used by triggerSell to get exact on-chain raw amount
+// TOKEN BALANCE
 // ─────────────────────────────────────────────────────────────────────────────
-async function getTokenBalance(
-  conn: Connection,
-  walletPubkey: PublicKey,
-  mint: string,
-): Promise<number> {
-  try {
-    const accounts = await conn.getParsedTokenAccountsByOwner(walletPubkey, {
-      mint: new PublicKey(mint),
-    });
-    if (!accounts.value.length) return 0;
-    return accounts.value[0].account.data.parsed.info.tokenAmount.uiAmount ?? 0;
-  } catch {
-    return 0;
-  }
-}
 async function getRawTokenBalance(
   conn: Connection,
   walletPubkey: PublicKey,
@@ -647,9 +625,7 @@ function playAlert(type: "sell_tp" | "sell_sl" | "sell_trail") {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.4);
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1874,7 +1850,11 @@ function PositionCard({
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
-export default function PaperTrader({ selectedMeme }: Props) {
+export default function PaperTrader({
+  selectedMeme,
+  collapsed,
+  onCollapseChange,
+}: Props) {
   const { connection } = useConnection();
 
   const connRef = useRef<Connection | null>(null);
@@ -1896,7 +1876,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
   const [hotPub, setHotPub] = useState<string | null>(null);
   const [hotBal, setHotBal] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
   const [tab, setTab] = useState<"trade" | "positions" | "log" | "config">(
     "trade",
   );
@@ -1934,7 +1913,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
     null,
   );
   const mountedRef = useRef(true);
-
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setPositionsSync = useCallback(
@@ -1942,12 +1920,10 @@ export default function PaperTrader({ selectedMeme }: Props) {
       setPositions((prev) => {
         const next = typeof updater === "function" ? updater(prev) : updater;
         positionsRef.current = next;
-
         if (persistTimer.current) clearTimeout(persistTimer.current);
         persistTimer.current = setTimeout(() => {
           persistPositions(next.filter((p) => p.status === "watching"));
         }, 1000);
-
         return next;
       });
     },
@@ -1969,7 +1945,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
     trailPctRef.current = trailPct;
   }, [trailPct]);
 
-  // Load positions + trades from MongoDB on mount
   useEffect(() => {
     let cancelled = false;
     Promise.all([fetchPositions(), fetchTrades()]).then(
@@ -1986,7 +1961,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
     };
   }, []);
 
-  // Balance polling
   useEffect(() => {
     if (!hotPub || !hotKeypair) return;
     const fetchBal = async () => {
@@ -1995,9 +1969,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
         const bal =
           (await getConn().getBalance(hotKeypair.publicKey)) / LAMPORTS_PER_SOL;
         if (mountedRef.current) setHotBal(bal);
-      } catch {
-        /* retry next interval */
-      }
+      } catch {}
     };
     fetchBal();
     balTimer.current = setInterval(fetchBal, 15000);
@@ -2006,7 +1978,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
     };
   }, [hotPub, hotKeypair, getConn]);
 
-  // Token data fetch
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ca = (selectedMeme as any)?.contractAddress;
@@ -2111,9 +2082,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
           ts: pos.ts,
         };
 
-        if (mountedRef.current) {
-          setLog((prev) => [logEntry, ...prev]);
-        }
+        if (mountedRef.current) setLog((prev) => [logEntry, ...prev]);
         appendTrade(logEntry);
 
         if (mountedRef.current) {
@@ -2132,9 +2101,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
             const bal =
               (await getConn().getBalance(kp.publicKey)) / LAMPORTS_PER_SOL;
             if (mountedRef.current) setHotBal(bal);
-          } catch {
-            /* non-critical */
-          }
+          } catch {}
         }, 4000);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Unknown error";
@@ -2155,7 +2122,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
     [setPositionsSync, getConn],
   );
 
-  // Monitor positions
   useEffect(() => {
     const monitor = async () => {
       const watching = positionsRef.current.filter(
@@ -2183,18 +2149,15 @@ export default function PaperTrader({ selectedMeme }: Props) {
               peakMcap: newPeak,
               trailStopMcap: trailStop,
             };
-            if (mountedRef.current) {
+            if (mountedRef.current)
               setPositionsSync((prev) =>
                 prev.map((p) => (p.id === pos.id ? updated : p)),
               );
-            }
             if (mcap >= tpMcap) triggerSell(pos.id, "TP");
             else if (slValid && mcap <= slMcap) triggerSell(pos.id, "SL");
             else if (newPeak > pos.entryMcap && mcap <= trailStop)
               triggerSell(pos.id, "TRAIL");
-          } catch {
-            /* skip this position this tick */
-          }
+          } catch {}
         }),
       );
     };
@@ -2241,11 +2204,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
     const amt = parseFloat(amountSol);
     try {
       const conn = getConn();
-
-      // ── jupiterBuy now returns { sig, rawTokenAmount } from quote.outAmount.
-      // No RPC polling loop needed — the quote already tells us exactly how
-      // many raw token units we'll receive (before slippage adjustments, but
-      // accurate enough for position tracking).
       const { sig, rawTokenAmount } = await jupiterBuy(
         conn,
         hotKeypair,
@@ -2267,7 +2225,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
         mint: ca,
         entryMcap,
         entryPrice: tokenData?.price || 0,
-        // rawTokenAmount from quote.outAmount — no RPC polling required
         tokenAmount: rawTokenAmount,
         amountSol: amt,
         slPct,
@@ -2285,10 +2242,6 @@ export default function PaperTrader({ selectedMeme }: Props) {
       setPositionsSync((prev) => [pos, ...prev]);
       markBoughtInWinsPanel((sym || "").toLowerCase());
 
-      // Derive a human-readable display amount from rawTokenAmount.
-      // We don't have decimals here so show it as a large integer — good enough
-      // for the status message. The monitor loop uses getRawTokenBalance on sell
-      // so the actual on-chain amount is always used when it matters.
       const displayAmt =
         rawTokenAmount > 1e6
           ? `${(rawTokenAmount / 1e6).toFixed(1)}M`
@@ -2314,9 +2267,7 @@ export default function PaperTrader({ selectedMeme }: Props) {
             (await getConn().getBalance(hotKeypair.publicKey)) /
             LAMPORTS_PER_SOL;
           if (mountedRef.current) setHotBal(bal);
-        } catch {
-          /* non-critical */
-        }
+        } catch {}
       }, 4000);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Unknown error";
@@ -2385,9 +2336,9 @@ export default function PaperTrader({ selectedMeme }: Props) {
         .cfg-inp:focus{border-color:#e8490f55;}
       `}</style>
 
-      {/* HEADER */}
+      {/* HEADER — clicking toggles collapsed via prop */}
       <div
-        onClick={() => setCollapsed((p) => !p)}
+        onClick={() => onCollapseChange(!collapsed)}
         style={{
           background: "#030303",
           borderBottom: collapsed ? "none" : `1px solid ${C.border}`,
@@ -2458,6 +2409,19 @@ export default function PaperTrader({ selectedMeme }: Props) {
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          {/* Collapse indicator */}
+          <span
+            style={{
+              fontSize: 9,
+              color: C.dim,
+              ...MONO,
+              transform: collapsed ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.2s",
+              display: "inline-block",
+            }}
+          >
+            ▾
+          </span>
           {!collapsed &&
             hotKeypair &&
             (["trade", "positions", "log", "config"] as const).map((t) => (

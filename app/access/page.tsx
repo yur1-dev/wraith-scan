@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useWraithTier } from "@/hooks/useWraithTier";
 import { TIERS, TIER_ORDER, type TierKey } from "@/lib/tiers";
@@ -38,7 +38,6 @@ const TIER_PITCH: Record<TierKey, string> = {
   WRAITH: "Maximum power. Zero fees. Live signals. For serious traders.",
 };
 
-// Single source of truth — same order used in cards AND matrix
 const ALL_FEATURES: { id: string; label: string; desc: string }[] = [
   {
     id: "scanner_view",
@@ -79,7 +78,6 @@ function fmtTokens(n: number) {
   return n.toString();
 }
 
-// Patch: live_signals_view is WRAITH-only
 function patchTier(key: TierKey) {
   if (key === "WRAITH") return TIERS[key];
   return {
@@ -93,6 +91,186 @@ function patchTier(key: TierKey) {
 const DISPLAY_TIERS = Object.fromEntries(
   TIER_ORDER.map((k) => [k, patchTier(k)]),
 ) as typeof TIERS;
+
+// Canvas is larger than the ghost image and centered on it via negative margins
+// so smoke bleeds freely in all directions without any clipping
+function SmokeCanvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Canvas is 800x700, ghost image is ~380x460
+    // Canvas is centered on the image via CSS (left:-210px, top:-120px)
+    // so smoke has 210px bleed left, ~210px right, 120px top, ~120px bottom
+    const CW = 800;
+    const CH = 700;
+    canvas.width = CW;
+    canvas.height = CH;
+
+    // Perlin noise
+    const perm = new Uint8Array(512);
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    for (let i = 255; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [p[i], p[j]] = [p[j], p[i]];
+    }
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+
+    const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (a: number, b: number, t: number) => a + t * (b - a);
+    const grad = (h: number, x: number, y: number) => {
+      const v = h & 3;
+      const u = v < 2 ? x : y,
+        w = v < 2 ? y : x;
+      return (h & 1 ? -u : u) + (h & 2 ? -w : w);
+    };
+    const noise2 = (x: number, y: number) => {
+      const X = Math.floor(x) & 255,
+        Y = Math.floor(y) & 255;
+      const xf = x - Math.floor(x),
+        yf = y - Math.floor(y);
+      const u = fade(xf),
+        v = fade(yf);
+      const a = perm[X] + Y,
+        b = perm[X + 1] + Y;
+      return lerp(
+        lerp(grad(perm[a], xf, yf), grad(perm[b], xf - 1, yf), u),
+        lerp(
+          grad(perm[a + 1], xf, yf - 1),
+          grad(perm[b + 1], xf - 1, yf - 1),
+          u,
+        ),
+        v,
+      );
+    };
+
+    type Particle = {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      r: number;
+      alpha: number;
+      life: number;
+      maxLife: number;
+      nx: number;
+      ny: number;
+      spin: number;
+      angle: number;
+      scaleX: number;
+    };
+
+    const particles: Particle[] = [];
+    let t = 0;
+
+    // Spawn at the bottom-center of the canvas (where ghost base is)
+    // Spread across 300px centered on x=400 (canvas center)
+    const spawn = (): Particle => ({
+      x: 250 + Math.random() * 300,
+      y: 610 + Math.random() * 50,
+      vx: 0,
+      vy: -(0.35 + Math.random() * 0.55),
+      r: 22 + Math.random() * 32,
+      alpha: 0,
+      life: 0,
+      maxLife: 220 + Math.random() * 180,
+      nx: Math.random() * 100,
+      ny: Math.random() * 100,
+      spin: (Math.random() - 0.5) * 0.007,
+      angle: Math.random() * Math.PI * 2,
+      scaleX: 0.65 + Math.random() * 0.7,
+    });
+
+    // Pre-seed particles at various heights so it's not empty on mount
+    for (let i = 0; i < 60; i++) {
+      const p = spawn();
+      p.y = 200 + Math.random() * 450;
+      p.life = Math.random() * p.maxLife;
+      p.r += p.life * 0.08;
+      particles.push(p);
+    }
+
+    let raf: number;
+    function draw() {
+      if (!ctx || !canvas) return;
+      ctx.clearRect(0, 0, CW, CH);
+      t += 0.004;
+
+      if (particles.length < 90 && Math.random() < 0.55)
+        particles.push(spawn());
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life++;
+        p.angle += p.spin;
+
+        const n1 = noise2(p.nx + t, p.ny + t * 0.5);
+        const n2 = noise2(p.nx * 1.6 + t * 0.8, p.ny * 1.6);
+        p.vx += n1 * 0.07 + n2 * 0.035;
+        p.vx *= 0.955;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.r += 0.14;
+        p.nx += 0.003;
+        p.ny += 0.002;
+
+        const rise = p.life / p.maxLife;
+        if (rise < 0.15) p.alpha = (rise / 0.15) * 0.17;
+        else if (rise < 0.55) p.alpha = 0.17;
+        else p.alpha = 0.17 * (1 - (rise - 0.55) / 0.45);
+
+        if (p.alpha <= 0.002 || p.y < -150) {
+          particles.splice(i, 1);
+          continue;
+        }
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.angle);
+        ctx.scale(p.scaleX, 1);
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, p.r);
+        g.addColorStop(0, `rgba(222,220,232,${p.alpha})`);
+        g.addColorStop(0.3, `rgba(200,198,216,${p.alpha * 0.7})`);
+        g.addColorStop(0.65, `rgba(178,176,198,${p.alpha * 0.28})`);
+        g.addColorStop(1, `rgba(155,153,178,0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      raf = requestAnimationFrame(draw);
+    }
+
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        // Centered on the ghost image column (380w x 460h)
+        // Canvas is 800x700 so it bleeds 210px each side horizontally
+        // and 120px top, 120px bottom
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        transform: "translate(-50%, -50%)",
+        width: 800,
+        height: 700,
+        pointerEvents: "none",
+        zIndex: 4,
+        mixBlendMode: "screen",
+      }}
+    />
+  );
+}
 
 export default function AccessPage() {
   const { tier: currentTier, rawBalance, loading } = useWraithTier();
@@ -121,6 +299,7 @@ export default function AccessPage() {
         @keyframes ticker  { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
         @keyframes dotpulse{ 0%,100%{box-shadow:0 0 4px #00c47a55} 50%{box-shadow:0 0 12px #00c47a} }
         @keyframes scan    { 0%{top:-1px;opacity:0} 5%{opacity:1} 95%{opacity:1} 100%{top:100%;opacity:0} }
+        @keyframes float   { 0%,100%{transform:translateY(0px)} 50%{transform:translateY(-12px)} }
 
         .a1{animation:fadein .5s .00s cubic-bezier(.22,1,.36,1) both}
         .a2{animation:fadein .5s .08s cubic-bezier(.22,1,.36,1) both}
@@ -214,12 +393,30 @@ export default function AccessPage() {
         .mx-row:hover { background:#0a0a0a; }
         .mx-row:last-child { border-bottom:none; }
 
+        .ghost-video-wrap {
+          position:relative;
+          animation: float 6s ease-in-out infinite;
+        }
+
+        .ghost-video {
+          width:100%;
+          height:100%;
+          object-fit:contain;
+          display:block;
+          mix-blend-mode: lighten;
+          position: relative;
+          z-index: 2;
+        }
+
         @media(max-width:960px){
           .pricing-grid { grid-template-columns:1fr 1fr !important; }
+          .hero-inner { flex-direction:column !important; }
+          .ghost-video-col { width:100% !important; max-width:320px !important; height:320px !important; margin:0 auto; }
         }
         @media(max-width:600px){
           .pricing-grid { grid-template-columns:1fr !important; }
           .mx-hide { display:none; }
+          .ghost-video-col { max-width:260px !important; height:260px !important; }
         }
       `}</style>
 
@@ -375,9 +572,10 @@ export default function AccessPage() {
       <section
         style={{
           padding: "80px 40px 64px",
-          maxWidth: 960,
+          maxWidth: 1080,
           margin: "0 auto",
           position: "relative",
+          overflow: "visible",
         }}
       >
         <div className="scan-line" />
@@ -393,164 +591,216 @@ export default function AccessPage() {
             pointerEvents: "none",
           }}
         />
-        <div className="a1" style={{ marginBottom: 16 }}>
-          <span
-            style={{
-              fontSize: 9,
-              letterSpacing: ".3em",
-              color: "#666",
-              fontWeight: 700,
-            }}
-          >
-            TOKEN-GATED ACCESS · SOLANA
-          </span>
-        </div>
-        <h1
-          className="a2"
-          style={{
-            fontSize: "clamp(34px,5vw,62px)",
-            fontWeight: 900,
-            letterSpacing: "-.01em",
-            lineHeight: 1.06,
-            color: "#f0f0f0",
-            margin: "0 0 20px",
-          }}
-        >
-          HOLD WRAITH.
-          <br />
-          <span style={{ color: "#e8490f" }}>UNLOCK</span> THE MACHINE.
-        </h1>
-        <p
-          className="a3"
-          style={{
-            color: "#888",
-            fontSize: 13,
-            lineHeight: 1.9,
-            maxWidth: 460,
-            marginBottom: 36,
-          }}
-        >
-          Four token-gated tiers. Your balance is auto-detected the moment you
-          connect your wallet — features and fee discounts activate instantly.
-        </p>
+
+        {/* Hero inner: text left, ghost right */}
         <div
-          className="a4"
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap" as const,
-            marginBottom: 56,
-          }}
-        >
-          <a
-            href="https://pump.fun"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              background: "#e8490f",
-              color: "#fff",
-              fontSize: 10,
-              fontWeight: 900,
-              letterSpacing: ".16em",
-              padding: "11px 22px",
-              borderRadius: 4,
-              textDecoration: "none",
-              boxShadow: "0 0 28px #e8490f44",
-              transition: "all .15s",
-              ...MONO,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#ff5c22";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#e8490f";
-            }}
-          >
-            BUY WRAITH <span style={{ opacity: 0.6 }}>↗</span>
-          </a>
-          <Link
-            href="/"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              background: "transparent",
-              color: "#888",
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: ".16em",
-              padding: "11px 22px",
-              borderRadius: 4,
-              textDecoration: "none",
-              border: "1px solid #222",
-              transition: "all .15s",
-              ...MONO,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "#555";
-              e.currentTarget.style.color = "#e0e0e0";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "#222";
-              e.currentTarget.style.color = "#888";
-            }}
-          >
-            OPEN APP →
-          </Link>
-        </div>
-        <div
-          className="a5"
+          className="hero-inner"
           style={{
             display: "flex",
             alignItems: "center",
-            flexWrap: "wrap" as const,
+            gap: 60,
           }}
         >
-          {[
-            { l: "SUPPLY", v: "1B" },
-            { l: "CHAIN", v: "SOL" },
-            { l: "MAX FEE", v: "1.5%" },
-            { l: "MIN FEE", v: "0%" },
-          ].map((s, i) => (
-            <div key={s.l} style={{ display: "flex", alignItems: "center" }}>
-              <div style={{ padding: i === 0 ? "0 36px 0 0" : "0 36px" }}>
-                <div
-                  style={{
-                    fontSize: "clamp(22px,3vw,30px)",
-                    fontWeight: 900,
-                    color: "#f0f0f0",
-                    letterSpacing: "-.02em",
-                  }}
-                >
-                  {s.v}
-                </div>
-                <div
-                  style={{
-                    fontSize: 8,
-                    color: "#555",
-                    letterSpacing: ".24em",
-                    marginTop: 4,
-                    fontWeight: 700,
-                  }}
-                >
-                  {s.l}
-                </div>
-              </div>
-              {i < 3 && (
-                <div
-                  style={{
-                    width: 1,
-                    height: 28,
-                    background: "#1a1a1a",
-                    flexShrink: 0,
-                  }}
-                />
-              )}
+          {/* ── LEFT: text content ── */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="a1" style={{ marginBottom: 16 }}>
+              <span
+                style={{
+                  fontSize: 9,
+                  letterSpacing: ".3em",
+                  color: "#666",
+                  fontWeight: 700,
+                }}
+              >
+                TOKEN-GATED ACCESS · SOLANA
+              </span>
             </div>
-          ))}
+            <h1
+              className="a2"
+              style={{
+                fontSize: "clamp(34px,5vw,62px)",
+                fontWeight: 900,
+                letterSpacing: "-.01em",
+                lineHeight: 1.06,
+                color: "#f0f0f0",
+                margin: "0 0 20px",
+              }}
+            >
+              HOLD WRAITH.
+              <br />
+              <span style={{ color: "#e8490f" }}>UNLOCK</span> THE MACHINE.
+            </h1>
+            <p
+              className="a3"
+              style={{
+                color: "#888",
+                fontSize: 13,
+                lineHeight: 1.9,
+                maxWidth: 460,
+                marginBottom: 36,
+              }}
+            >
+              Four token-gated tiers. Your balance is auto-detected the moment
+              you connect your wallet — features and fee discounts activate
+              instantly.
+            </p>
+            <div
+              className="a4"
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap" as const,
+                marginBottom: 56,
+              }}
+            >
+              <a
+                href="https://pump.fun"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "#e8490f",
+                  color: "#fff",
+                  fontSize: 10,
+                  fontWeight: 900,
+                  letterSpacing: ".16em",
+                  padding: "11px 22px",
+                  borderRadius: 4,
+                  textDecoration: "none",
+                  boxShadow: "0 0 28px #e8490f44",
+                  transition: "all .15s",
+                  ...MONO,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#ff5c22";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#e8490f";
+                }}
+              >
+                BUY WRAITH <span style={{ opacity: 0.6 }}>↗</span>
+              </a>
+              <Link
+                href="/"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "transparent",
+                  color: "#888",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: ".16em",
+                  padding: "11px 22px",
+                  borderRadius: 4,
+                  textDecoration: "none",
+                  border: "1px solid #222",
+                  transition: "all .15s",
+                  ...MONO,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = "#555";
+                  e.currentTarget.style.color = "#e0e0e0";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = "#222";
+                  e.currentTarget.style.color = "#888";
+                }}
+              >
+                OPEN APP →
+              </Link>
+            </div>
+            <div
+              className="a5"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap" as const,
+              }}
+            >
+              {[
+                { l: "SUPPLY", v: "1B" },
+                { l: "CHAIN", v: "SOL" },
+                { l: "MAX FEE", v: "1.5%" },
+                { l: "MIN FEE", v: "0%" },
+              ].map((s, i) => (
+                <div
+                  key={s.l}
+                  style={{ display: "flex", alignItems: "center" }}
+                >
+                  <div style={{ padding: i === 0 ? "0 36px 0 0" : "0 36px" }}>
+                    <div
+                      style={{
+                        fontSize: "clamp(22px,3vw,30px)",
+                        fontWeight: 900,
+                        color: "#f0f0f0",
+                        letterSpacing: "-.02em",
+                      }}
+                    >
+                      {s.v}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 8,
+                        color: "#555",
+                        letterSpacing: ".24em",
+                        marginTop: 4,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {s.l}
+                    </div>
+                  </div>
+                  {i < 3 && (
+                    <div
+                      style={{
+                        width: 1,
+                        height: 28,
+                        background: "#1a1a1a",
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── RIGHT: ghost image with smoke bleeding outward ── */}
+          <div
+            className="ghost-video-col a2"
+            style={{
+              flexShrink: 0,
+              width: 380,
+              height: 460,
+              position: "relative",
+              // overflow MUST be visible so canvas bleeds outside this box
+              overflow: "visible",
+            }}
+          >
+            {/*
+              SmokeCanvas is 800x700, centered on this 380x460 box via
+              transform: translate(-50%, -50%) + left:50% + top:50%.
+              That gives ~210px bleed left/right and ~120px bleed top/bottom.
+              The canvas uses mixBlendMode:"screen" so black = transparent.
+            */}
+            <SmokeCanvas />
+
+            {/* Ghost image sits above the smoke (zIndex:2) */}
+            <div
+              className="ghost-video-wrap"
+              style={{
+                width: "100%",
+                height: "100%",
+                position: "relative",
+                zIndex: 2,
+              }}
+            >
+              <img className="ghost-video" src="/wraith.png" alt="WRAITH" />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -633,6 +883,7 @@ export default function AccessPage() {
                     style={{
                       padding: "24px 20px 20px",
                       position: "relative",
+                      overflow: "visible",
                       flex: 1,
                       display: "flex",
                       flexDirection: "column",
@@ -658,7 +909,6 @@ export default function AccessPage() {
                       </div>
                     )}
 
-                    {/* Tier name row */}
                     <div
                       style={{
                         display: "flex",
@@ -702,7 +952,6 @@ export default function AccessPage() {
                       </div>
                     </div>
 
-                    {/* Price + pitch */}
                     <div style={{ marginBottom: 18 }}>
                       <div
                         style={{
@@ -758,7 +1007,6 @@ export default function AccessPage() {
                       }}
                     />
 
-                    {/* Features — single ordered list, identical across all cards */}
                     <div style={{ flex: 1, marginBottom: 20 }}>
                       {ALL_FEATURES.map((f) => {
                         const has =
@@ -794,7 +1042,6 @@ export default function AccessPage() {
                     </div>
                   </div>
 
-                  {/* CTA */}
                   <div style={{ padding: "0 20px 20px", position: "relative" }}>
                     {(() => {
                       const rank = {
@@ -875,7 +1122,6 @@ export default function AccessPage() {
             </h2>
           </div>
 
-          {/* Header row */}
           <div
             style={{
               display: "grid",
@@ -910,7 +1156,6 @@ export default function AccessPage() {
             ))}
           </div>
 
-          {/* Same ALL_FEATURES order as cards */}
           {ALL_FEATURES.map((f) => (
             <div key={f.id} className="mx-row">
               <div>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { jupiterLimiter, checkLimit } from "@/lib/ratelimit"; // ✅
+import { jupiterLimiter, checkLimit } from "@/lib/ratelimit";
 
 const JUP_BASE = "https://api.jup.ag/swap/v1";
 const TIMEOUT_MS = 30000;
@@ -19,7 +19,6 @@ const QUOTE_ALLOWED_PARAMS = new Set([
   "asLegacyTransaction",
 ]);
 
-// ✅ Allowlist of top-level fields accepted in POST swap body
 const SWAP_ALLOWED_FIELDS = new Set([
   "quoteResponse",
   "userPublicKey",
@@ -31,6 +30,7 @@ const SWAP_ALLOWED_FIELDS = new Set([
   "trackingAccount",
   "prioritizationFeeLamports",
   "dynamicComputeUnitLimit",
+  "platformFeeBps", // ← fee injection
 ]);
 
 async function fetchWithTimeout(url: string, options: RequestInit, ms: number) {
@@ -49,7 +49,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ✅ Redis outage safe
   const { success } = await checkLimit(jupiterLimiter, session.user.id);
   if (!success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
@@ -119,7 +118,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Request too large" }, { status: 413 });
   }
 
-  // ✅ Redis outage safe
   const { success } = await checkLimit(jupiterLimiter, session.user.id);
   if (!success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
@@ -139,7 +137,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // ✅ Strip unknown fields — only allowlisted swap fields reach Jupiter
+  // Strip unknown fields
   const filteredBody: Record<string, unknown> = {};
   for (const key of SWAP_ALLOWED_FIELDS) {
     if (key in rawBody) filteredBody[key] = rawBody[key];
@@ -155,6 +153,28 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+
+  // ── FEE INJECTION ──────────────────────────────────────────────────────────
+  // Only inject if FEE_WALLET and FEE_ACCOUNT are set and feeBps > 0.
+  // feeBps is sent from the client and validated here (0–100 bps max).
+  // When placeholder values are still in place, fees are silently skipped.
+  const feeWallet = process.env.FEE_WALLET ?? "";
+  const feeAccount = process.env.FEE_ACCOUNT ?? "";
+  const isPlaceholder =
+    feeWallet.includes("PLACEHOLDER") || feeWallet === "" || feeAccount === "";
+
+  if (!isPlaceholder && endpoint === "swap") {
+    const clientFeeBps =
+      typeof rawBody.feeBps === "number"
+        ? Math.min(Math.max(Math.round(rawBody.feeBps), 0), 100)
+        : 0;
+
+    if (clientFeeBps > 0) {
+      filteredBody.platformFeeBps = clientFeeBps;
+      filteredBody.feeAccount = feeAccount;
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   const upstreamUrl = `${JUP_BASE}/${endpoint}`;
 

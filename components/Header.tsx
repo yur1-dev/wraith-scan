@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSession, signOut } from "next-auth/react";
 import Image from "next/image";
+import Link from "next/link";
 import WalletModal from "./WalletModal";
+import { TierBadge } from "@/hooks/useWraithTier";
 
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
@@ -45,22 +47,30 @@ export default function Header() {
 
       <header
         style={{
-          background: "#030303",
-          borderBottom: "1px solid #1a1a1a",
-          padding: "0 20px",
-          height: 56,
+          background: "#020202",
+          borderBottom: "1px solid #0d0d0d",
+          padding: "0 24px",
+          height: 52,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
+          ...MONO,
         }}
       >
         {/* Left — branding */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            minWidth: 160,
+          }}
+        >
           <div
             style={{
-              width: 32,
-              height: 32,
+              width: 28,
+              height: 28,
               position: "relative",
               flexShrink: 0,
             }}
@@ -69,104 +79,135 @@ export default function Header() {
               src="/logo.png"
               alt="Wraith logo"
               fill
-              sizes="32px"
+              sizes="28px"
               style={{
                 objectFit: "contain",
                 mixBlendMode: "screen",
-                filter: "drop-shadow(0 0 6px #e8490f88)",
+                filter: "drop-shadow(0 0 5px #e8490f77)",
               }}
               priority
             />
           </div>
 
-          <div
+          <span
             style={{
               color: "#e0e0e0",
-              fontSize: 21,
-              fontWeight: 700,
-              letterSpacing: "0.15em",
-              ...MONO,
+              fontSize: 16,
+              fontWeight: 900,
+              letterSpacing: ".22em",
               lineHeight: 1,
             }}
           >
             WRAITH
-          </div>
+          </span>
 
-          <div
+          <span
             style={{
-              width: 6,
-              height: 6,
+              width: 5,
+              height: 5,
               borderRadius: "50%",
               background: "#00c47a",
               boxShadow: "0 0 6px #00c47a",
-              marginLeft: 4,
+              display: "inline-block",
+              marginLeft: 2,
             }}
           />
-          <span style={{ color: "#00c47a", fontSize: 10, ...MONO }}>LIVE</span>
         </div>
 
-        {/* Center */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span
-            style={{
-              fontSize: 10,
-              color: "#444",
-              ...MONO,
-              border: "1px solid #222",
-              padding: "3px 10px",
-              borderRadius: 4,
-            }}
-          >
-            ◈ SOLANA
-          </span>
-        </div>
+        {/* Center — nav */}
+        <nav style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {[
+            // { label: "SNIPER", href: "/" },
+            // { label: "SIGNALS", href: "/?tab=signals" },
+            // { label: "PAPER", href: "/?tab=paper" },
+          ].map(({ label, href }) => (
+            <Link
+              key={label}
+              href={href}
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: ".16em",
+                color: "#272727",
+                textDecoration: "none",
+                padding: "6px 14px",
+                borderRadius: 3,
+                transition: "color .15s, background .15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "#888";
+                e.currentTarget.style.background = "#0a0a0a";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "#272727";
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
 
-        {/* Right — wallet + user account */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Wallet controls */}
+        {/* Right — wallet + user */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            minWidth: 160,
+            justifyContent: "flex-end",
+          }}
+        >
           {connected && publicKey ? (
             <>
+              <TierBadge compact />
+
               <button
                 onClick={handleCopy}
                 style={{
-                  background: "#0a0a0a",
-                  border: "1px solid #222",
-                  color: copied ? "#00c47a" : "#888",
+                  background: "#080808",
+                  border: "1px solid #181818",
+                  color: copied ? "#00c47a" : "#444",
                   fontSize: 10,
                   ...MONO,
                   padding: "0 12px",
-                  height: 32,
+                  height: 30,
                   borderRadius: 4,
                   cursor: "pointer",
-                  letterSpacing: "0.05em",
-                  transition: "all 0.15s",
+                  letterSpacing: ".05em",
+                  transition: "all .15s",
+                }}
+                onMouseEnter={(e) => {
+                  if (!copied) e.currentTarget.style.color = "#666";
+                }}
+                onMouseLeave={(e) => {
+                  if (!copied) e.currentTarget.style.color = "#444";
                 }}
               >
-                {copied ? "COPIED!" : trimAddress(publicKey.toString())}
+                {copied ? "COPIED" : trimAddress(publicKey.toString())}
               </button>
 
               <button
                 onClick={() => disconnect()}
                 style={{
                   background: "transparent",
-                  border: "1px solid #222",
-                  color: "#555",
+                  border: "1px solid #181818",
+                  color: "#2a2a2a",
                   fontSize: 10,
                   ...MONO,
                   padding: "0 12px",
-                  height: 32,
+                  height: 30,
                   borderRadius: 4,
                   cursor: "pointer",
-                  transition: "all 0.15s",
+                  transition: "all .15s",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "#ff444433";
-                  (e.currentTarget as HTMLElement).style.color = "#ff4444";
+                  e.currentTarget.style.borderColor = "#ff444433";
+                  e.currentTarget.style.color = "#ff4444";
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = "#222";
-                  (e.currentTarget as HTMLElement).style.color = "#555";
+                  e.currentTarget.style.borderColor = "#181818";
+                  e.currentTarget.style.color = "#2a2a2a";
                 }}
               >
                 DISCONNECT
@@ -177,46 +218,42 @@ export default function Header() {
               onClick={() => setModalOpen(true)}
               disabled={connecting}
               style={{
-                background: connecting ? "#111" : "#e8490f",
+                background: connecting ? "#0a0a0a" : "#e8490f",
                 border: "none",
-                color: connecting ? "#666" : "#fff",
+                color: connecting ? "#444" : "#fff",
                 fontSize: 11,
                 fontWeight: 700,
                 ...MONO,
-                padding: "0 20px",
-                height: 32,
-                borderRadius: 5,
+                padding: "0 18px",
+                height: 30,
+                borderRadius: 4,
                 cursor: connecting ? "not-allowed" : "pointer",
-                letterSpacing: "0.1em",
-                boxShadow: connecting ? "none" : "0 0 16px #e8490f44",
-                transition: "all 0.15s",
+                letterSpacing: ".1em",
+                boxShadow: connecting ? "none" : "0 0 14px #e8490f33",
+                transition: "all .15s",
               }}
               onMouseEnter={(e) => {
-                if (!connecting)
-                  (e.currentTarget as HTMLElement).style.background = "#ff5a1f";
+                if (!connecting) e.currentTarget.style.background = "#ff5a1f";
               }}
               onMouseLeave={(e) => {
-                if (!connecting)
-                  (e.currentTarget as HTMLElement).style.background = "#e8490f";
+                if (!connecting) e.currentTarget.style.background = "#e8490f";
               }}
             >
               {connecting ? "CONNECTING..." : "CONNECT WALLET"}
             </button>
           )}
 
-          {/* Divider */}
           {session && (
             <div
               style={{
                 width: 1,
-                height: 24,
-                background: "#1a1a1a",
-                margin: "0 4px",
+                height: 20,
+                background: "#111",
+                margin: "0 2px",
               }}
             />
           )}
 
-          {/* Google account menu */}
           {session && (
             <div style={{ position: "relative" }}>
               <button
@@ -226,45 +263,44 @@ export default function Header() {
                 }}
                 style={{
                   background: "transparent",
-                  border: "1px solid #222",
+                  border: "1px solid #181818",
                   borderRadius: 4,
                   padding: "0 8px",
-                  height: 32,
+                  height: 30,
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  gap: 8,
-                  transition: "border-color 0.15s",
+                  gap: 7,
+                  transition: "border-color .15s",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = "#333";
+                  e.currentTarget.style.borderColor = "#2a2a2a";
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = "#222";
+                  e.currentTarget.style.borderColor = "#181818";
                 }}
               >
-                {/* Avatar */}
                 {session.user?.image ? (
                   <Image
                     src={session.user.image}
                     alt="avatar"
-                    width={22}
-                    height={22}
+                    width={20}
+                    height={20}
                     style={{ borderRadius: "50%", display: "block" }}
                   />
                 ) : (
                   <div
                     style={{
-                      width: 22,
-                      height: 22,
+                      width: 20,
+                      height: 20,
                       borderRadius: "50%",
-                      background: "#e8490f22",
-                      border: "1px solid #e8490f44",
+                      background: "#e8490f18",
+                      border: "1px solid #e8490f33",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       color: "#e8490f",
-                      fontSize: 9,
+                      fontSize: 8,
                       fontWeight: 700,
                       ...MONO,
                     }}
@@ -275,25 +311,24 @@ export default function Header() {
                   </div>
                 )}
 
-                <span style={{ color: "#555", fontSize: 10, ...MONO }}>
+                <span style={{ color: "#333", fontSize: 10, ...MONO }}>
                   {session.user?.name?.split(" ")[0] ??
                     session.user?.email?.split("@")[0] ??
                     "USER"}
                 </span>
 
-                {/* Chevron */}
                 <svg
-                  width="8"
-                  height="8"
+                  width="7"
+                  height="7"
                   viewBox="0 0 8 8"
                   style={{
                     transform: userMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
-                    transition: "transform 0.15s",
+                    transition: "transform .15s",
                   }}
                 >
                   <path
                     d="M1 2.5L4 5.5L7 2.5"
-                    stroke="#444"
+                    stroke="#333"
                     strokeWidth="1.5"
                     fill="none"
                     strokeLinecap="round"
@@ -301,7 +336,6 @@ export default function Header() {
                 </svg>
               </button>
 
-              {/* Dropdown */}
               {userMenuOpen && (
                 <div
                   style={{
@@ -309,34 +343,33 @@ export default function Header() {
                     top: "calc(100% + 8px)",
                     right: 0,
                     background: "#060606",
-                    border: "1px solid #1a1a1a",
-                    borderRadius: 6,
+                    border: "1px solid #111",
+                    borderRadius: 5,
                     minWidth: 180,
-                    zIndex: 100,
+                    zIndex: 200,
                     overflow: "hidden",
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {/* Account info */}
                   <div
                     style={{
                       padding: "10px 14px",
-                      borderBottom: "1px solid #111",
+                      borderBottom: "1px solid #0d0d0d",
                     }}
                   >
                     <div
                       style={{
-                        color: "#888",
+                        color: "#555",
                         fontSize: 9,
                         ...MONO,
-                        marginBottom: 2,
+                        marginBottom: 3,
                       }}
                     >
                       SIGNED IN AS
                     </div>
                     <div
                       style={{
-                        color: "#e0e0e0",
+                        color: "#888",
                         fontSize: 10,
                         ...MONO,
                         overflow: "hidden",
@@ -349,7 +382,31 @@ export default function Header() {
                     </div>
                   </div>
 
-                  {/* Sign out */}
+                  <Link
+                    href="/access"
+                    style={{
+                      display: "block",
+                      color: "#444",
+                      fontSize: 10,
+                      ...MONO,
+                      padding: "10px 14px",
+                      textDecoration: "none",
+                      letterSpacing: ".06em",
+                      borderBottom: "1px solid #0d0d0d",
+                      transition: "background .15s, color .15s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "#0a0a0a";
+                      e.currentTarget.style.color = "#e8490f";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.color = "#444";
+                    }}
+                  >
+                    VIEW TIERS
+                  </Link>
+
                   <button
                     onClick={() => signOut({ callbackUrl: "/login" })}
                     style={{
@@ -362,16 +419,14 @@ export default function Header() {
                       padding: "10px 14px",
                       cursor: "pointer",
                       textAlign: "left",
-                      letterSpacing: "0.05em",
-                      transition: "background 0.15s",
+                      letterSpacing: ".06em",
+                      transition: "background .15s",
                     }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background =
-                        "#1a0000";
+                      e.currentTarget.style.background = "#1a0000";
                     }}
                     onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.background =
-                        "transparent";
+                      e.currentTarget.style.background = "transparent";
                     }}
                   >
                     SIGN OUT

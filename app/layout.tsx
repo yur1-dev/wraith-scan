@@ -3,6 +3,7 @@ import { IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import WalletProvider from "@/components/WalletProvider";
 import AppSessionProvider from "@/components/SessionProvider";
+import { WraithTierProvider } from "@/hooks/useWraithTier";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -29,7 +30,9 @@ export default async function RootLayout({
     <html lang="en" className={mono.variable}>
       <body style={{ fontFamily: "var(--font-mono)" }}>
         <AppSessionProvider session={session}>
-          <WalletProvider>{children}</WalletProvider>
+          <WalletProvider>
+            <WraithTierProvider>{children}</WraithTierProvider>
+          </WalletProvider>
         </AppSessionProvider>
       </body>
     </html>

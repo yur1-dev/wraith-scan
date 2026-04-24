@@ -10,6 +10,7 @@ import {
   PublicKey,
 } from "@solana/web3.js";
 import { MemeTrend } from "@/app/page";
+import { useWraithTier } from "@/hooks/useWraithTier";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -380,6 +381,7 @@ async function jupiterBuy(
   keypair: Keypair,
   outputMint: string,
   amountLamports: number,
+  feeBps: number,
   onStatus?: (msg: string) => void,
 ): Promise<BuyResult> {
   onStatus?.("Fetching quote…");
@@ -402,6 +404,7 @@ async function jupiterBuy(
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: 500000,
+      feeBps, // ← forwarded to route.ts for server-side injection
     }),
   });
   if (!swapRes.ok) throw new Error(`Swap build failed: ${swapRes.status}`);
@@ -440,6 +443,7 @@ async function jupiterSell(
   keypair: Keypair,
   inputMint: string,
   tokenAmount: number,
+  feeBps: number,
   onStatus?: (msg: string) => void,
 ): Promise<string> {
   onStatus?.("Fetching sell quote…");
@@ -460,6 +464,7 @@ async function jupiterSell(
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: 500000,
+      feeBps, // ← forwarded to route.ts for server-side injection
     }),
   });
   if (!swapRes.ok) throw new Error(`Sell swap build failed: ${swapRes.status}`);
@@ -1856,6 +1861,7 @@ export default function PaperTrader({
   onCollapseChange,
 }: Props) {
   const { connection } = useConnection();
+  const { tier } = useWraithTier(); // ← tier for feeBps
 
   const connRef = useRef<Connection | null>(null);
   const getConn = useCallback((): Connection => {
@@ -1909,6 +1915,7 @@ export default function PaperTrader({
   const sellingRef = useRef<Set<string>>(new Set());
   const hotKeypairRef = useRef<Keypair | null>(null);
   const trailPctRef = useRef(trailPct);
+  const tierRef = useRef(tier); // ← keep tier in ref for callbacks
   const borderFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1944,6 +1951,9 @@ export default function PaperTrader({
   useEffect(() => {
     trailPctRef.current = trailPct;
   }, [trailPct]);
+  useEffect(() => {
+    tierRef.current = tier;
+  }, [tier]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2037,9 +2047,18 @@ export default function PaperTrader({
         const rawBal = await getRawTokenBalance(conn, kp.publicKey, pos.mint);
         if (rawBal <= 0) throw new Error("No token balance to sell");
 
-        const sig = await jupiterSell(conn, kp, pos.mint, rawBal, (msg) => {
-          if (mountedRef.current) setStatus({ msg, type: "pending" });
-        });
+        const feeBps = tierRef.current?.feeBps ?? 0;
+
+        const sig = await jupiterSell(
+          conn,
+          kp,
+          pos.mint,
+          rawBal,
+          feeBps,
+          (msg) => {
+            if (mountedRef.current) setStatus({ msg, type: "pending" });
+          },
+        );
 
         const exitMcap = await fetchMcap(pos.mint);
         const exitPnl =
@@ -2202,6 +2221,7 @@ export default function PaperTrader({
     setBuying(true);
     setStatus({ msg: "Starting buy…", type: "pending" });
     const amt = parseFloat(amountSol);
+    const feeBps = tier?.feeBps ?? 0;
     try {
       const conn = getConn();
       const { sig, rawTokenAmount } = await jupiterBuy(
@@ -2209,6 +2229,7 @@ export default function PaperTrader({
         hotKeypair,
         ca,
         Math.floor(amt * 1e9),
+        feeBps,
         (msg) => {
           if (mountedRef.current) setStatus({ msg, type: "pending" });
         },
@@ -2291,6 +2312,7 @@ export default function PaperTrader({
     trailPct,
     mcap,
     tokenData,
+    tier,
     setPositionsSync,
     getConn,
   ]);
@@ -2309,6 +2331,14 @@ export default function PaperTrader({
   const SL_PRESETS = [-10, -20, -30, -50];
   const TP_PRESETS = [1.5, 2, 3, 5, 10];
   const TRAIL_PRESETS = [5, 10, 15, 20, 25];
+
+  // fee badge for trade tab header
+  const feeBadgeLabel =
+    tier?.feeBps === 0
+      ? "0% FEE"
+      : tier?.feeBps != null
+        ? `${(tier.feeBps / 100).toFixed(2)}% FEE`
+        : null;
 
   return (
     <div
@@ -2336,7 +2366,7 @@ export default function PaperTrader({
         .cfg-inp:focus{border-color:#e8490f55;}
       `}</style>
 
-      {/* HEADER — clicking toggles collapsed via prop */}
+      {/* HEADER */}
       <div
         onClick={() => onCollapseChange(!collapsed)}
         style={{
@@ -2389,6 +2419,20 @@ export default function PaperTrader({
               {hotBal.toFixed(3)} SOL
             </span>
           )}
+          {feeBadgeLabel && (
+            <span
+              style={{
+                fontSize: 7,
+                color: tier?.feeBps === 0 ? C.green : C.amber,
+                border: `1px solid ${tier?.feeBps === 0 ? C.green + "33" : C.amber + "33"}`,
+                padding: "1px 5px",
+                borderRadius: 2,
+                ...MONO,
+              }}
+            >
+              {feeBadgeLabel}
+            </span>
+          )}
           {watchingPositions.length > 0 && (
             <span
               style={{
@@ -2409,7 +2453,6 @@ export default function PaperTrader({
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          {/* Collapse indicator */}
           <span
             style={{
               fontSize: 9,
@@ -3244,6 +3287,16 @@ export default function PaperTrader({
                   label: "Trailing Stop",
                   val: `-${trailPct}% from peak — new positions only`,
                   color: C.amber,
+                },
+                {
+                  label: "Platform Fee",
+                  val:
+                    tier?.feeBps === 0
+                      ? "0% (WRAITH tier)"
+                      : tier?.feeBps != null
+                        ? `${(tier.feeBps / 100).toFixed(2)}% per trade`
+                        : "—",
+                  color: tier?.feeBps === 0 ? C.green : C.amber,
                 },
               ].map((item) => (
                 <div

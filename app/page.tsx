@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
+import { useWraithTier } from "@/hooks/useWraithTier";
 
 const Header = dynamic(() => import("@/components/Header"), { ssr: false });
 const MemeScanner = dynamic(() => import("@/components/MemeScanner"), {
@@ -40,8 +41,8 @@ export interface MemeTrend {
 const MIN_PX = 220;
 const HANDLE_W = 6;
 const HANDLE_H = 6;
-const MIN_TRADER_H = 48; // collapsed = just the header bar
-const COLLAPSED_H = 36; // exact header bar height when collapsed
+const MIN_TRADER_H = 48;
+const COLLAPSED_H = 36;
 const MIN_WINS_H = 80;
 const DEFAULT_TRADER_H = 320;
 
@@ -56,23 +57,88 @@ const MOBILE_TABS: { key: MobileTab; label: string; icon: string }[] = [
 
 const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
 
+const C = {
+  bg: "#050505",
+  border: "#1a1a1a",
+  orange: "#e8490f",
+  red: "#ff4444",
+  muted: "#777",
+  dim: "#444",
+};
+
+function LockedSniper() {
+  return (
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+        background: "#050505",
+        border: "1px solid #1a1a1a",
+        borderRadius: 8,
+        padding: 24,
+        textAlign: "center" as const,
+        ...MONO,
+      }}
+    >
+      <span style={{ fontSize: 28 }}>🔒</span>
+      <div
+        style={{
+          color: "#e8490f",
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.15em",
+        }}
+      >
+        SNIPER LOCKED
+      </div>
+      <div
+        style={{ color: "#555", fontSize: 9, lineHeight: 1.7, maxWidth: 200 }}
+      >
+        Hold{" "}
+        <span style={{ color: "#00b4d8", fontWeight: 700 }}>
+          10,000+ WRAITH
+        </span>{" "}
+        tokens to unlock the sniper.
+      </div>
+      <a
+        href="/access"
+        style={{
+          marginTop: 4,
+          background: "#e8490f",
+          color: "#fff",
+          fontSize: 9,
+          fontWeight: 700,
+          padding: "6px 14px",
+          borderRadius: 4,
+          textDecoration: "none",
+          letterSpacing: "0.1em",
+        }}
+      >
+        VIEW TIERS →
+      </a>
+    </div>
+  );
+}
+
 export default function Home() {
+  const { canUse: can } = useWraithTier();
+  const canSnipe = can("sniper");
+
   const [selectedMeme, setSelectedMeme] = useState<MemeTrend | null>(null);
   const [leftW, setLeftW] = useState(430);
   const [rightW, setRightW] = useState(420);
-
-  // PaperTrader collapse state — lifted here so we can control outer height
   const [traderCollapsed, setTraderCollapsed] = useState(false);
-  // Remember the last expanded height so we restore it on expand
   const lastExpandedH = useRef(DEFAULT_TRADER_H);
   const [paperTraderH, setPaperTraderH] = useState<number>(DEFAULT_TRADER_H);
-
   const [mobileTab, setMobileTab] = useState<MobileTab>("scan");
   const [isMobile, setIsMobile] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const rightColRef = useRef<HTMLDivElement>(null);
-
   const hDragging = useRef<null | "left" | "right">(null);
   const hStartX = useRef(0);
   const hStartW = useRef(0);
@@ -87,16 +153,13 @@ export default function Home() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // When collapse toggles, animate the outer height
   const handleCollapseChange = useCallback(
     (collapsed: boolean) => {
       setTraderCollapsed(collapsed);
       if (collapsed) {
-        // Save current height before collapsing
         lastExpandedH.current = paperTraderH;
         setPaperTraderH(COLLAPSED_H);
       } else {
-        // Restore previous expanded height
         setPaperTraderH(lastExpandedH.current);
       }
     },
@@ -123,7 +186,6 @@ export default function Home() {
 
   const onVMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      // Don't allow dragging when collapsed
       if (traderCollapsed) return;
       e.preventDefault();
       e.stopPropagation();
@@ -182,7 +244,7 @@ export default function Home() {
     };
   }, [leftW, rightW]);
 
-  // ── MOBILE LAYOUT ──────────────────────────────────────────────────────────
+  // ── MOBILE ──────────────────────────────────────────────────────────────────
   if (isMobile) {
     return (
       <div
@@ -246,11 +308,15 @@ export default function Home() {
                 overflow: "hidden",
               }}
             >
-              <PaperTrader
-                selectedMeme={selectedMeme}
-                collapsed={traderCollapsed}
-                onCollapseChange={handleCollapseChange}
-              />
+              {canSnipe ? (
+                <PaperTrader
+                  selectedMeme={selectedMeme}
+                  collapsed={traderCollapsed}
+                  onCollapseChange={handleCollapseChange}
+                />
+              ) : (
+                <LockedSniper />
+              )}
             </div>
           </div>
           <nav
@@ -265,6 +331,7 @@ export default function Home() {
             {MOBILE_TABS.map(({ key, label, icon }) => {
               const active = mobileTab === key;
               const hasNotif = key === "token" && !!selectedMeme;
+              const locked = key === "sniper" && !canSnipe;
               return (
                 <button
                   key={key}
@@ -274,7 +341,7 @@ export default function Home() {
                     background: active ? "#0d0d0d" : "transparent",
                     border: "none",
                     borderTop: `2px solid ${active ? "#e8490f" : "transparent"}`,
-                    color: active ? "#e8490f" : "#555",
+                    color: active ? "#e8490f" : locked ? "#333" : "#555",
                     padding: "10px 4px 8px",
                     cursor: "pointer",
                     display: "flex",
@@ -286,7 +353,7 @@ export default function Home() {
                     ...MONO,
                   }}
                 >
-                  <span style={{ fontSize: 16 }}>{icon}</span>
+                  <span style={{ fontSize: 16 }}>{locked ? "🔒" : icon}</span>
                   <span
                     style={{
                       fontSize: 9,
@@ -320,18 +387,7 @@ export default function Home() {
     );
   }
 
-  // ── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
-  //
-  // Structure:
-  //   ┌────────────────────────────────────────────────────────┐
-  //   │  Header (full width)                                   │
-  //   ├──────────────────────────────────────┬─────────────────┤
-  //   │  LiveSignals (Scanner+Token only)    │  WinsPanel      │
-  //   ├──────────────────┬───────────────────┤  (full height)  │
-  //   │  Scanner         │  TokenPanel       ├─────────────────┤
-  //   │                  │                   │  PaperTrader    │
-  //   └──────────────────┴───────────────────┴─────────────────┘
-
+  // ── DESKTOP ─────────────────────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -345,7 +401,6 @@ export default function Home() {
       }}
     >
       <Header />
-
       <main
         style={{
           flex: 1,
@@ -358,7 +413,6 @@ export default function Home() {
           gap: 0,
         }}
       >
-        {/* ── LEFT+CENTER: LiveSignals on top, Scanner+TokenPanel below ── */}
         <div
           style={{
             flex: 1,
@@ -368,10 +422,7 @@ export default function Home() {
             overflow: "hidden",
           }}
         >
-          {/* LiveSignals only spans Scanner + TokenPanel columns */}
           <LiveSignalsBar onSelectMeme={setSelectedMeme} />
-
-          {/* Scanner + TokenPanel side by side */}
           <div
             ref={containerRef}
             style={{
@@ -382,7 +433,6 @@ export default function Home() {
               gap: 0,
             }}
           >
-            {/* LEFT — Scanner */}
             <div
               style={{
                 display: "flex",
@@ -400,8 +450,6 @@ export default function Home() {
                 />
               </div>
             </div>
-
-            {/* Drag handle Scanner↔TokenPanel */}
             <div
               onMouseDown={onHMouseDown("left")}
               style={{
@@ -431,15 +479,12 @@ export default function Home() {
                 }
               />
             </div>
-
-            {/* CENTER — Token Panel */}
             <div style={{ flex: 1, minWidth: MIN_PX, overflow: "hidden" }}>
               <TokenPanel selectedMeme={selectedMeme} />
             </div>
           </div>
         </div>
 
-        {/* Drag handle (Scanner+Token)↔Right column */}
         <div
           onMouseDown={onHMouseDown("right")}
           style={{
@@ -468,7 +513,6 @@ export default function Home() {
           />
         </div>
 
-        {/* ── RIGHT — WinsPanel + PaperTrader, full height, no LiveSignals ── */}
         <div
           ref={rightColRef}
           style={{
@@ -481,12 +525,9 @@ export default function Home() {
             gap: 0,
           }}
         >
-          {/* WinsPanel fills available space above PaperTrader */}
           <div style={{ flex: 1, minHeight: MIN_WINS_H, overflow: "hidden" }}>
             <WinsPanel onSelectMeme={setSelectedMeme} />
           </div>
-
-          {/* Vertical drag handle — hidden when collapsed */}
           <div
             onMouseDown={onVMouseDown}
             style={{
@@ -542,8 +583,6 @@ export default function Home() {
               ))}
             </div>
           </div>
-
-          {/* PaperTrader — height controlled here, transitions smoothly */}
           <div
             style={{
               height: paperTraderH,
@@ -552,11 +591,15 @@ export default function Home() {
               transition: "height 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
             }}
           >
-            <PaperTrader
-              selectedMeme={selectedMeme}
-              collapsed={traderCollapsed}
-              onCollapseChange={handleCollapseChange}
-            />
+            {canSnipe ? (
+              <PaperTrader
+                selectedMeme={selectedMeme}
+                collapsed={traderCollapsed}
+                onCollapseChange={handleCollapseChange}
+              />
+            ) : (
+              <LockedSniper />
+            )}
           </div>
         </div>
       </main>

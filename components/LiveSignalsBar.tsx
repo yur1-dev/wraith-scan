@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { MemeTrend } from "@/app/page";
+import { useWraithTier } from "@/hooks/useWraithTier";
 
 const SCAN_CLUSTER_GAP_MS = 10 * 60 * 1000;
 const LOOKBACK_MS = 40 * 60 * 1000;
@@ -166,6 +167,10 @@ export default function LiveSignalsBar({
 }: {
   onSelectMeme: (m: MemeTrend) => void;
 }) {
+  const { canUse: can, tier } = useWraithTier();
+  const canSeeSignals = can("live_signals_view");
+  const canSeeAiScore = can("ai_score");
+
   const [sigs, setSigs] = useState<Sig[]>([]);
   const [batchTs, setBatchTs] = useState(0);
   const [page, setPage] = useState(0);
@@ -214,6 +219,64 @@ export default function LiveSignalsBar({
       celebMention: s.celebMention,
     } as MemeTrend);
 
+  // ─── LOCKED STATE ─────────────────────────────────────────────────────────
+  if (!canSeeSignals) {
+    return (
+      <div
+        style={{
+          background: "#030303",
+          borderBottom: "1px solid #141414",
+          padding: "8px 14px",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: "#1e1e1e",
+            flexShrink: 0,
+            display: "inline-block",
+          }}
+        />
+        <span
+          style={{
+            color: "#252525",
+            fontSize: 10,
+            fontWeight: 900,
+            letterSpacing: "0.22em",
+            ...MONO,
+          }}
+        >
+          LIVE SIGNALS
+        </span>
+        <span
+          style={{
+            fontSize: 8,
+            color: "#2a2a2a",
+            background: "#0d0d0d",
+            border: "1px solid #1a1a1a",
+            padding: "2px 8px",
+            borderRadius: 2,
+            ...MONO,
+            letterSpacing: "0.08em",
+          }}
+        >
+          LOCKED — REQUIRES{" "}
+          <span style={{ color: "#a855f7", fontWeight: 700 }}>SPECTER</span>
+        </span>
+        <span style={{ fontSize: 8, color: "#1e1e1e", ...MONO }}>
+          100K WRAITH
+        </span>
+      </div>
+    );
+  }
+
+  // ─── UNLOCKED STATE ───────────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -353,9 +416,9 @@ export default function LiveSignalsBar({
                 ? CELEB_COLOR
                 : TIER_COLOR[sig.twoXTier || ""] || "#444";
             const tierLabel = isHot
-              ? "🔥 HOT"
+              ? "HOT"
               : isCeleb
-                ? "⭐ CELEB"
+                ? "CELEB"
                 : sig.twoXTier || "HIGH";
             const ageMin = Math.floor((now - sig.seenAt) / 60_000);
             const keyPlats = sig.platforms
@@ -386,7 +449,7 @@ export default function LiveSignalsBar({
                   padding: "5px 9px 7px",
                 }}
               >
-                {/* Row 1: tier badge + symbol + age */}
+                {/* Row 1 */}
                 <div
                   style={{
                     display: "flex",
@@ -456,7 +519,7 @@ export default function LiveSignalsBar({
                   >
                     {fmtMcap(sig.initialMcap)}
                   </span>
-                  {typeof sig.aiScore === "number" && (
+                  {canSeeAiScore && typeof sig.aiScore === "number" ? (
                     <div
                       style={{
                         marginLeft: "auto",
@@ -502,7 +565,7 @@ export default function LiveSignalsBar({
                         {sig.aiScore}
                       </span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* Row 3: platforms */}

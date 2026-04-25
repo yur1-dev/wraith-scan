@@ -86,6 +86,12 @@ export async function ensureIndexes(): Promise<void> {
       .collection("trades")
       .createIndex({ userId: 1, tokenMint: 1, timestamp: -1 });
 
+    // ── telegram_links ────────────────────────────────────────────────────────
+    // Auto-delete expired one-time link tokens after expiresAt passes
+    await db
+      .collection("telegram_links")
+      .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
     console.log("[mongoClient] Indexes ensured");
   } catch (err) {
     // Non-fatal — app still works, just potentially slower queries

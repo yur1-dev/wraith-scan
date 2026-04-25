@@ -1,6 +1,7 @@
 // app/api/telegram/bot/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
+import clientPromise from "@/lib/mongoClient";
 
 const API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -177,31 +178,80 @@ export async function POST(req: NextRequest) {
   const chatType = msg.chat.type;
   const chatId = msg.chat.id;
   const name = msg.from?.first_name ?? "trader";
-  const cmd = msg.text.trim().split(" ")[0].split("@")[0].toLowerCase();
 
   // Groups only receive pushed signals — ignore all commands
   if (chatType !== "private") {
     return NextResponse.json({ ok: true });
   }
 
+  const parts = msg.text.trim().split(" ");
+  const cmd = parts[0].split("@")[0].toLowerCase();
+  const param = parts[1] ?? null; // token passed via /start <token>
+
   if (!cmd.startsWith("/")) return NextResponse.json({ ok: true });
 
   switch (cmd) {
-    case "/start":
-      await send(chatId, msgStart(name));
+    case "/start": {
+      if (param) {
+        // ── Deep-link flow: /start <token> ──
+        // Look up the one-time token and link this Telegram chat to the user
+        const client = await clientPromise;
+        const db = client.db();
+
+        const link = await db.collection("telegram_links").findOne({
+          token: param,
+          expiresAt: { $gt: new Date() },
+        });
+
+        if (link) {
+          // Save chatId to the matching user document
+          await db.collection("users").updateOne(
+            { _id: link.userId },
+            {
+              $set: {
+                telegramChatId: String(chatId),
+                telegramLinkedAt: new Date(),
+              },
+            },
+          );
+
+          // Consume the token so it can't be reused
+          await db.collection("telegram_links").deleteOne({ token: param });
+
+          await send(
+            chatId,
+            `✅ <b>Telegram linked successfully!</b>\n\nYou'll now receive WRAITH signals here the moment they fire.\n\nType /help to see alert types or /status to verify your setup.\n\n🔗 <a href="https://wraith-scan.vercel.app">Open WRAITH App →</a>`,
+          );
+        } else {
+          // Token missing, already used, or expired
+          await send(
+            chatId,
+            `❌ <b>Link expired or already used.</b>\n\nGenerate a fresh link from the WRAITH app:\n🔗 <a href="https://wraith-scan.vercel.app">wraith-scan.vercel.app</a>`,
+          );
+        }
+      } else {
+        // ── Plain /start with no token — show onboarding ──
+        await send(chatId, msgStart(name));
+      }
       break;
+    }
+
     case "/help":
       await send(chatId, msgHelp());
       break;
+
     case "/tier":
       await send(chatId, msgTier());
       break;
+
     case "/status":
       await send(chatId, msgStatus());
       break;
+
     case "/signals":
       await send(chatId, msgSignals());
       break;
+
     default:
       await send(chatId, msgUnknown(cmd));
       break;

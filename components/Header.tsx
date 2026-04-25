@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSession, signOut } from "next-auth/react";
 import Image from "next/image";
@@ -29,6 +29,8 @@ export default function Header() {
   const [tgLinking, setTgLinking] = useState(false);
   const [tgLinked, setTgLinked] = useState(false);
   const [tgTooltip, setTgTooltip] = useState(false);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canUseTelegram = TELEGRAM_TIERS.includes(tier?.key ?? "");
 
@@ -61,24 +63,50 @@ export default function Header() {
       .catch(() => {});
   }, [session]);
 
+  // Poll for linked status after clicking connect
+  const startPolling = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    let attempts = 0;
+    const MAX = 10; // 10 × 3s = 30s max
+
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      try {
+        const r = await fetch("/api/user/telegram-status");
+        const d = await r.json();
+        if (d.linked) {
+          setTgLinked(true);
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+        }
+      } catch {
+        // silent
+      }
+      if (attempts >= MAX) {
+        clearInterval(pollRef.current!);
+        pollRef.current = null;
+      }
+    }, 3000);
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
   const handleConnectTelegram = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!canUseTelegram) return;
+    if (!canUseTelegram || tgLinked) return;
     setTgLinking(true);
     try {
       const res = await fetch("/api/telegram/link", { method: "POST" });
       const data = await res.json();
       if (data.url) {
         window.open(data.url, "_blank");
-        // Poll briefly so we can show "linked" state
-        setTimeout(() => {
-          fetch("/api/user/telegram-status")
-            .then((r) => r.json())
-            .then((d) => {
-              if (d.linked) setTgLinked(true);
-            })
-            .catch(() => {});
-        }, 5000);
+        startPolling();
       }
     } catch {
       // silent
@@ -347,6 +375,20 @@ export default function Header() {
                     "USER"}
                 </span>
 
+                {/* Telegram linked indicator dot on avatar button */}
+                {tgLinked && (
+                  <div
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "#00c47a",
+                      boxShadow: "0 0 6px #00c47a88",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+
                 <svg
                   width="7"
                   height="7"
@@ -421,12 +463,14 @@ export default function Header() {
                   >
                     <button
                       onClick={
-                        canUseTelegram ? handleConnectTelegram : undefined
+                        canUseTelegram && !tgLinked
+                          ? handleConnectTelegram
+                          : undefined
                       }
                       disabled={tgLinking}
                       style={{
                         width: "100%",
-                        background: "transparent",
+                        background: tgLinked ? "#001a0d" : "transparent",
                         border: "none",
                         borderBottom: "1px solid #0d0d0d",
                         color: tgLinked
@@ -437,7 +481,8 @@ export default function Header() {
                         fontSize: 10,
                         ...MONO,
                         padding: "10px 14px",
-                        cursor: canUseTelegram ? "pointer" : "not-allowed",
+                        cursor:
+                          tgLinked || !canUseTelegram ? "default" : "pointer",
                         textAlign: "left",
                         letterSpacing: ".06em",
                         transition: "background .15s, color .15s",
@@ -489,9 +534,24 @@ export default function Header() {
                         {tgLinking
                           ? "OPENING..."
                           : tgLinked
-                            ? "TELEGRAM LINKED ✓"
+                            ? "TELEGRAM LINKED"
                             : "CONNECT TELEGRAM"}
                       </span>
+
+                      {/* Green dot when linked */}
+                      {tgLinked && (
+                        <div
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: "#00c47a",
+                            boxShadow: "0 0 6px #00c47a88",
+                            marginLeft: "auto",
+                            flexShrink: 0,
+                          }}
+                        />
+                      )}
 
                       {/* Lock icon for non-eligible tiers */}
                       {!canUseTelegram && (

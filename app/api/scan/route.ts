@@ -114,6 +114,8 @@ const ALLOWED_FETCH_HOSTS = new Set([
   "trends.google.com",
   "knowyourmeme.com",
   "api.twitter.com",
+  "api.coinmarketcap.com",
+  "www.coinmarketcap.com",
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1301,13 +1303,13 @@ async function scanTwitter(
     for (const query of TWITTER_QUERIES.slice(0, 6)) {
       try {
         const url = `https://api.twitter.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=100&tweet.fields=public_metrics,created_at&expansions=author_id`;
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 10000);
-        const r = await fetch(url, {
-          headers: twitterHeaders,
-          signal: ctrl.signal,
-        });
-        clearTimeout(t);
+
+        // ← FIXED: now goes through safeFetch with host allowlist
+        const r = await safeFetch(url, twitterHeaders, 10000);
+        if (!r) {
+          logs.push(`[Twitter] ✗ "${query.slice(0, 30)}" — blocked or failed`);
+          continue;
+        }
         if (!r.ok) {
           logs.push(`[Twitter] ✗ "${query.slice(0, 30)}" HTTP ${r.status}`);
           if (r.status === 401 || r.status === 403) {
@@ -2812,14 +2814,9 @@ async function scanReddit(sub: string, tier: number) {
     `https://www.reddit.com/r/${sub}/new.json?limit=50&raw_json=1`,
   ]) {
     try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 8000);
-      const r = await fetch(endpoint, {
-        headers: redditHeaders,
-        signal: ctrl.signal,
-      });
-      clearTimeout(t);
-      if (!r.ok) continue;
+      // ← FIXED: now goes through safeFetch with host allowlist
+      const r = await safeFetch(endpoint, redditHeaders, 8000);
+      if (!r || !r.ok) continue;
       const data = await r.json();
       for (const p of data?.data?.children || []) {
         const createdUtc = p.data.created_utc;
@@ -2868,14 +2865,10 @@ async function scanRedditSearch(
   ];
   for (const q of searchQueries) {
     try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 8000);
-      const r = await fetch(
-        `https://www.reddit.com/search.json?q=${encodeURIComponent(q)}&sort=new&limit=50&t=day&raw_json=1`,
-        { headers: redditHeaders, signal: ctrl.signal },
-      );
-      clearTimeout(t);
-      if (!r.ok) continue;
+      const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(q)}&sort=new&limit=50&t=day&raw_json=1`;
+      // ← FIXED: now goes through safeFetch with host allowlist
+      const r = await safeFetch(url, redditHeaders, 8000);
+      if (!r || !r.ok) continue;
       const data = await r.json();
       for (const p of data?.data?.children || []) {
         const title = (p.data.title || "").toLowerCase();
@@ -2969,22 +2962,19 @@ async function scanCoinGecko() {
 async function scanCMCNew() {
   const results: { keyword: string; score: number }[] = [];
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(
+    // ← FIXED: now goes through safeFetch with host allowlist
+    // Also add coinmarketcap.com to ALLOWED_FETCH_HOSTS
+    const r = await safeFetch(
       "https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing/new?start=1&limit=50&convertId=2781",
       {
-        headers: {
-          "User-Agent": UA,
-          Referer: "https://coinmarketcap.com/",
-          Origin: "https://coinmarketcap.com",
-          Accept: "application/json",
-        },
-        signal: ctrl.signal,
+        "User-Agent": UA,
+        Referer: "https://coinmarketcap.com/",
+        Origin: "https://coinmarketcap.com",
+        Accept: "application/json",
       },
+      8000,
     );
-    clearTimeout(t);
-    if (!r.ok) return results;
+    if (!r || !r.ok) return results;
     const data = await r.json();
     for (const coin of data?.data?.recentlyAdded || []) {
       const sym = cleanTicker(coin.symbol || "");

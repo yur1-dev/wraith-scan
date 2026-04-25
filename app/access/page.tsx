@@ -16,12 +16,29 @@ const TIER_ACCENT: Record<TierKey, string> = {
   WRAITH: "#e8490f",
 };
 
-const TIER_GLYPH: Record<TierKey, string> = {
-  GHOST: "◌",
-  SHADE: "◈",
-  SPECTER: "◆",
-  WRAITH: "⬡",
+const TIER_IMAGE: Record<TierKey, string> = {
+  GHOST: "/ghost.png",
+  SHADE: "/shade.png",
+  SPECTER: "/specter.png",
+  WRAITH: "/tier-wraith.png",
 };
+
+function GhostIcon({ tier, lit }: { tier: TierKey; lit: boolean }) {
+  return (
+    <img
+      src={TIER_IMAGE[tier]}
+      alt={tier}
+      width={44}
+      height={44}
+      style={{
+        objectFit: "contain",
+        flexShrink: 0,
+        opacity: lit ? 1 : 0.5,
+        transition: "opacity .2s",
+      }}
+    />
+  );
+}
 
 const TIER_SUBTITLE: Record<TierKey, string> = {
   GHOST: "No tokens required",
@@ -103,9 +120,6 @@ function SmokeCanvas() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Canvas is 800x700, ghost image is ~380x460
-    // Canvas is centered on the image via CSS (left:-210px, top:-120px)
-    // so smoke has 210px bleed left, ~210px right, 120px top, ~120px bottom
     const CW = 800;
     const CH = 700;
     canvas.width = CW;
@@ -168,8 +182,6 @@ function SmokeCanvas() {
     const particles: Particle[] = [];
     let t = 0;
 
-    // Spawn at the bottom-center of the canvas (where ghost base is)
-    // Spread across 300px centered on x=400 (canvas center)
     const spawn = (): Particle => ({
       x: 250 + Math.random() * 300,
       y: 610 + Math.random() * 50,
@@ -186,7 +198,6 @@ function SmokeCanvas() {
       scaleX: 0.65 + Math.random() * 0.7,
     });
 
-    // Pre-seed particles at various heights so it's not empty on mount
     for (let i = 0; i < 60; i++) {
       const p = spawn();
       p.y = 200 + Math.random() * 450;
@@ -255,9 +266,6 @@ function SmokeCanvas() {
     <canvas
       ref={canvasRef}
       style={{
-        // Centered on the ghost image column (380w x 460h)
-        // Canvas is 800x700 so it bleeds 210px each side horizontally
-        // and 120px top, 120px bottom
         position: "absolute",
         left: "50%",
         top: "50%",
@@ -592,7 +600,6 @@ export default function AccessPage() {
           }}
         />
 
-        {/* Hero inner: text left, ghost right */}
         <div
           className="hero-inner"
           style={{
@@ -768,7 +775,7 @@ export default function AccessPage() {
             </div>
           </div>
 
-          {/* ── RIGHT: ghost image with smoke bleeding outward ── */}
+          {/* ── RIGHT: ghost image with smoke ── */}
           <div
             className="ghost-video-col a2"
             style={{
@@ -776,19 +783,10 @@ export default function AccessPage() {
               width: 380,
               height: 460,
               position: "relative",
-              // overflow MUST be visible so canvas bleeds outside this box
               overflow: "visible",
             }}
           >
-            {/*
-              SmokeCanvas is 800x700, centered on this 380x460 box via
-              transform: translate(-50%, -50%) + left:50% + top:50%.
-              That gives ~210px bleed left/right and ~120px bleed top/bottom.
-              The canvas uses mixBlendMode:"screen" so black = transparent.
-            */}
             <SmokeCanvas />
-
-            {/* Ghost image sits above the smoke (zIndex:2) */}
             <div
               className="ghost-video-wrap"
               style={{
@@ -909,24 +907,16 @@ export default function AccessPage() {
                       </div>
                     )}
 
+                    {/* ── GHOST ICON + TIER NAME (replaces old glyph) ── */}
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 10,
+                        gap: 12,
                         marginBottom: 18,
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: 26,
-                          lineHeight: 1,
-                          color: lit ? tc : "#555",
-                          transition: "color .2s",
-                        }}
-                      >
-                        {TIER_GLYPH[key]}
-                      </span>
+                      <GhostIcon tier={key} lit={lit} />
                       <div>
                         <div
                           style={{

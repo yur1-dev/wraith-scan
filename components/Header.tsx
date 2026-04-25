@@ -100,18 +100,7 @@ export default function Header() {
           >
             WRAITH
           </span>
-
-          <span
-            style={{
-              width: 5,
-              height: 5,
-              borderRadius: "50%",
-              background: "#00c47a",
-              boxShadow: "0 0 6px #00c47a",
-              display: "inline-block",
-              marginLeft: 2,
-            }}
-          />
+          {/*  */}
         </div>
 
         {/* Center — nav */}

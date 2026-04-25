@@ -19,6 +19,7 @@
     "@upstash/redis": "^1.37.0",
     "axios": "^1.15.0",
     "bs58": "^6.0.0",
+    "html2canvas": "^1.4.1",
     "mongodb": "^5.9.2",
     "next": "16.2.3",
     "next-auth": "^4.24.14",

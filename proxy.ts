@@ -61,6 +61,6 @@ function isSafeCallbackUrl(url: string, allowedOrigin: string): boolean {
     }
     return false;
   } catch {
-    return true;
+    return false; // ← FIXED: malformed URL is unsafe, not safe
   }
 }

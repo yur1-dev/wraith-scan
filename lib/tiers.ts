@@ -1,15 +1,6 @@
-// ─── WRAITH TIER SYSTEM ───────────────────────────────────────────────────────
-// Replace WRAITH_MINT with your real token mint after launch
-// Replace FEE_WALLET with your treasury wallet address
-
 export const WRAITH_MINT = "WRAITH_TOKEN_MINT_PLACEHOLDER";
-export const FEE_WALLET = "YOUR_FEE_TREASURY_WALLET_HERE";
-
-// 1B total supply — tiers based on % held
-// GHOST:   0 tokens         → read-only, no trading
-// SHADE:   10,000  (0.001%) → basic sniper, 1% fee
-// SPECTER: 100,000 (0.01%)  → full scanner + sniper, 0.5% fee
-// WRAITH:  1,000,000 (0.1%) → all features + live signals, 0% fee
+export const FEE_WALLET = "FnpcuNmMhGjTLKJLbXTecaCYCKmdCzeA6cg3fkbSz92g";
+export const FEE_ACCOUNT = "FnpcuNmMhGjTLKJLbXTecaCYCKmdCzeA6cg3fkbSz92g";
 
 export type TierKey = "GHOST" | "SHADE" | "SPECTER" | "WRAITH";
 
@@ -101,7 +92,6 @@ export const TIERS: Record<TierKey, Tier> = {
 
 export const TIER_ORDER: TierKey[] = ["GHOST", "SHADE", "SPECTER", "WRAITH"];
 
-/** Returns the tier for a given raw token balance */
 export function getTierFromBalance(rawBalance: number): Tier {
   if (rawBalance >= TIERS.WRAITH.minTokens) return TIERS.WRAITH;
   if (rawBalance >= TIERS.SPECTER.minTokens) return TIERS.SPECTER;
@@ -109,7 +99,6 @@ export function getTierFromBalance(rawBalance: number): Tier {
   return TIERS.GHOST;
 }
 
-/** Check if a tier can use a specific feature */
 export function canUse(tier: Tier, featureId: string): boolean {
   return tier.features.find((f) => f.id === featureId)?.unlocked ?? false;
 }

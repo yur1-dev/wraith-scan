@@ -76,8 +76,26 @@ export function loadHistory(): Record<string, HistoryEntry> {
 export function saveHistory(h: Record<string, HistoryEntry>) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
-  } catch {}
+    const MAX_BYTES = 4 * 1024 * 1024; // 4MB guard — browser limit is 5MB
+    let serialized = JSON.stringify(h);
+
+    // If over limit, trim oldest 20% of entries until under limit
+    if (serialized.length > MAX_BYTES) {
+      const entries = Object.entries(h).sort(
+        ([, a], [, b]) => a.seenAt - b.seenAt, // oldest first
+      );
+      const trimCount = Math.max(1, Math.floor(entries.length * 0.2));
+      console.warn(
+        `[saveHistory] localStorage near limit (${(serialized.length / 1024).toFixed(0)}KB) — trimming ${trimCount} oldest entries`,
+      );
+      const trimmed = Object.fromEntries(entries.slice(trimCount));
+      serialized = JSON.stringify(trimmed);
+    }
+
+    localStorage.setItem(HISTORY_KEY, serialized);
+  } catch (err) {
+    console.error("[saveHistory] failed to write localStorage:", err);
+  }
 }
 
 // ─── STALE TOKEN CLEANUP ──────────────────────────────────────────────────────
@@ -337,45 +355,83 @@ async function postToServerHistory(
     crossPlatforms,
   };
 
-  let isNewToken = false;
-  try {
-    const res = await fetch("/api/history", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      isNewToken = data.isNew === true;
+  // ── Retry helper — 2 attempts with 2s delay ──────────────────────────────
+  async function fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    attempts = 2,
+    delayMs = 2000,
+  ): Promise<Response | null> {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const res = await fetch(url, options);
+        if (res.ok) return res;
+        console.warn(
+          `[postToServerHistory] ${url} attempt ${i + 1} returned HTTP ${res.status}`,
+        );
+      } catch (err) {
+        console.warn(
+          `[postToServerHistory] ${url} attempt ${i + 1} network error:`,
+          err,
+        );
+      }
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
     }
-  } catch {
+    console.error(
+      `[postToServerHistory] ${url} failed after ${attempts} attempts — token ${result.keyword} not recorded`,
+    );
+    return null;
+  }
+
+  // ── 1. Post to /api/history ───────────────────────────────────────────────
+  let isNewToken = false;
+  const historyRes = await fetchWithRetry("/api/history", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!historyRes) return; // both attempts failed — bail out
+
+  try {
+    const data = await historyRes.json();
+    isNewToken = data.isNew === true;
+  } catch (err) {
+    console.error(
+      "[postToServerHistory] failed to parse /api/history response:",
+      err,
+    );
     return;
   }
 
   if (!isNewToken) return;
 
+  // ── 2. AI scoring ─────────────────────────────────────────────────────────
   let aiScore = 50;
   let aiTier: "HOT" | "WATCH" | "SKIP" = "WATCH";
   let aiReason = "";
 
-  try {
-    const scoreRes = await fetch("/api/ai-score", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        keyword: result.keyword,
-        contractAddress: result.contractAddress,
-        mcap,
-        tier: tier ?? "MEDIUM",
-        platforms: result.platforms ?? [],
-        celebMention: result.celebMention,
-        aiContext: result.aiContext,
-        liquidity: result.liquidity,
-        priceChange24h: result.priceChange24h,
-        crossPlatforms,
-      }),
-    });
-    if (scoreRes.ok) {
+  const scoreRes = await fetchWithRetry("/api/ai-score", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      keyword: result.keyword,
+      contractAddress: result.contractAddress,
+      mcap,
+      tier: tier ?? "MEDIUM",
+      platforms: result.platforms ?? [],
+      celebMention: result.celebMention,
+      aiContext: result.aiContext,
+      liquidity: result.liquidity,
+      priceChange24h: result.priceChange24h,
+      crossPlatforms,
+    }),
+  });
+
+  if (scoreRes) {
+    try {
       const scoreData = await scoreRes.json();
       if (typeof scoreData.score === "number") aiScore = scoreData.score;
       if (
@@ -386,9 +442,15 @@ async function postToServerHistory(
         aiTier = scoreData.tier;
       }
       if (typeof scoreData.reason === "string") aiReason = scoreData.reason;
+    } catch (err) {
+      console.error(
+        "[postToServerHistory] failed to parse /api/ai-score response:",
+        err,
+      );
     }
-  } catch {}
+  }
 
+  // ── 3. Update localStorage with AI score ─────────────────────────────────
   const h = loadHistory();
   if (h[result.keyword]) {
     h[result.keyword].aiScore = aiScore;
@@ -396,37 +458,35 @@ async function postToServerHistory(
     saveHistory(h);
   }
 
-  try {
-    await fetch("/api/history", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, aiScore, aiTier }),
-    });
-  } catch {}
+  // ── 4. Persist AI score back to server ───────────────────────────────────
+  await fetchWithRetry("/api/history", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, aiScore, aiTier }),
+  });
 
   if (aiTier === "SKIP") return;
 
-  try {
-    await fetch("/api/alert/telegram", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "entry",
-        symbol: (result.tokenSymbol ?? result.keyword).toUpperCase(),
-        keyword: result.keyword,
-        mcap,
-        contractAddress: result.contractAddress,
-        celebMention: result.celebMention,
-        aiContext: result.aiContext,
-        platforms: result.platforms ?? [],
-        twoXTier: tier ?? "MEDIUM",
-        seenAt: Date.now(),
-        aiScore,
-        aiTier,
-        aiReason,
-      }),
-    });
-  } catch {}
+  // ── 5. Telegram alert ─────────────────────────────────────────────────────
+  await fetchWithRetry("/api/alert/telegram", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "entry",
+      symbol: (result.tokenSymbol ?? result.keyword).toUpperCase(),
+      keyword: result.keyword,
+      mcap,
+      contractAddress: result.contractAddress,
+      celebMention: result.celebMention,
+      aiContext: result.aiContext,
+      platforms: result.platforms ?? [],
+      twoXTier: tier ?? "MEDIUM",
+      seenAt: Date.now(),
+      aiScore,
+      aiTier,
+      aiReason,
+    }),
+  });
 }
 
 function getAgeDisplay(ageMinutes: number | undefined) {

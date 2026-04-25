@@ -26,7 +26,7 @@ const ALLOWED_METHODS = new Set([
   "getTokenSupply",
   "getTokenAccountBalance",
   "getMultipleAccounts",
-  "getProgramAccounts",
+  // "getProgramAccounts" ← REMOVED: exposes all token holders + wallet positions
   "getMinimumBalanceForRentExemption",
   "getRecentPrioritizationFees",
 ]);

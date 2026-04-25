@@ -20,24 +20,55 @@ const fmt = (n: number) => {
   return `$${n.toFixed(0)}`;
 };
 
-const fmtTime = (ts: number) =>
-  new Date(ts).toLocaleTimeString("en-PH", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Manila",
-  });
-
-// ─── Score bar visual — shows how strong the signal is ───────────────────────
-// e.g. score 82 → "████████░░ 82/100"
-function scoreBar(score: number): string {
+// ─── Score bar helper (e.g. ██████░░░░ 67/100) ────────────────────────────────
+const scoreBar = (score: number) => {
   const filled = Math.round(score / 10);
-  const empty = 10 - filled;
-  return `${"█".repeat(filled)}${"░".repeat(empty)} ${score}/100`;
+  return "█".repeat(filled) + "░".repeat(10 - filled);
+};
+
+// ─── Send a plain text message ────────────────────────────────────────────────
+async function sendTelegramMessage(
+  token: string,
+  chatId: string,
+  text: string,
+) {
+  return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    }),
+  });
 }
 
+// ─── Send a photo with caption ────────────────────────────────────────────────
+async function sendTelegramPhoto(
+  token: string,
+  chatId: string,
+  photoUrl: string,
+  caption: string,
+) {
+  return fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo: photoUrl,
+      caption,
+      parse_mode: "HTML",
+    }),
+  });
+}
+
+// ─── Entry message — WRAITH SIGNALS style ────────────────────────────────────
 function buildEntryMessage(body: {
   symbol: string;
+  name?: string;
   mcap: number;
+  holders?: number;
   contractAddress?: string;
   celebMention?: string;
   aiContext?: string;
@@ -47,107 +78,113 @@ function buildEntryMessage(body: {
   aiScore?: number;
   aiTier?: "HOT" | "WATCH" | "SKIP";
   aiReason?: string;
+  peakMcap?: number;
+  dexPaid?: boolean;
 }): string {
-  const score = body.aiScore ?? 50;
-  const aiTier = body.aiTier ?? "WATCH";
-
-  // Header varies by AI tier
-  const headerEmoji =
-    aiTier === "HOT" ? "🔥🔥🔥 HOT SIGNAL" : "👁 WATCH SIGNAL";
-
+  const statusDot = body.aiTier === "HOT" ? "🟢" : "🟡";
+  const statusLabel = body.aiTier === "HOT" ? "HOT SIGNAL" : "WATCH SIGNAL";
   const tierEmoji =
-    body.twoXTier === "ULTRA"
-      ? "ULTRA 🔥🔥🔥"
-      : body.twoXTier === "HIGH"
-        ? "HIGH 🔥🔥"
-        : "MEDIUM 🔥";
+    body.twoXTier === "ULTRA" || body.twoXTier === "HIGH" ? "🔥" : "👁";
 
   const platStr = body.platforms?.length
     ? body.platforms.map((p) => p.toUpperCase()).join(" · ")
-    : "";
+    : "PUMPFUN";
 
-  // Score bar line
-  const scoreLine = `AI Score: ${scoreBar(score)}${body.aiReason ? `\n          ${body.aiReason}` : ""}`;
+  const lines: string[] = [
+    `${statusDot} <b>${statusLabel} — ${body.name ?? body.symbol} — $${body.symbol}</b>`,
+    ``,
+    body.mcap ? `💰 <b>MCAP:</b> ${fmt(body.mcap)}` : "",
+    body.holders ? `🧑‍🤝‍🧑 <b>Holders:</b> ${body.holders}` : "",
+    ``,
+    `🏁 <b>First Call:</b> ${fmt(body.mcap)} (just now)`,
+    body.aiScore !== undefined ? `📈 <b>AI Score:</b> ${body.aiScore}/100` : "",
+    body.twoXTier ? `${tierEmoji} <b>Signal Tier:</b> ${body.twoXTier}` : "",
+    body.dexPaid ? `✅ <b>Dex Paid</b>` : "",
+    body.celebMention ? `⭐ <b>Signal:</b> ${body.celebMention}` : "",
+    ``,
+  ];
 
-  // HOT signals get a more urgent header
-  const urgencyLine =
-    aiTier === "HOT"
-      ? "⚡ HIGH CONFIDENCE — act fast, similar tokens pumped hard"
-      : "⚡ BUY SIGNAL — monitor closely";
+  if (body.aiContext) {
+    lines.push(`🧠 <b>LORE</b>`);
+    lines.push(body.aiContext);
+    lines.push(``);
+  }
 
-  return [
-    `${headerEmoji} — $${body.symbol}`,
-    ``,
-    urgencyLine,
-    ``,
-    scoreLine,
-    ``,
-    `MCap:     ${fmt(body.mcap)}`,
-    `Scanner:  ${tierEmoji}`,
-    `Time:     ${fmtTime(body.seenAt)}`,
-    body.celebMention ? `Signal:   ⭐ ${body.celebMention}` : "",
-    platStr ? `Sources:  ${platStr}` : "",
-    body.aiContext ? `Context:  ${body.aiContext.slice(0, 100)}` : "",
-    ``,
-    body.contractAddress
-      ? `DEX:  https://dexscreener.com/solana/${body.contractAddress}`
-      : "",
-    body.contractAddress
-      ? `PUMP: https://pump.fun/${body.contractAddress}`
-      : "",
-    body.contractAddress
-      ? `SWAP: https://jup.ag/swap/SOL-${body.contractAddress}`
-      : "",
-  ]
-    .filter((l) => l !== "")
-    .join("\n");
+  if (body.aiReason) {
+    lines.push(`💡 ${body.aiReason}`);
+    lines.push(``);
+  }
+
+  lines.push(`📡 <b>Sources:</b> ${platStr}`);
+  lines.push(``);
+
+  if (body.contractAddress) {
+    const ca = body.contractAddress;
+    lines.push(
+      `🔗 <a href="https://dexscreener.com/solana/${ca}">DexScreener</a> • ` +
+        `<a href="https://pump.fun/${ca}">Pump</a> • ` +
+        `<a href="https://jup.ag/swap/SOL-${ca}">Swap</a> • ` +
+        `<a href="https://birdeye.so/token/${ca}?chain=solana">BullX</a> • ` +
+        `<a href="https://solscan.io/token/${ca}">Solscan</a>`,
+    );
+    lines.push(``);
+    lines.push(`<code>${ca}</code>`);
+  }
+
+  return lines.filter((l) => l !== "").join("\n");
 }
 
+// ─── Win message — WRAITH SIGNALS style ──────────────────────────────────────
 function buildWinMessage(body: {
   symbol: string;
+  name?: string;
   initialMcap: number;
   currentMcap: number;
   xNow: number;
+  peakMcap?: number;
+  peakX?: number;
+  holders?: number;
   contractAddress?: string;
   celebMention?: string;
   platforms?: string[];
   seenAt: number;
   aiScore?: number;
+  aiContext?: string;
+  dexPaid?: boolean;
 }): string {
   const xStr =
     body.xNow >= 10 ? `${body.xNow.toFixed(1)}x` : `${body.xNow.toFixed(2)}x`;
+
+  const spottedTime = new Date(body.seenAt).toLocaleTimeString("en-PH", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Manila",
+  });
+
   const platStr = body.platforms?.length
     ? body.platforms.map((p) => p.toUpperCase()).join(" · ")
-    : "";
+    : "PUMPFUN";
 
-  const scoreLine =
-    typeof body.aiScore === "number"
-      ? `AI Score: ${scoreBar(body.aiScore)} (at spot)`
-      : "";
-
-  return [
-    `✅ WRAITH WIN — $${body.symbol}`,
-    ``,
-    `📈 ${xStr} from spotted price`,
-    ``,
-    `Spotted:  ${fmt(body.initialMcap)} at ${fmtTime(body.seenAt)}`,
+  const lines: string[] = [
+    `✅ <b>WRAITH WIN — $$${body.symbol}</b>`,
+    `📊 ${xStr} from spotted price`,
+    `Spotted:  ${fmt(body.initialMcap)} at ${spottedTime}`,
     `Now:      ${fmt(body.currentMcap)}`,
-    scoreLine,
-    body.celebMention ? `Signal:   ⭐ ${body.celebMention}` : "",
-    platStr ? `Sources:  ${platStr}` : "",
+    body.aiScore !== undefined
+      ? `AI Score: ${scoreBar(body.aiScore)} ${body.aiScore}/100 (at spot)`
+      : "",
+    `Sources:  ${platStr}`,
     ``,
-    body.contractAddress
-      ? `DEX:  https://dexscreener.com/solana/${body.contractAddress}`
-      : "",
-    body.contractAddress
-      ? `PUMP: https://pump.fun/${body.contractAddress}`
-      : "",
-    body.contractAddress
-      ? `SWAP: https://jup.ag/swap/SOL-${body.contractAddress}`
-      : "",
-  ]
-    .filter((l) => l !== "")
-    .join("\n");
+  ];
+
+  if (body.contractAddress) {
+    const ca = body.contractAddress;
+    lines.push(`DEX:\nhttps://dexscreener.com/solana/${ca}`);
+    lines.push(`\nPUMP:\nhttps://pump.fun/${ca}`);
+    lines.push(`\nSWAP:\nhttps://jup.ag/swap/SOL-${ca}`);
+  }
+
+  return lines.filter((l) => l !== undefined).join("\n");
 }
 
 export async function POST(req: NextRequest) {
@@ -175,7 +212,9 @@ export async function POST(req: NextRequest) {
     alertType === "entry"
       ? buildEntryMessage({
           symbol: body.symbol,
+          name: body.name,
           mcap: body.mcap ?? 0,
+          holders: body.holders,
           contractAddress: body.contractAddress,
           celebMention: body.celebMention,
           aiContext: body.aiContext,
@@ -185,36 +224,50 @@ export async function POST(req: NextRequest) {
           aiScore: body.aiScore,
           aiTier: body.aiTier,
           aiReason: body.aiReason,
+          dexPaid: body.dexPaid,
         })
       : buildWinMessage({
           symbol: body.symbol,
+          name: body.name,
           initialMcap: body.initialMcap ?? 0,
           currentMcap: body.currentMcap ?? 0,
           xNow: body.xNow ?? 0,
+          peakMcap: body.peakMcap,
+          peakX: body.peakX,
+          holders: body.holders,
           contractAddress: body.contractAddress,
           celebMention: body.celebMention,
           platforms: body.platforms,
           seenAt: body.seenAt ?? Date.now(),
           aiScore: body.aiScore,
+          aiContext: body.aiContext,
+          dexPaid: body.dexPaid,
         });
 
   try {
-    const tgRes = await fetch(
-      `https://api.telegram.org/bot${token}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text,
-          disable_web_page_preview: true,
-        }),
-      },
-    );
+    // If there's a token image URL, send as photo with caption; otherwise plain message
+    const imageUrl: string | undefined = body.imageUrl;
+
+    const tgRes = imageUrl
+      ? await sendTelegramPhoto(token, chatId, imageUrl, text)
+      : await sendTelegramMessage(token, chatId, text);
 
     if (!tgRes.ok) {
       const err = await tgRes.text();
       console.error("[telegram] send failed:", err);
+
+      // If photo send fails (bad URL etc), fall back to plain message
+      if (imageUrl) {
+        const fallback = await sendTelegramMessage(token, chatId, text);
+        if (!fallback.ok) {
+          return NextResponse.json(
+            { error: "Telegram API error" },
+            { status: 502 },
+          );
+        }
+        return NextResponse.json({ ok: true, fallback: true });
+      }
+
       return NextResponse.json(
         { error: "Telegram API error" },
         { status: 502 },

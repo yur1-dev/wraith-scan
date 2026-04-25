@@ -46,24 +46,19 @@ function calcMultiplier(init: number, peak: number): number {
 }
 
 function buildPrompt(wins: ITokenHistory[], candidate: ScoreRequest): string {
-  // Summarize win patterns from history
-  const winSummaries = wins
-    .slice(0, 30) // cap at 30 to keep prompt lean
-    .map((w) => {
-      const mult = calcMultiplier(w.initialMcap, w.peakMcap);
-      const liqRatio =
-        w.initialMcap > 0 ? (w.initialMcap * 0.3) / w.initialMcap : 0; // estimated
-      return {
-        mcap: w.initialMcap,
-        tier: "HIGH", // stored tokens passed quality gates
-        platforms: w.platforms,
-        hasCeleb: !!w.celebMention,
-        multiplier: parseFloat(mult.toFixed(2)),
-        timeToXh: w.peakMcapTs
-          ? parseFloat(((w.peakMcapTs - w.seenAt) / 3_600_000).toFixed(1))
-          : null,
-      };
-    });
+  const winSummaries = wins.slice(0, 30).map((w) => {
+    const mult = calcMultiplier(w.initialMcap, w.peakMcap);
+    return {
+      mcap: w.initialMcap,
+      tier: "HIGH",
+      platforms: w.platforms,
+      hasCeleb: !!w.celebMention,
+      multiplier: parseFloat(mult.toFixed(2)),
+      timeToXh: w.peakMcapTs
+        ? parseFloat(((w.peakMcapTs - w.seenAt) / 3_600_000).toFixed(1))
+        : null,
+    };
+  });
 
   const avgMcap =
     wins.length > 0
@@ -140,6 +135,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── API key guard — fail fast if not configured ────────────────────────────
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    console.error("[ai-score] ANTHROPIC_API_KEY is not set");
+    const score = heuristicScore(body);
+    const tier = score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
+    return NextResponse.json({
+      score,
+      tier,
+      reason: "Heuristic fallback (ANTHROPIC_API_KEY not configured)",
+    });
+  }
+
   const userId = session.user.id;
 
   try {
@@ -149,7 +157,6 @@ export async function POST(req: NextRequest) {
     );
 
     // ── 1. Fetch historical wins ──────────────────────────────────────────
-    // A "win" = peakMcap >= 2x initialMcap AND peakMcapTs > seenAt (earned)
     const PEAK_GRACE_MS = 5 * 60 * 1000;
     const allHistory = await col
       .find({ userId, initialMcap: { $gt: 0 }, peakMcap: { $gt: 0 } })
@@ -160,14 +167,13 @@ export async function POST(req: NextRequest) {
     const wins = allHistory.filter((e) => {
       const mult = calcMultiplier(e.initialMcap, e.peakMcap);
       if (mult < 2) return false;
-      // earned check
       if (e.peakMcapTs > e.seenAt + PEAK_GRACE_MS) return true;
       if (e.currentMcap >= e.initialMcap * 1.5) return true;
       if (e.peakMcapTs > 0 && e.peakMcap >= e.initialMcap * 1.5) return true;
       return false;
     });
 
-    // ── 2. If no wins yet, use heuristic scoring (no training data) ───────
+    // ── 2. If no wins yet, use heuristic scoring ──────────────────────────
     if (wins.length < 3) {
       const score = heuristicScore(body);
       const tier = score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
@@ -185,7 +191,11 @@ export async function POST(req: NextRequest) {
 
     const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicApiKey, // ← FIXED: explicit API key
+        "anthropic-version": "2023-06-01", // ← FIXED: required header
+      },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 256,
@@ -194,8 +204,11 @@ export async function POST(req: NextRequest) {
     });
 
     if (!claudeRes.ok) {
-      console.error("[ai-score] Claude API error:", await claudeRes.text());
-      // Fall back to heuristic
+      console.error(
+        "[ai-score] Claude API error:",
+        claudeRes.status,
+        await claudeRes.text(),
+      );
       const score = heuristicScore(body);
       const tier = score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
       const result: ScoreResponse = {
@@ -276,36 +289,29 @@ async function persistScore(
 }
 
 // ─── Heuristic fallback (no win history yet) ──────────────────────────────────
-// Simple rule-based score for when the AI has < 3 wins to learn from.
 function heuristicScore(c: ScoreRequest): number {
-  let score = 40; // base
+  let score = 40;
 
-  // Tier
   if (c.tier === "ULTRA") score += 20;
   else if (c.tier === "HIGH") score += 12;
   else if (c.tier === "MEDIUM") score += 4;
 
-  // Celeb
   if (c.celebMention) score += 15;
 
-  // MCap sweet spot $3K–$50K
   if (c.mcap >= 3_000 && c.mcap <= 50_000) score += 15;
   else if (c.mcap > 50_000 && c.mcap <= 150_000) score += 5;
   else if (c.mcap > 200_000) score -= 10;
 
-  // Platform count
   const platCount = c.platforms.length;
   if (platCount >= 3) score += 10;
   else if (platCount === 2) score += 5;
 
-  // Cross-platform
   if ((c.crossPlatforms ?? 0) >= 3) score += 8;
 
-  // Price momentum
   const p24 = c.priceChange24h ?? 0;
-  if (p24 > 50 && p24 < 300) score += 5; // good momentum, not too late
-  if (p24 > 500) score -= 10; // might be too late
-  if (p24 < -50) score -= 8; // dumping
+  if (p24 > 50 && p24 < 300) score += 5;
+  if (p24 > 500) score -= 10;
+  if (p24 < -50) score -= 8;
 
   return Math.max(0, Math.min(100, score));
 }

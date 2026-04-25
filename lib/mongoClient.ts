@@ -13,10 +13,12 @@ if (!MONGODB_URI) {
 
 // ─── CONNECTION OPTIONS ───────────────────────────────────────────────────────
 const MONGO_OPTIONS = {
-  serverSelectionTimeoutMS: 10_000,
-  socketTimeoutMS: 30_000,
+  serverSelectionTimeoutMS: 30_000,
+  connectTimeoutMS: 30_000,
+  socketTimeoutMS: 45_000,
   maxPoolSize: 10,
   minPoolSize: 1,
+  heartbeatFrequencyMS: 15_000,
 };
 
 // ─── CLIENT SINGLETON ─────────────────────────────────────────────────────────

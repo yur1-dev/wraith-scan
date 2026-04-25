@@ -64,6 +64,26 @@ interface TradeLog {
   ts: number;
 }
 
+interface ShareCardData {
+  symbol: string;
+  mint: string;
+  entryMcap: number;
+  currentMcap: number;
+  exitMcap?: number;
+  amountSol: number;
+  currentPnlPct: number;
+  exitPnlPct?: number;
+  tpX: number;
+  slPct: number;
+  trailPct: number;
+  exitReason?: string;
+  imageUrl?: string;
+  buyTxSig?: string;
+  exitTxSig?: string;
+  status: "watching" | "sold";
+  ts: number;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -404,7 +424,7 @@ async function jupiterBuy(
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: 500000,
-      feeBps, // ← forwarded to route.ts for server-side injection
+      feeBps,
     }),
   });
   if (!swapRes.ok) throw new Error(`Swap build failed: ${swapRes.status}`);
@@ -464,7 +484,7 @@ async function jupiterSell(
       wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: 500000,
-      feeBps, // ← forwarded to route.ts for server-side injection
+      feeBps,
     }),
   });
   if (!swapRes.ok) throw new Error(`Sell swap build failed: ${swapRes.status}`);
@@ -959,6 +979,462 @@ function NoFillPasswordInput({
         )}
       </div>
       <style>{`@keyframes pwcursor { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARE CARD MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARE CARD MODAL
+// Drop your images in:
+//   /public/share-bg/profit/profit-1.jpg … profit-5.jpg
+//   /public/share-bg/loss/loss-1.jpg  … loss-5.jpg
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Paste this entire block in place of the existing ShareModal function in PaperTrader.tsx
+
+const PROFIT_BG_COUNT = 5;
+const LOSS_BG_COUNT = 5;
+
+function pickBg(isWin: boolean): string {
+  const folder = isWin ? "profit" : "loss";
+  const count = isWin ? PROFIT_BG_COUNT : LOSS_BG_COUNT;
+  const idx = Math.floor(Math.random() * count) + 1; // 1..5
+  return `/share-bg/${folder}/${folder}-${idx}.png`;
+}
+
+function ShareModal({
+  data,
+  onClose,
+}: {
+  data: ShareCardData;
+  onClose: () => void;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [imgErr, setImgErr] = useState(false);
+  const [bgErr, setBgErr] = useState(false);
+
+  const pnl =
+    data.status === "sold"
+      ? (data.exitPnlPct ?? data.currentPnlPct)
+      : data.currentPnlPct;
+  const exitMcap = data.status === "sold" ? data.exitMcap : data.currentMcap;
+  const isWin = pnl >= 0;
+  const pnlColor = isWin ? "#00c47a" : "#ff4444";
+  const solPnl = data.amountSol * (pnl / 100);
+
+  // Pick a random background image once per modal open
+  const [bgUrl] = useState(() => pickBg(isWin));
+
+  const exitReasonColor =
+    data.exitReason === "TP"
+      ? "#00c47a"
+      : data.exitReason === "SL"
+        ? "#ff4444"
+        : data.exitReason === "TRAIL"
+          ? "#ffaa00"
+          : "#777";
+
+  const letter = (data.symbol || "?").charAt(0).toUpperCase();
+  const palette = [C.orange, C.purple, C.blue, C.green, C.yellow];
+  const avatarBg = palette[letter.charCodeAt(0) % palette.length];
+
+  const handleDownload = async () => {
+    if (!cardRef.current) return;
+    setDownloading(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(cardRef.current, {
+        backgroundColor: null,
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+      });
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `wraith-${data.symbol}-${pnl >= 0 ? "win" : "loss"}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, "image/png");
+    } catch (e) {
+      console.error("Share card export failed", e);
+    }
+    setDownloading(false);
+  };
+
+  const handleCopy = async () => {
+    if (!cardRef.current) return;
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(cardRef.current, {
+        backgroundColor: null,
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+      });
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ "image/png": blob }),
+          ]);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch {}
+      }, "image/png");
+    } catch {}
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.88)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backdropFilter: "blur(4px)",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        {/* ── THE CARD ── */}
+        <div
+          ref={cardRef}
+          style={{
+            width: 480,
+            height: 270,
+            background: "transparent",
+            border: `1px solid ${isWin ? "#00c47a33" : "#ff444433"}`,
+            borderRadius: 12,
+            padding: "18px 20px 16px",
+            position: "relative",
+            overflow: "hidden",
+            boxShadow: `0 0 60px ${isWin ? "#00c47a18" : "#ff444418"}, 0 20px 60px #00000099`,
+            fontFamily: "'IBM Plex Mono', monospace",
+          }}
+        >
+          {/* ── FULL BACKGROUND IMAGE ── */}
+          {!bgErr && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                pointerEvents: "none",
+                zIndex: 0,
+              }}
+            >
+              <img
+                src={bgUrl}
+                alt=""
+                onError={() => setBgErr(true)}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  objectPosition: "center",
+                  display: "block",
+                }}
+              />
+              {/* dark overlay so text stays readable, lighter than before */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background:
+                    "linear-gradient(135deg, rgba(6,6,6,0.82) 0%, rgba(6,6,6,0.55) 50%, rgba(6,6,6,0.3) 100%)",
+                }}
+              />
+            </div>
+          )}
+
+          {/* glow blob — above bg, below content */}
+          <div
+            style={{
+              position: "absolute",
+              top: -40,
+              right: -40,
+              width: 140,
+              height: 140,
+              borderRadius: "50%",
+              background: isWin ? "#00c47a0d" : "#ff44440d",
+              filter: "blur(30px)",
+              pointerEvents: "none",
+              zIndex: 1,
+            }}
+          />
+
+          {/* ── CONTENT (z above background) ── */}
+          <div
+            style={{
+              position: "relative",
+              zIndex: 2,
+              padding: "22px 24px",
+              height: "100%",
+              boxSizing: "border-box" as const,
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              width: "55%",
+            }}
+          >
+            {/* TOP: avatar + symbol */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {data.imageUrl && !imgErr ? (
+                <img
+                  src={data.imageUrl}
+                  alt={data.symbol}
+                  onError={() => setImgErr(true)}
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: "50%",
+                    objectFit: "cover",
+                    border: `2px solid ${pnlColor}55`,
+                    flexShrink: 0,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: "50%",
+                    background: `${avatarBg}22`,
+                    border: `2px solid ${avatarBg}55`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: avatarBg,
+                    fontSize: 14,
+                    fontWeight: 900,
+                    flexShrink: 0,
+                  }}
+                >
+                  {letter}
+                </div>
+              )}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    style={{
+                      color: "#fff",
+                      fontSize: 15,
+                      fontWeight: 900,
+                      letterSpacing: "0.02em",
+                    }}
+                  >
+                    ${data.symbol}
+                  </span>
+                  {data.status === "watching" && (
+                    <span
+                      style={{
+                        fontSize: 7,
+                        padding: "2px 6px",
+                        borderRadius: 2,
+                        color: "#00c47a",
+                        border: "1px solid #00c47a55",
+                        fontWeight: 700,
+                        letterSpacing: "0.1em",
+                        background: "#00c47a11",
+                      }}
+                    >
+                      LIVE
+                    </span>
+                  )}
+                  {data.exitReason && (
+                    <span
+                      style={{
+                        fontSize: 7,
+                        padding: "2px 6px",
+                        borderRadius: 2,
+                        color: exitReasonColor,
+                        border: `1px solid ${exitReasonColor}55`,
+                        fontWeight: 700,
+                        background: `${exitReasonColor}11`,
+                      }}
+                    >
+                      {data.exitReason}
+                    </span>
+                  )}
+                </div>
+                <div style={{ color: "#ffffff55", fontSize: 8, marginTop: 2 }}>
+                  {data.amountSol} SOL · {fmtAgo(data.ts)}
+                </div>
+              </div>
+            </div>
+
+            {/* MIDDLE: big PnL */}
+            <div>
+              <div
+                style={{
+                  fontSize: 46,
+                  fontWeight: 900,
+                  color: pnlColor,
+                  lineHeight: 1,
+                  letterSpacing: "-0.03em",
+                  textShadow: `0 0 30px ${pnlColor}77`,
+                }}
+              >
+                {fmtPnl(pnl)}
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: `${pnlColor}aa`,
+                  marginTop: 5,
+                  fontWeight: 600,
+                }}
+              >
+                {isWin ? "+" : ""}
+                {solPnl.toFixed(3)} SOL
+              </div>
+            </div>
+
+            {/* BOTTOM: clean stat rows + branding */}
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 5,
+                  marginBottom: 12,
+                }}
+              >
+                {[
+                  { label: "Entry", value: fmtMcap(data.entryMcap) },
+                  {
+                    label: data.status === "sold" ? "Exit" : "Current",
+                    value: fmtMcap(exitMcap ?? 0),
+                    highlight: true,
+                  },
+                  {
+                    label: "Multi",
+                    value:
+                      exitMcap && data.entryMcap
+                        ? `${(exitMcap / data.entryMcap).toFixed(2)}×`
+                        : "—",
+                  },
+                  { label: "SL / TP", value: `${data.slPct}% / ${data.tpX}×` },
+                ].map((row) => (
+                  <div
+                    key={row.label}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ color: "#ffffff55", fontSize: 9 }}>
+                      {row.label}
+                    </span>
+                    <span
+                      style={{
+                        color: row.highlight ? pnlColor : "#ffffffcc",
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {row.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span
+                  style={{
+                    color: "#e8490f",
+                    fontSize: 9,
+                    fontWeight: 900,
+                    letterSpacing: "0.2em",
+                  }}
+                >
+                  ⚡ WRAITH
+                </span>
+                <span style={{ color: "#ffffff33", fontSize: 7 }}>
+                  paper trader
+                </span>
+              </div>
+            </div>
+          </div>
+          {/* end z:2 content wrapper */}
+        </div>
+
+        {/* action buttons */}
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            style={{
+              background: downloading ? "#0d0d0d" : C.orange,
+              border: "none",
+              color: "#fff",
+              fontSize: 9,
+              fontWeight: 700,
+              padding: "7px 14px",
+              borderRadius: 4,
+              cursor: downloading ? "not-allowed" : "pointer",
+              letterSpacing: "0.1em",
+              ...MONO,
+            }}
+          >
+            {downloading ? "RENDERING…" : "↓ DOWNLOAD PNG"}
+          </button>
+          <button
+            onClick={handleCopy}
+            style={{
+              background: copied ? "#001a0a" : "#111",
+              border: `1px solid ${copied ? C.green + "55" : C.border}`,
+              color: copied ? C.green : C.muted,
+              fontSize: 9,
+              fontWeight: 700,
+              padding: "7px 14px",
+              borderRadius: 4,
+              cursor: "pointer",
+              letterSpacing: "0.1em",
+              ...MONO,
+            }}
+          >
+            {copied ? "✓ COPIED" : "⧉ COPY IMG"}
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              background: "transparent",
+              border: `1px solid ${C.border}`,
+              color: C.dim,
+              fontSize: 9,
+              padding: "7px 10px",
+              borderRadius: 4,
+              cursor: "pointer",
+              ...MONO,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1638,10 +2114,12 @@ function HotWalletSetup({
 function PositionCard({
   pos,
   onManualSell,
+  onShare,
   flash,
 }: {
   pos: Position;
   onManualSell: (id: string) => void;
+  onShare: (pos: Position) => void;
   flash: boolean;
 }) {
   const pnl = pos.currentPnlPct;
@@ -1743,23 +2221,47 @@ function PositionCard({
             </div>
           )}
         </div>
+        {/* action buttons stacked */}
         {pos.status === "watching" && (
-          <button
-            onClick={() => onManualSell(pos.id)}
+          <div
             style={{
-              background: "transparent",
-              border: `1px solid ${C.red}44`,
-              color: C.red,
-              fontSize: 7,
-              padding: "3px 7px",
-              borderRadius: 2,
-              cursor: "pointer",
-              ...MONO,
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
               flexShrink: 0,
             }}
           >
-            SELL NOW
-          </button>
+            <button
+              onClick={() => onShare(pos)}
+              style={{
+                background: "transparent",
+                border: `1px solid ${C.orange}44`,
+                color: C.orange,
+                fontSize: 7,
+                padding: "3px 7px",
+                borderRadius: 2,
+                cursor: "pointer",
+                ...MONO,
+              }}
+            >
+              ↗ SHARE
+            </button>
+            <button
+              onClick={() => onManualSell(pos.id)}
+              style={{
+                background: "transparent",
+                border: `1px solid ${C.red}44`,
+                color: C.red,
+                fontSize: 7,
+                padding: "3px 7px",
+                borderRadius: 2,
+                cursor: "pointer",
+                ...MONO,
+              }}
+            >
+              SELL NOW
+            </button>
+          </div>
         )}
       </div>
       <div style={{ marginBottom: 5 }}>
@@ -1861,7 +2363,7 @@ export default function PaperTrader({
   onCollapseChange,
 }: Props) {
   const { connection } = useConnection();
-  const { tier } = useWraithTier(); // ← tier for feeBps
+  const { tier } = useWraithTier();
 
   const connRef = useRef<Connection | null>(null);
   const getConn = useCallback((): Connection => {
@@ -1909,13 +2411,60 @@ export default function PaperTrader({
 
   const [dbLoaded, setDbLoaded] = useState(false);
 
+  // ── SHARE STATE
+  const [shareData, setShareData] = useState<ShareCardData | null>(null);
+
+  const handleShare = useCallback((pos: Position) => {
+    setShareData({
+      symbol: pos.symbol,
+      mint: pos.mint,
+      entryMcap: pos.entryMcap,
+      currentMcap: pos.currentMcap,
+      exitMcap: pos.exitMcap,
+      amountSol: pos.amountSol,
+      currentPnlPct: pos.currentPnlPct,
+      exitPnlPct: pos.exitPnlPct,
+      tpX: pos.tpX,
+      slPct: pos.slPct,
+      trailPct: pos.trailPct,
+      exitReason: pos.exitReason,
+      imageUrl: pos.imageUrl,
+      buyTxSig: pos.buyTxSig,
+      exitTxSig: pos.exitTxSig,
+      status: pos.status === "sold" ? "sold" : "watching",
+      ts: pos.ts,
+    });
+  }, []);
+
+  const handleShareFromLog = useCallback((t: TradeLog) => {
+    setShareData({
+      symbol: t.symbol,
+      mint: t.mint,
+      entryMcap: t.entryMcap,
+      currentMcap: t.exitMcap ?? t.entryMcap,
+      exitMcap: t.exitMcap,
+      amountSol: t.amountSol,
+      currentPnlPct: t.pnlPct ?? 0,
+      exitPnlPct: t.pnlPct,
+      tpX: t.tpX,
+      slPct: t.slPct,
+      trailPct: DEFAULT_TRAIL,
+      exitReason: t.exitReason as ShareCardData["exitReason"],
+      imageUrl: t.imageUrl,
+      buyTxSig: t.buyTxSig,
+      exitTxSig: t.exitTxSig,
+      status: "sold",
+      ts: t.ts,
+    });
+  }, []);
+
   const fetchAbortRef = useRef<AbortController | null>(null);
   const balTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const monitorTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const sellingRef = useRef<Set<string>>(new Set());
   const hotKeypairRef = useRef<Keypair | null>(null);
   const trailPctRef = useRef(trailPct);
-  const tierRef = useRef(tier); // ← keep tier in ref for callbacks
+  const tierRef = useRef(tier);
   const borderFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -2332,7 +2881,6 @@ export default function PaperTrader({
   const TP_PRESETS = [1.5, 2, 3, 5, 10];
   const TRAIL_PRESETS = [5, 10, 15, 20, 25];
 
-  // fee badge for trade tab header
   const feeBadgeLabel =
     tier?.feeBps === 0
       ? "0% FEE"
@@ -3362,6 +3910,7 @@ export default function PaperTrader({
                   pos={pos}
                   flash={flashPos === pos.id}
                   onManualSell={(id) => triggerSell(id, "MANUAL")}
+                  onShare={handleShare}
                 />
               ))
             )}
@@ -3534,7 +4083,16 @@ export default function PaperTrader({
                         {fmtMcap(t.exitMcap ?? 0)}
                       </div>
                     </div>
-                    <div style={{ textAlign: "right" as const, flexShrink: 0 }}>
+                    <div
+                      style={{
+                        textAlign: "right" as const,
+                        flexShrink: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-end",
+                        gap: 2,
+                      }}
+                    >
                       <div style={{ color: C.dim, fontSize: 7, ...MONO }}>
                         {fmtAgo(t.ts)}
                       </div>
@@ -3553,6 +4111,22 @@ export default function PaperTrader({
                           {t.exitTxSig.slice(0, 8)}↗
                         </a>
                       )}
+                      {/* share button in log */}
+                      <button
+                        onClick={() => handleShareFromLog(t)}
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${C.orange}33`,
+                          color: C.orange,
+                          fontSize: 6,
+                          padding: "2px 5px",
+                          borderRadius: 2,
+                          cursor: "pointer",
+                          ...MONO,
+                        }}
+                      >
+                        ↗ SHARE
+                      </button>
                     </div>
                   </div>
                 );
@@ -3561,6 +4135,49 @@ export default function PaperTrader({
           </div>
         )}
       </div>
+
+      {/* SHARE TEST — remove after */}
+      {/* <button
+        onClick={() =>
+          setShareData({
+            symbol: "PEPE",
+            mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            entryMcap: 500000,
+            currentMcap: 1250000,
+            exitMcap: undefined,
+            amountSol: 0.1,
+            currentPnlPct: 150,
+            exitPnlPct: undefined,
+            tpX: 3,
+            slPct: -20,
+            trailPct: 15,
+            exitReason: undefined,
+            imageUrl: undefined,
+            buyTxSig: undefined,
+            exitTxSig: undefined,
+            status: "watching",
+            ts: Date.now(),
+          })
+        }
+        style={{
+          position: "fixed",
+          bottom: 20,
+          right: 20,
+          zIndex: 9999,
+          background: "orange",
+          padding: "10px 16px",
+          borderRadius: 6,
+          cursor: "pointer",
+          fontWeight: 700,
+        }}
+      >
+        TEST SHARE
+      </button> */}
+
+      {/* ── SHARE MODAL */}
+      {shareData && (
+        <ShareModal data={shareData} onClose={() => setShareData(null)} />
+      )}
     </div>
   );
 }

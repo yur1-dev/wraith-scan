@@ -801,6 +801,476 @@ export default function AccessPage() {
           </div>
         </div>
       </section>
+      {/* ── TELEGRAM ALERTS ── */}
+      {/* Paste this section between the FEATURE MATRIX section and the FEES section */}
+      <section
+        style={{ borderTop: "1px solid #111", padding: "72px 40px 80px" }}
+      >
+        <div style={{ maxWidth: 960, margin: "0 auto" }}>
+          {/* Header */}
+          <div style={{ marginBottom: 52 }}>
+            <div
+              style={{
+                fontSize: 9,
+                color: "#666",
+                letterSpacing: ".3em",
+                fontWeight: 700,
+                marginBottom: 12,
+              }}
+            >
+              ALERTS
+            </div>
+            <h2
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+                color: "#f0f0f0",
+                letterSpacing: ".04em",
+                marginBottom: 12,
+              }}
+            >
+              SIGNALS. STRAIGHT TO TELEGRAM.
+            </h2>
+            <p
+              style={{
+                color: "#888",
+                fontSize: 12,
+                lineHeight: 1.8,
+                maxWidth: 480,
+              }}
+            >
+              The moment WRAITH detects a HOT or ULTRA token, a signal fires to
+              your Telegram — contract address, AI score, mcap, and swap links
+              included. No app required to receive them.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 40,
+              alignItems: "start",
+            }}
+          >
+            {/* LEFT — steps */}
+            <div>
+              <div
+                style={{
+                  fontSize: 9,
+                  color: "#666",
+                  letterSpacing: ".2em",
+                  fontWeight: 700,
+                  marginBottom: 20,
+                }}
+              >
+                HOW TO CONNECT
+              </div>
+
+              {[
+                {
+                  n: "01",
+                  title: "REACH SPECTER TIER",
+                  desc: "Hold at least 100,000 WRAITH in your connected wallet. Telegram alerts unlock at SPECTER.",
+                  color: "#a855f7",
+                },
+                {
+                  n: "02",
+                  title: "OPEN THE BOT",
+                  desc: "Click Connect Telegram in your account menu. It opens @wraithscan_bot in Telegram automatically.",
+                  color: "#00b4d8",
+                },
+                {
+                  n: "03",
+                  title: "SEND /START",
+                  desc: "The bot responds instantly with your setup confirmation and alert preferences.",
+                  color: "#00c47a",
+                },
+                {
+                  n: "04",
+                  title: "RECEIVE SIGNALS",
+                  desc: "Alerts fire the moment the scanner spots a token. Entry signal, AI score, and one-tap swap link — all in one message.",
+                  color: "#e8490f",
+                },
+              ].map((s, i) => (
+                <div
+                  key={s.n}
+                  style={{
+                    display: "flex",
+                    gap: 16,
+                    marginBottom: i < 3 ? 0 : 0,
+                    position: "relative",
+                  }}
+                >
+                  {/* connector line */}
+                  {i < 3 && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 17,
+                        top: 36,
+                        bottom: 0,
+                        width: 1,
+                        background: "#1a1a1a",
+                      }}
+                    />
+                  )}
+
+                  {/* step number circle */}
+                  <div
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: "50%",
+                      border: `1px solid ${s.color}44`,
+                      background: `${s.color}0e`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      fontSize: 8,
+                      fontWeight: 900,
+                      color: s.color,
+                      letterSpacing: ".1em",
+                      zIndex: 1,
+                    }}
+                  >
+                    {s.n}
+                  </div>
+
+                  <div style={{ paddingBottom: 28 }}>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 900,
+                        letterSpacing: ".12em",
+                        color: "#c0c0c0",
+                        marginBottom: 6,
+                      }}
+                    >
+                      {s.title}
+                    </div>
+                    <div
+                      style={{ fontSize: 11, color: "#888", lineHeight: 1.8 }}
+                    >
+                      {s.desc}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* tier badge */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 4,
+                  padding: "8px 14px",
+                  background: "#a855f70e",
+                  border: "1px solid #a855f730",
+                  borderRadius: 4,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "#a855f7",
+                    flexShrink: 0,
+                    display: "inline-block",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: 9,
+                    color: "#a855f7",
+                    fontWeight: 700,
+                    letterSpacing: ".14em",
+                  }}
+                >
+                  SPECTER TIER REQUIRED · 100,000 WRAITH
+                </span>
+              </div>
+            </div>
+
+            {/* RIGHT — mock alert messages */}
+            <div>
+              <div
+                style={{
+                  fontSize: 9,
+                  color: "#666",
+                  letterSpacing: ".2em",
+                  fontWeight: 700,
+                  marginBottom: 20,
+                }}
+              >
+                EXAMPLE ALERTS
+              </div>
+
+              {/* Phone mock */}
+              <div
+                style={{
+                  background: "#0a0a0a",
+                  border: "1px solid #1a1a1a",
+                  borderRadius: 10,
+                  overflow: "hidden",
+                }}
+              >
+                {/* Telegram header bar */}
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    borderBottom: "1px solid #141414",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "50%",
+                      background: "#1a0a2e",
+                      border: "1px solid #a855f730",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 12,
+                    }}
+                  >
+                    👻
+                  </div>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#c0c0c0",
+                        letterSpacing: ".06em",
+                      }}
+                    >
+                      WRAITH SIGNALS
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 8,
+                        color: "#555",
+                        letterSpacing: ".08em",
+                      }}
+                    >
+                      bot
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      marginLeft: "auto",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: "50%",
+                        background: "#00c47a",
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 8,
+                        color: "#00c47a",
+                        letterSpacing: ".1em",
+                        fontWeight: 700,
+                      }}
+                    >
+                      ONLINE
+                    </span>
+                  </div>
+                </div>
+
+                {/* Entry signal */}
+                <div
+                  style={{
+                    padding: "14px 16px",
+                    borderBottom: "1px solid #0d0d0d",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#0f1a0f",
+                      border: "1px solid #00c47a22",
+                      borderLeft: "3px solid #00c47a",
+                      borderRadius: 6,
+                      padding: "12px 14px",
+                      fontSize: 10,
+                      lineHeight: 1.8,
+                      color: "#aaa",
+                      fontFamily:
+                        "var(--font-mono), 'IBM Plex Mono', monospace",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: "#00c47a",
+                        fontWeight: 900,
+                        marginBottom: 6,
+                        fontSize: 11,
+                      }}
+                    >
+                      🟢 HOT SIGNAL — PEPELON — $PEPELON
+                    </div>
+                    <div>
+                      💰 <span style={{ color: "#c0c0c0" }}>MCAP:</span> $18.4K
+                    </div>
+                    <div>
+                      📈 <span style={{ color: "#c0c0c0" }}>AI Score:</span>{" "}
+                      <span style={{ color: "#e8490f" }}>84/100</span>
+                    </div>
+                    <div>
+                      🔥 <span style={{ color: "#c0c0c0" }}>Signal Tier:</span>{" "}
+                      ULTRA
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        paddingTop: 8,
+                        borderTop: "1px solid #1a1a1a",
+                      }}
+                    >
+                      <span style={{ color: "#2b9fd4" }}>DexScreener</span>
+                      <span style={{ color: "#444" }}> · </span>
+                      <span style={{ color: "#2b9fd4" }}>Pump</span>
+                      <span style={{ color: "#444" }}> · </span>
+                      <span style={{ color: "#2b9fd4" }}>Swap</span>
+                    </div>
+                    <div style={{ marginTop: 6, color: "#555", fontSize: 9 }}>
+                      7xK2mNvRqL...f9Rp
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 8,
+                      color: "#444",
+                      marginTop: 6,
+                      textAlign: "right" as const,
+                      letterSpacing: ".06em",
+                    }}
+                  >
+                    2:47 PM ✓✓
+                  </div>
+                </div>
+
+                {/* Win alert */}
+                <div style={{ padding: "14px 16px" }}>
+                  <div
+                    style={{
+                      background: "#0a1a12",
+                      border: "1px solid #00c47a22",
+                      borderLeft: "3px solid #00c47a",
+                      borderRadius: 6,
+                      padding: "12px 14px",
+                      fontSize: 10,
+                      lineHeight: 1.8,
+                      color: "#aaa",
+                      fontFamily:
+                        "var(--font-mono), 'IBM Plex Mono', monospace",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: "#00c47a",
+                        fontWeight: 900,
+                        marginBottom: 6,
+                        fontSize: 11,
+                      }}
+                    >
+                      ✅ WRAITH WIN — $DOGEAI
+                    </div>
+                    <div>
+                      📊{" "}
+                      <span style={{ color: "#e8490f", fontWeight: 900 }}>
+                        4.70x
+                      </span>{" "}
+                      from spotted price
+                    </div>
+                    <div>
+                      Spotted: <span style={{ color: "#c0c0c0" }}>$9.1K</span>{" "}
+                      at 02:14 PM
+                    </div>
+                    <div>
+                      Now: <span style={{ color: "#c0c0c0" }}>$42.8K</span>
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 9, color: "#666" }}>
+                      AI Score: ████████░░ 76/100
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 8,
+                      color: "#444",
+                      marginTop: 6,
+                      textAlign: "right" as const,
+                      letterSpacing: ".06em",
+                    }}
+                  >
+                    3:14 PM ✓✓
+                  </div>
+                </div>
+              </div>
+
+              {/* commands hint */}
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: "12px 16px",
+                  background: "#080808",
+                  border: "1px solid #141414",
+                  borderRadius: 6,
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap" as const,
+                }}
+              >
+                {["/start", "/tier", "/signals", "/status", "/help"].map(
+                  (cmd) => (
+                    <span
+                      key={cmd}
+                      style={{
+                        fontSize: 9,
+                        color: "#2b9fd4",
+                        background: "#0a1520",
+                        border: "1px solid #2b9fd422",
+                        padding: "3px 8px",
+                        borderRadius: 3,
+                        letterSpacing: ".06em",
+                        fontFamily:
+                          "var(--font-mono), 'IBM Plex Mono', monospace",
+                      }}
+                    >
+                      {cmd}
+                    </span>
+                  ),
+                )}
+                <span
+                  style={{
+                    fontSize: 9,
+                    color: "#555",
+                    letterSpacing: ".06em",
+                    alignSelf: "center",
+                  }}
+                >
+                  available commands
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* ── PRICING CARDS ── */}
       <section

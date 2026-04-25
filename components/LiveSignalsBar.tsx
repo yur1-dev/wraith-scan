@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { MemeTrend } from "@/app/page";
+import { MemeTrend } from "@/app/app/page";
 import { useWraithTier } from "@/hooks/useWraithTier";
 
 const SCAN_CLUSTER_GAP_MS = 10 * 60 * 1000;

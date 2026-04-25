@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { MemeTrend } from "@/app/page";
+import { MemeTrend } from "@/app/app/page";
 
 interface ScanResult extends MemeTrend {
   platforms?: string[];
@@ -233,7 +233,7 @@ function InlineChart({
   contractAddress: string;
   onOpenFull: () => void;
 }) {
-  const src = `https://dexscreener.com/solana/${contractAddress}?embed=1&theme=dark&trades=0&info=0&chart=1&chartLeftToolbar=0&chartDefaultOnMobile=1&chartTheme=dark&chartStyle=0&chartType=usd&interval=15`;
+  const src = `https://dexscreener.com/solana/${contractAddress}?embed=1&theme=dark&trades=0&info=0&chart=1&chartLeftToolbar=0&chartDefaultOnMobile=1&chartTheme=dark&chartStyle=1&chartType=usd&interval=15`;
   return (
     <div
       style={{

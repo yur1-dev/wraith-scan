@@ -9,7 +9,7 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
 } from "@solana/web3.js";
-import { MemeTrend } from "@/app/page";
+import { MemeTrend } from "@/app/app/page";
 import { useWraithTier } from "@/hooks/useWraithTier";
 
 // ─────────────────────────────────────────────────────────────────────────────

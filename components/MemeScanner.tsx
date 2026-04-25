@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import axios from "axios";
-import { MemeTrend } from "@/app/page";
+import { MemeTrend } from "@/app/app/page";
 
 interface ScanResult extends MemeTrend {
   platforms?: string[];

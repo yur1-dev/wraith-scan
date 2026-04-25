@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { MemeTrend } from "@/app/page";
+import { MemeTrend } from "@/app/app/page";
 import {
   saveHistory,
   fetchCurrentMcap,

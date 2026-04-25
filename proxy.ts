@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const PUBLIC_PATHS = new Set(["/login"]);
+const PUBLIC_PATHS = new Set(["/login", "/"]);
 const PUBLIC_API_PREFIXES = ["/api/auth/"];
 const ALLOWED_ORIGIN = process.env.NEXTAUTH_URL || "";
 
-export async function proxy(req: NextRequest) {
+export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  if (pathname.startsWith("/_next/") || pathname === "/favicon.ico") {
+    return NextResponse.next();
+  }
 
   if (PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  if (pathname.startsWith("/_next/") || pathname === "/favicon.ico") {
+  if (PUBLIC_PATHS.has(pathname)) {
     return NextResponse.next();
   }
 
@@ -26,10 +30,6 @@ export async function proxy(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (PUBLIC_PATHS.has(pathname)) {
-      return NextResponse.next();
-    }
-
     const rawCallback = req.url;
     const callbackUrl = isSafeCallbackUrl(rawCallback, ALLOWED_ORIGIN)
       ? rawCallback
@@ -41,7 +41,7 @@ export async function proxy(req: NextRequest) {
   }
 
   if (pathname === "/login") {
-    return NextResponse.redirect(new URL("/", req.url));
+    return NextResponse.redirect(new URL("/app", req.url));
   }
 
   return NextResponse.next();
@@ -61,6 +61,6 @@ function isSafeCallbackUrl(url: string, allowedOrigin: string): boolean {
     }
     return false;
   } catch {
-    return false; // ← FIXED: malformed URL is unsafe, not safe
+    return false;
   }
 }

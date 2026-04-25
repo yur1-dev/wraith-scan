@@ -3,7 +3,6 @@ import GoogleProvider from "next-auth/providers/google";
 import { MongoDBAdapter } from "@next-auth/mongodb-adapter";
 import clientPromise from "@/lib/mongoClient";
 
-// ─── TYPE AUGMENTATION ────────────────────────────────────────────────────────
 declare module "next-auth" {
   interface Session {
     user: {
@@ -21,7 +20,6 @@ declare module "next-auth/jwt" {
   }
 }
 
-// ─── AUTH CONFIG ──────────────────────────────────────────────────────────────
 export const authOptions: NextAuthOptions = {
   adapter: MongoDBAdapter(clientPromise),
   providers: [
@@ -43,6 +41,11 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (token.userId) session.user.id = token.userId;
       return session;
+    },
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith(baseUrl)) return url;
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      return `${baseUrl}/app`;
     },
   },
   pages: {

@@ -31,7 +31,7 @@ This bot delivers <b>real-time HOT and ULTRA signals</b> the moment the WRAITH s
 <b>03</b> — Enable Telegram alerts in the Scanner settings
 <b>04</b> — Alerts fire to this chat automatically
 
-Minimum tier: <b>SHADE · 10,000 WRAITH</b>
+Minimum tier: <b>SPECTER · 100,000 WRAITH</b>
 
 <b>━━━ COMMANDS ━━━</b>
 
@@ -74,7 +74,7 @@ Celebrity mention detected alongside on-chain activity.
 Fires when a tracked token hits 2× from spotted price.
 
 Enable alerts at <a href="https://wraith-scan.vercel.app">wraith-scan.vercel.app</a>
-Requires SHADE tier (10,000 WRAITH minimum).`;
+Requires SPECTER tier (100,000 WRAITH minimum).`;
 }
 
 function msgTier() {
@@ -85,13 +85,13 @@ function msgTier() {
 
 ◈ <b>SHADE</b> — 10,000 WRAITH
   Sniper / Auto-buy · Hot Wallet
-  <b>Telegram Alerts ✓</b>
   1.0% fee
 
 ◆ <b>SPECTER</b> — 100,000 WRAITH
   Everything in SHADE
   AI Score · <b>Live Signals ✓</b>
   Auto TP / SL / Trailing stop
+  <b>Telegram Alerts ✓</b>
   0.5% fee
 
 ⬡ <b>WRAITH</b> — 1,000,000 WRAITH
@@ -112,12 +112,12 @@ The bot is <b>online</b> and ready to push signals.
 <b>To receive alerts:</b>
 · Signed in to wraith-scan.vercel.app
 · Solana wallet connected (holding WRAITH)
-· At least 10,000 WRAITH (SHADE tier)
+· At least 100,000 WRAITH (SPECTER tier)
 · Telegram alerts enabled in Scanner settings
 
 <b>If alerts stopped:</b>
 · Re-enable in Scanner settings panel
-· Check WRAITH balance hasn't dropped below 10K
+· Check WRAITH balance hasn't dropped below 100K
 · Make sure you're still signed in
 
 🔗 <a href="https://wraith-scan.vercel.app">Open WRAITH App →</a>`;
@@ -174,17 +174,16 @@ export async function POST(req: NextRequest) {
   const msg = update.message;
   if (!msg?.text) return NextResponse.json({ ok: true });
 
-  const chatType = msg.chat.type; // "private" | "group" | "supergroup" | "channel"
+  const chatType = msg.chat.type;
   const chatId = msg.chat.id;
   const name = msg.from?.first_name ?? "trader";
   const cmd = msg.text.trim().split(" ")[0].split("@")[0].toLowerCase();
 
-  // ── Groups only receive pushed signals — ignore all commands ──
+  // Groups only receive pushed signals — ignore all commands
   if (chatType !== "private") {
     return NextResponse.json({ ok: true });
   }
 
-  // ── DMs: respond to commands ──
   if (!cmd.startsWith("/")) return NextResponse.json({ ok: true });
 
   switch (cmd) {

@@ -1,16 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-
-// ─── POST /api/alert/telegram ─────────────────────────────────────────────────
-// Handles two alert types:
-//
-//   type: "entry" — fired by recordTokenSighting the moment scanner spots a token.
-//                   This is the BUY SIGNAL. Token has NOT 2x'd yet.
-//                   Includes AI score (0-100) and HOT/WATCH tier.
-//
-//   type: "win"   — fired by WinsPanel when a token hits 2x AFTER being spotted.
-//                   This is the WIN NOTIFICATION.
+import { getDb } from "@/lib/mongoClient";
 
 const fmt = (n: number) => {
   if (!n) return "—";
@@ -20,19 +11,17 @@ const fmt = (n: number) => {
   return `$${n.toFixed(0)}`;
 };
 
-// ─── Score bar helper (e.g. ██████░░░░ 67/100) ────────────────────────────────
 const scoreBar = (score: number) => {
   const filled = Math.round(score / 10);
   return "█".repeat(filled) + "░".repeat(10 - filled);
 };
 
-// ─── Send a plain text message ────────────────────────────────────────────────
 async function sendTelegramMessage(
-  token: string,
+  botToken: string,
   chatId: string,
   text: string,
 ) {
-  return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  return fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -44,14 +33,13 @@ async function sendTelegramMessage(
   });
 }
 
-// ─── Send a photo with caption ────────────────────────────────────────────────
 async function sendTelegramPhoto(
-  token: string,
+  botToken: string,
   chatId: string,
   photoUrl: string,
   caption: string,
 ) {
-  return fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+  return fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -63,7 +51,6 @@ async function sendTelegramPhoto(
   });
 }
 
-// ─── Entry message — WRAITH SIGNALS style ────────────────────────────────────
 function buildEntryMessage(body: {
   symbol: string;
   name?: string;
@@ -85,7 +72,6 @@ function buildEntryMessage(body: {
   const statusLabel = body.aiTier === "HOT" ? "HOT SIGNAL" : "WATCH SIGNAL";
   const tierEmoji =
     body.twoXTier === "ULTRA" || body.twoXTier === "HIGH" ? "🔥" : "👁";
-
   const platStr = body.platforms?.length
     ? body.platforms.map((p) => p.toUpperCase()).join(" · ")
     : "PUMPFUN";
@@ -109,7 +95,6 @@ function buildEntryMessage(body: {
     lines.push(body.aiContext);
     lines.push(``);
   }
-
   if (body.aiReason) {
     lines.push(`💡 ${body.aiReason}`);
     lines.push(``);
@@ -134,7 +119,6 @@ function buildEntryMessage(body: {
   return lines.filter((l) => l !== "").join("\n");
 }
 
-// ─── Win message — WRAITH SIGNALS style ──────────────────────────────────────
 function buildWinMessage(body: {
   symbol: string;
   name?: string;
@@ -154,19 +138,17 @@ function buildWinMessage(body: {
 }): string {
   const xStr =
     body.xNow >= 10 ? `${body.xNow.toFixed(1)}x` : `${body.xNow.toFixed(2)}x`;
-
   const spottedTime = new Date(body.seenAt).toLocaleTimeString("en-PH", {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Asia/Manila",
   });
-
   const platStr = body.platforms?.length
     ? body.platforms.map((p) => p.toUpperCase()).join(" · ")
     : "PUMPFUN";
 
   const lines: string[] = [
-    `✅ <b>WRAITH WIN — $$${body.symbol}</b>`,
+    `✅ <b>WRAITH WIN — $${body.symbol}</b>`,
     `📊 ${xStr} from spotted price`,
     `Spotted:  ${fmt(body.initialMcap)} at ${spottedTime}`,
     `Now:      ${fmt(body.currentMcap)}`,
@@ -187,15 +169,73 @@ function buildWinMessage(body: {
   return lines.filter((l) => l !== undefined).join("\n");
 }
 
+// ─── Broadcast to all eligible users ─────────────────────────────────────────
+async function broadcastToEligibleUsers(
+  botToken: string,
+  text: string,
+  imageUrl?: string,
+) {
+  const db = await getDb();
+
+  // Only send to users who:
+  // 1. Have linked their Telegram (telegramChatId exists)
+  // 2. Are SPECTER or WRAITH tier
+  const users = await db
+    .collection("users")
+    .find(
+      {
+        telegramChatId: { $exists: true, $ne: null },
+        tier: { $in: ["SPECTER", "WRAITH"] },
+      },
+      { projection: { telegramChatId: 1 } },
+    )
+    .toArray();
+
+  if (users.length === 0) return { sent: 0, failed: 0 };
+
+  let sent = 0;
+  let failed = 0;
+
+  // Send to each user — fire in parallel but don't let one failure block others
+  await Promise.allSettled(
+    users.map(async (user) => {
+      const chatId = user.telegramChatId as string;
+      try {
+        const res = imageUrl
+          ? await sendTelegramPhoto(botToken, chatId, imageUrl, text)
+          : await sendTelegramMessage(botToken, chatId, text);
+
+        if (res.ok) {
+          sent++;
+        } else {
+          // If photo fails, fall back to text
+          if (imageUrl) {
+            const fallback = await sendTelegramMessage(botToken, chatId, text);
+            if (fallback.ok) {
+              sent++;
+            } else {
+              failed++;
+            }
+          } else {
+            failed++;
+          }
+        }
+      } catch {
+        failed++;
+      }
+    }),
+  );
+
+  return { sent, failed };
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-
-  if (!token || !chatId)
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken)
     return NextResponse.json(
       { error: "Telegram not configured" },
       { status: 503 },
@@ -203,7 +243,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
 
-  // _ping — just used by WinsPanel to check if Telegram is configured
+  // _ping — used by WinsPanel to check if Telegram is configured
   if (body._ping) return NextResponse.json({ ok: true });
 
   const alertType: "entry" | "win" = body.type === "entry" ? "entry" : "win";
@@ -245,38 +285,15 @@ export async function POST(req: NextRequest) {
         });
 
   try {
-    // If there's a token image URL, send as photo with caption; otherwise plain message
-    const imageUrl: string | undefined = body.imageUrl;
-
-    const tgRes = imageUrl
-      ? await sendTelegramPhoto(token, chatId, imageUrl, text)
-      : await sendTelegramMessage(token, chatId, text);
-
-    if (!tgRes.ok) {
-      const err = await tgRes.text();
-      console.error("[telegram] send failed:", err);
-
-      // If photo send fails (bad URL etc), fall back to plain message
-      if (imageUrl) {
-        const fallback = await sendTelegramMessage(token, chatId, text);
-        if (!fallback.ok) {
-          return NextResponse.json(
-            { error: "Telegram API error" },
-            { status: 502 },
-          );
-        }
-        return NextResponse.json({ ok: true, fallback: true });
-      }
-
-      return NextResponse.json(
-        { error: "Telegram API error" },
-        { status: 502 },
-      );
-    }
-
-    return NextResponse.json({ ok: true });
+    const { sent, failed } = await broadcastToEligibleUsers(
+      botToken,
+      text,
+      body.imageUrl,
+    );
+    console.log(`[telegram] broadcast: ${sent} sent, ${failed} failed`);
+    return NextResponse.json({ ok: true, sent, failed });
   } catch (err) {
-    console.error("[telegram] fetch error:", err);
-    return NextResponse.json({ error: "Network error" }, { status: 500 });
+    console.error("[telegram] broadcast error:", err);
+    return NextResponse.json({ error: "Broadcast failed" }, { status: 500 });
   }
 }

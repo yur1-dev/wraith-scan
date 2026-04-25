@@ -7,6 +7,7 @@ import {
   createContext,
   useContext,
 } from "react";
+import { useSession } from "next-auth/react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import {
@@ -42,6 +43,7 @@ export function WraithTierProvider({
 }) {
   const { connection } = useConnection();
   const { publicKey, connected } = useWallet();
+  const { status } = useSession();
 
   const [rawBalance, setRawBalance] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -113,6 +115,21 @@ export function WraithTierProvider({
     : tierOverride
       ? TIERS[tierOverride]
       : getTierFromBalance(rawBalance);
+
+  // ─── Sync tier to MongoDB so alert broadcaster knows who to send to ──────
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    if (loading) return;
+    const tierKey = isWhitelistMember ? "WRAITH" : tier.key;
+    fetch("/api/user/tier", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tier: tierKey,
+        walletAddress: walletStr ?? undefined,
+      }),
+    }).catch(() => {});
+  }, [tier.key, status, loading, isWhitelistMember, walletStr]);
 
   const canUseFeature = useCallback(
     (feature: string) => {

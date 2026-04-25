@@ -6,7 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
 import WalletModal from "./WalletModal";
-import { TierBadge } from "@/hooks/useWraithTier";
+import { TierBadge, useWraithTier } from "@/hooks/useWraithTier";
 
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
@@ -16,12 +16,21 @@ function trimAddress(addr: string) {
   return `${addr.slice(0, 4)}..${addr.slice(-4)}`;
 }
 
+// Tiers that can access Telegram alerts (SPECTER and above)
+const TELEGRAM_TIERS = ["SPECTER", "WRAITH"];
+
 export default function Header() {
   const { connected, publicKey, disconnect, connecting } = useWallet();
   const { data: session } = useSession();
+  const { tier } = useWraithTier();
   const [modalOpen, setModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [tgLinking, setTgLinking] = useState(false);
+  const [tgLinked, setTgLinked] = useState(false);
+  const [tgTooltip, setTgTooltip] = useState(false);
+
+  const canUseTelegram = TELEGRAM_TIERS.includes(tier?.key ?? "");
 
   useEffect(() => {
     if (connected) setModalOpen(false);
@@ -40,6 +49,43 @@ export default function Header() {
     window.addEventListener("click", handler);
     return () => window.removeEventListener("click", handler);
   }, [userMenuOpen]);
+
+  // Check if already linked on mount
+  useEffect(() => {
+    if (!session) return;
+    fetch("/api/user/telegram-status")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.linked) setTgLinked(true);
+      })
+      .catch(() => {});
+  }, [session]);
+
+  const handleConnectTelegram = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canUseTelegram) return;
+    setTgLinking(true);
+    try {
+      const res = await fetch("/api/telegram/link", { method: "POST" });
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, "_blank");
+        // Poll briefly so we can show "linked" state
+        setTimeout(() => {
+          fetch("/api/user/telegram-status")
+            .then((r) => r.json())
+            .then((d) => {
+              if (d.linked) setTgLinked(true);
+            })
+            .catch(() => {});
+        }, 5000);
+      }
+    } catch {
+      // silent
+    } finally {
+      setTgLinking(false);
+    }
+  };
 
   return (
     <>
@@ -100,16 +146,11 @@ export default function Header() {
           >
             WRAITH
           </span>
-          {/*  */}
         </div>
 
         {/* Center — nav */}
         <nav style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {[
-            // { label: "SNIPER", href: "/" },
-            // { label: "SIGNALS", href: "/?tab=signals" },
-            // { label: "PAPER", href: "/?tab=paper" },
-          ].map(({ label, href }) => (
+          {[].map(({ label, href }: { label: string; href: string }) => (
             <Link
               key={label}
               href={href}
@@ -334,12 +375,13 @@ export default function Header() {
                     background: "#060606",
                     border: "1px solid #111",
                     borderRadius: 5,
-                    minWidth: 180,
+                    minWidth: 200,
                     zIndex: 200,
                     overflow: "hidden",
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
+                  {/* User info */}
                   <div
                     style={{
                       padding: "10px 14px",
@@ -364,38 +406,160 @@ export default function Header() {
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
-                        maxWidth: 152,
+                        maxWidth: 172,
                       }}
                     >
                       {session.user?.email ?? "—"}
                     </div>
                   </div>
 
-                  <Link
-                    href="/access"
-                    style={{
-                      display: "block",
-                      color: "#444",
-                      fontSize: 10,
-                      ...MONO,
-                      padding: "10px 14px",
-                      textDecoration: "none",
-                      letterSpacing: ".06em",
-                      borderBottom: "1px solid #0d0d0d",
-                      transition: "background .15s, color .15s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "#0a0a0a";
-                      e.currentTarget.style.color = "#e8490f";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "transparent";
-                      e.currentTarget.style.color = "#444";
-                    }}
+                  {/* Connect Telegram — tier gated */}
+                  <div
+                    style={{ position: "relative" }}
+                    onMouseEnter={() => !canUseTelegram && setTgTooltip(true)}
+                    onMouseLeave={() => setTgTooltip(false)}
                   >
-                    VIEW TIERS
-                  </Link>
+                    <button
+                      onClick={
+                        canUseTelegram ? handleConnectTelegram : undefined
+                      }
+                      disabled={tgLinking}
+                      style={{
+                        width: "100%",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: "1px solid #0d0d0d",
+                        color: tgLinked
+                          ? "#00c47a"
+                          : canUseTelegram
+                            ? "#2b9fd4"
+                            : "#2a2a2a",
+                        fontSize: 10,
+                        ...MONO,
+                        padding: "10px 14px",
+                        cursor: canUseTelegram ? "pointer" : "not-allowed",
+                        textAlign: "left",
+                        letterSpacing: ".06em",
+                        transition: "background .15s, color .15s",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (canUseTelegram && !tgLinked) {
+                          e.currentTarget.style.background = "#0a1520";
+                          e.currentTarget.style.color = "#3ab8f0";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (canUseTelegram && !tgLinked) {
+                          e.currentTarget.style.background = "transparent";
+                          e.currentTarget.style.color = "#2b9fd4";
+                        }
+                      }}
+                    >
+                      {/* Telegram icon */}
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        style={{
+                          flexShrink: 0,
+                          opacity: canUseTelegram ? 1 : 0.3,
+                        }}
+                      >
+                        <path
+                          d="M22 2L11 13"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M22 2L15 22L11 13L2 9L22 2Z"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
 
+                      <span>
+                        {tgLinking
+                          ? "OPENING..."
+                          : tgLinked
+                            ? "TELEGRAM LINKED ✓"
+                            : "CONNECT TELEGRAM"}
+                      </span>
+
+                      {/* Lock icon for non-eligible tiers */}
+                      {!canUseTelegram && (
+                        <svg
+                          width="9"
+                          height="9"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          style={{ marginLeft: "auto", opacity: 0.4 }}
+                        >
+                          <rect
+                            x="3"
+                            y="11"
+                            width="18"
+                            height="11"
+                            rx="2"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          />
+                          <path
+                            d="M7 11V7C7 4.24 9.24 2 12 2C14.76 2 17 4.24 17 7V11"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          />
+                        </svg>
+                      )}
+                    </button>
+
+                    {/* Tooltip for locked state */}
+                    {tgTooltip && !canUseTelegram && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: "calc(100% + 6px)",
+                          left: 14,
+                          background: "#0a0a0a",
+                          border: "1px solid #1a1a1a",
+                          borderRadius: 4,
+                          padding: "6px 10px",
+                          fontSize: 9,
+                          color: "#e8490f",
+                          ...MONO,
+                          whiteSpace: "nowrap",
+                          zIndex: 300,
+                          letterSpacing: ".05em",
+                          pointerEvents: "none",
+                        }}
+                      >
+                        SPECTER TIER REQUIRED
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: -4,
+                            left: 12,
+                            width: 7,
+                            height: 7,
+                            background: "#0a0a0a",
+                            border: "1px solid #1a1a1a",
+                            borderTop: "none",
+                            borderLeft: "none",
+                            transform: "rotate(45deg)",
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sign out */}
                   <button
                     onClick={() => signOut({ callbackUrl: "/login" })}
                     style={{

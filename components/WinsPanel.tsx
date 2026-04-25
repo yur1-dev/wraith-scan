@@ -41,6 +41,8 @@ interface Props {
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
+
+const STALE_NOTIFIED_KEY = "wraith_stale_notified_keys";
 const AUTO_REFRESH_MS = 60_000;
 const UNDO_TIMEOUT_MS = 10_000;
 const BOUGHT_KEY = "wraith_bought_keys";
@@ -73,9 +75,6 @@ const C = {
   hot: "#ff6b35",
 };
 
-// ─── SHARED SIGNAL FILTER (mirrors LiveSignalsBar passes()) ──────────────────
-// A token only appears in Wins if it would have passed the live signals filter
-// when it was first spotted. This prevents garbage tokens from polluting wins.
 function passesSignalFilter(e: HistoryEntry): boolean {
   if (!e.contractAddress) return false;
   const mcap = e.initialMcap ?? 0;
@@ -99,7 +98,6 @@ function passesSignalFilter(e: HistoryEntry): boolean {
   return true;
 }
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function safeSnapshots(raw: unknown): McapSnapshot[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(
@@ -256,30 +254,6 @@ function calcX(init: number, cur: number): number {
 }
 
 // ─── SOUND ────────────────────────────────────────────────────────────────────
-function playEntrySound() {
-  try {
-    const ctx = new (
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext
-    )();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 1200;
-    osc.type = "sine";
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.35, ctx.currentTime + 0.01);
-    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.18);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.22);
-    setTimeout(() => ctx.close(), 500);
-  } catch {
-    /* silent */
-  }
-}
-
 function playWinSound() {
   try {
     const ctx = new (
@@ -356,6 +330,25 @@ async function sendTelegramWinAlert(entry: HistoryEntry, xNow: number) {
         seenAt: entry.seenAt,
         platforms: entry.platforms,
         aiScore: entry.aiScore,
+      }),
+    });
+  } catch {
+    /* silent */
+  }
+}
+
+async function sendTelegramStaleAlert(entry: HistoryEntry) {
+  try {
+    await fetch("/api/telegram/stale", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: (entry.tokenSymbol ?? entry.keyword).toUpperCase(),
+        keyword: entry.keyword,
+        initialMcap: entry.initialMcap,
+        currentMcap: entry.currentMcap,
+        contractAddress: entry.contractAddress,
+        seenAt: entry.seenAt,
       }),
     });
   } catch {
@@ -637,6 +630,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
   const cdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const backfillRunning = useRef(false);
   const winNotifiedRef = useRef<Set<string>>(new Set());
+  const staleNotifiedRef = useRef<Set<string>>(loadSet(STALE_NOTIFIED_KEY));
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 60_000);
@@ -898,6 +892,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         saveHistory(merged);
         setDeadCount(countDead(merged));
 
+        // Win alerts
         const newWins = Object.values(merged).filter((e) => {
           if (winNotifiedRef.current.has(e.keyword)) return false;
           if (!passesSignalFilter(e)) return false;
@@ -906,6 +901,24 @@ export default function WinsPanel({ onSelectMeme }: Props) {
           return (isPeakEarned(e) && xPeak >= 2 && xNow >= 1.5) || xNow >= 2;
         });
         if (newWins.length > 0) fireWinAlerts(newWins);
+
+        // Stale alerts — tokens 20+ mins old, below 1.5x, not already notified
+        if (tgEnabled) {
+          const staleTokens = Object.values(merged).filter((e) => {
+            if (staleNotifiedRef.current.has(e.keyword)) return false;
+            if (!passesSignalFilter(e)) return false;
+            if (winNotifiedRef.current.has(e.keyword)) return false;
+            const ageMs = Date.now() - e.seenAt;
+            const xNow = calcX(e.initialMcap, e.currentMcap);
+            return ageMs >= 20 * 60 * 1000 && xNow < 1.5;
+          });
+          for (const entry of staleTokens) {
+            staleNotifiedRef.current.add(entry.keyword);
+            saveSet(STALE_NOTIFIED_KEY, staleNotifiedRef.current);
+            sendTelegramStaleAlert(entry);
+          }
+        }
+
         return merged;
       });
 
@@ -914,7 +927,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       setLastAt(new Date().toLocaleTimeString());
       return { ...h, ...updates };
     },
-    [fireWinAlerts],
+    [fireWinAlerts, tgEnabled],
   );
 
   useEffect(() => {
@@ -941,12 +954,11 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     };
   }, [runRefresh]);
 
-  // ─── LIST — only tokens that passed signal filter AND hit 2x ──────────────
+  // ─── LIST ─────────────────────────────────────────────────────────────────
   const list = useMemo(
     () =>
       Object.values(history)
         .filter((e) => {
-          // Must pass the same filter as Live Signals bar
           if (!passesSignalFilter(e)) return false;
           const xNow = calcX(e.initialMcap, e.currentMcap);
           const xPeak = calcX(e.initialMcap, e.peakMcap);

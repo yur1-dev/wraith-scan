@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const PUBLIC_PATHS = new Set(["/login", "/"]);
-const PUBLIC_API_PREFIXES = ["/api/auth/"];
+const PUBLIC_API_PREFIXES = [
+  "/api/auth/",
+  "/api/telegram/bot",
+];
+];
 const ALLOWED_ORIGIN = process.env.NEXTAUTH_URL || "";
 
 export default async function middleware(req: NextRequest) {

@@ -16,7 +16,6 @@ function trimAddress(addr: string) {
   return `${addr.slice(0, 4)}..${addr.slice(-4)}`;
 }
 
-// Tiers that can access Telegram alerts (SPECTER and above)
 const TELEGRAM_TIERS = ["SPECTER", "WRAITH"];
 
 export default function Header() {
@@ -29,10 +28,18 @@ export default function Header() {
   const [tgLinking, setTgLinking] = useState(false);
   const [tgLinked, setTgLinked] = useState(false);
   const [tgTooltip, setTgTooltip] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canUseTelegram = TELEGRAM_TIERS.includes(tier?.key ?? "");
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   useEffect(() => {
     if (connected) setModalOpen(false);
@@ -52,7 +59,6 @@ export default function Header() {
     return () => window.removeEventListener("click", handler);
   }, [userMenuOpen]);
 
-  // Check if already linked on mount
   useEffect(() => {
     if (!session) return;
     fetch("/api/user/telegram-status")
@@ -63,13 +69,10 @@ export default function Header() {
       .catch(() => {});
   }, [session]);
 
-  // Poll for linked status after clicking connect
   const startPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
-
     let attempts = 0;
-    const MAX = 10; // 10 × 3s = 30s max
-
+    const MAX = 10;
     pollRef.current = setInterval(async () => {
       attempts++;
       try {
@@ -90,7 +93,6 @@ export default function Header() {
     }, 3000);
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -123,22 +125,27 @@ export default function Header() {
         style={{
           background: "#020202",
           borderBottom: "1px solid #0d0d0d",
-          padding: "0 24px",
+          // Use padding not fixed height so it can breathe on mobile
+          padding: isMobile ? "0 12px" : "0 24px",
           height: 52,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
+          // Prevent any child from overflowing
+          overflow: "hidden",
+          gap: isMobile ? 6 : 0,
           ...MONO,
         }}
       >
-        {/* Left — branding */}
+        {/* ── LEFT: branding ── */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 12,
-            minWidth: 160,
+            gap: isMobile ? 6 : 12,
+            // Don't let branding shrink on mobile
+            flexShrink: 0,
           }}
         >
           <div
@@ -166,98 +173,139 @@ export default function Header() {
           <span
             style={{
               color: "#e0e0e0",
-              fontSize: 16,
+              fontSize: isMobile ? 13 : 16,
               fontWeight: 900,
               letterSpacing: ".22em",
               lineHeight: 1,
+              // Hide wordmark on very small screens to save space
+              display: isMobile && publicKey ? "none" : "inline",
             }}
           >
             WRAITH
           </span>
         </div>
 
-        {/* Center — nav */}
-        <nav style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {[].map(({ label, href }: { label: string; href: string }) => (
-            <Link
-              key={label}
-              href={href}
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: ".16em",
-                color: "#272727",
-                textDecoration: "none",
-                padding: "6px 14px",
-                borderRadius: 3,
-                transition: "color .15s, background .15s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = "#888";
-                e.currentTarget.style.background = "#0a0a0a";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = "#272727";
-                e.currentTarget.style.background = "transparent";
-              }}
-            >
-              {label}
-            </Link>
-          ))}
-        </nav>
+        {/* ── CENTER: nav (desktop only) ── */}
+        {!isMobile && (
+          <nav style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {[].map(({ label, href }: { label: string; href: string }) => (
+              <Link
+                key={label}
+                href={href}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: ".16em",
+                  color: "#272727",
+                  textDecoration: "none",
+                  padding: "6px 14px",
+                  borderRadius: 3,
+                  transition: "color .15s, background .15s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = "#888";
+                  e.currentTarget.style.background = "#0a0a0a";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "#272727";
+                  e.currentTarget.style.background = "transparent";
+                }}
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
+        )}
 
-        {/* Right — wallet + user */}
+        {/* ── RIGHT: wallet + user ── */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
-            minWidth: 160,
+            gap: isMobile ? 5 : 8,
+            // Allow this to shrink but not overflow
+            minWidth: 0,
+            flexShrink: 1,
             justifyContent: "flex-end",
           }}
         >
           {connected && publicKey ? (
             <>
+              {/* Tier badge — always show */}
               <TierBadge compact />
 
-              <button
-                onClick={handleCopy}
-                style={{
-                  background: "#080808",
-                  border: "1px solid #181818",
-                  color: copied ? "#00c47a" : "#444",
-                  fontSize: 10,
-                  ...MONO,
-                  padding: "0 12px",
-                  height: 30,
-                  borderRadius: 4,
-                  cursor: "pointer",
-                  letterSpacing: ".05em",
-                  transition: "all .15s",
-                }}
-                onMouseEnter={(e) => {
-                  if (!copied) e.currentTarget.style.color = "#666";
-                }}
-                onMouseLeave={(e) => {
-                  if (!copied) e.currentTarget.style.color = "#444";
-                }}
-              >
-                {copied ? "COPIED" : trimAddress(publicKey.toString())}
-              </button>
+              {/* Wallet address — only on desktop */}
+              {!isMobile && (
+                <button
+                  onClick={handleCopy}
+                  style={{
+                    background: "#080808",
+                    border: "1px solid #181818",
+                    color: copied ? "#00c47a" : "#444",
+                    fontSize: 10,
+                    ...MONO,
+                    padding: "0 12px",
+                    height: 30,
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    letterSpacing: ".05em",
+                    transition: "all .15s",
+                    flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!copied) e.currentTarget.style.color = "#666";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!copied) e.currentTarget.style.color = "#444";
+                  }}
+                >
+                  {copied ? "COPIED" : trimAddress(publicKey.toString())}
+                </button>
+              )}
 
+              {/* On mobile: compact address pill that also copies */}
+              {isMobile && (
+                <button
+                  onClick={handleCopy}
+                  style={{
+                    background: "#080808",
+                    border: "1px solid #181818",
+                    color: copied ? "#00c47a" : "#333",
+                    fontSize: 9,
+                    ...MONO,
+                    padding: "0 8px",
+                    height: 28,
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    letterSpacing: ".04em",
+                    flexShrink: 1,
+                    minWidth: 0,
+                    maxWidth: 90,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {copied ? "✓" : trimAddress(publicKey.toString())}
+                </button>
+              )}
+
+              {/* Disconnect — icon only on mobile */}
               <button
                 onClick={() => disconnect()}
                 style={{
                   background: "transparent",
                   border: "1px solid #181818",
                   color: "#2a2a2a",
-                  fontSize: 10,
+                  fontSize: isMobile ? 12 : 10,
                   ...MONO,
-                  padding: "0 12px",
+                  padding: isMobile ? "0 8px" : "0 12px",
                   height: 30,
                   borderRadius: 4,
                   cursor: "pointer",
                   transition: "all .15s",
+                  flexShrink: 0,
+                  letterSpacing: isMobile ? 0 : ".1em",
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = "#ff444433";
@@ -267,8 +315,9 @@ export default function Header() {
                   e.currentTarget.style.borderColor = "#181818";
                   e.currentTarget.style.color = "#2a2a2a";
                 }}
+                title="Disconnect wallet"
               >
-                DISCONNECT
+                {isMobile ? "✕" : "DISCONNECT"}
               </button>
             </>
           ) : (
@@ -279,16 +328,18 @@ export default function Header() {
                 background: connecting ? "#0a0a0a" : "#e8490f",
                 border: "none",
                 color: connecting ? "#444" : "#fff",
-                fontSize: 11,
+                fontSize: isMobile ? 9 : 11,
                 fontWeight: 700,
                 ...MONO,
-                padding: "0 18px",
+                padding: isMobile ? "0 10px" : "0 18px",
                 height: 30,
                 borderRadius: 4,
                 cursor: connecting ? "not-allowed" : "pointer",
-                letterSpacing: ".1em",
+                letterSpacing: isMobile ? ".06em" : ".1em",
                 boxShadow: connecting ? "none" : "0 0 14px #e8490f33",
                 transition: "all .15s",
+                flexShrink: 0,
+                whiteSpace: "nowrap",
               }}
               onMouseEnter={(e) => {
                 if (!connecting) e.currentTarget.style.background = "#ff5a1f";
@@ -297,7 +348,13 @@ export default function Header() {
                 if (!connecting) e.currentTarget.style.background = "#e8490f";
               }}
             >
-              {connecting ? "CONNECTING..." : "CONNECT WALLET"}
+              {connecting
+                ? isMobile
+                  ? "..."
+                  : "CONNECTING..."
+                : isMobile
+                  ? "CONNECT"
+                  : "CONNECT WALLET"}
             </button>
           )}
 
@@ -308,12 +365,13 @@ export default function Header() {
                 height: 20,
                 background: "#111",
                 margin: "0 2px",
+                flexShrink: 0,
               }}
             />
           )}
 
           {session && (
-            <div style={{ position: "relative" }}>
+            <div style={{ position: "relative", flexShrink: 0 }}>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -323,12 +381,12 @@ export default function Header() {
                   background: "transparent",
                   border: "1px solid #181818",
                   borderRadius: 4,
-                  padding: "0 8px",
+                  padding: isMobile ? "0 6px" : "0 8px",
                   height: 30,
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  gap: 7,
+                  gap: isMobile ? 4 : 7,
                   transition: "border-color .15s",
                 }}
                 onMouseEnter={(e) => {
@@ -369,13 +427,15 @@ export default function Header() {
                   </div>
                 )}
 
-                <span style={{ color: "#333", fontSize: 10, ...MONO }}>
-                  {session.user?.name?.split(" ")[0] ??
-                    session.user?.email?.split("@")[0] ??
-                    "USER"}
-                </span>
+                {/* Name — hide on mobile when wallet connected to save space */}
+                {(!isMobile || !connected) && (
+                  <span style={{ color: "#333", fontSize: 10, ...MONO }}>
+                    {session.user?.name?.split(" ")[0] ??
+                      session.user?.email?.split("@")[0] ??
+                      "USER"}
+                  </span>
+                )}
 
-                {/* Telegram linked indicator dot on avatar button */}
                 {tgLinked && (
                   <div
                     style={{
@@ -455,7 +515,7 @@ export default function Header() {
                     </div>
                   </div>
 
-                  {/* Connect Telegram — tier gated */}
+                  {/* Connect Telegram */}
                   <div
                     style={{ position: "relative" }}
                     onMouseEnter={() => !canUseTelegram && setTgTooltip(true)}
@@ -503,7 +563,6 @@ export default function Header() {
                         }
                       }}
                     >
-                      {/* Telegram icon */}
                       <svg
                         width="12"
                         height="12"
@@ -538,7 +597,6 @@ export default function Header() {
                             : "CONNECT TELEGRAM"}
                       </span>
 
-                      {/* Green dot when linked */}
                       {tgLinked && (
                         <div
                           style={{
@@ -553,7 +611,6 @@ export default function Header() {
                         />
                       )}
 
-                      {/* Lock icon for non-eligible tiers */}
                       {!canUseTelegram && (
                         <svg
                           width="9"
@@ -580,7 +637,6 @@ export default function Header() {
                       )}
                     </button>
 
-                    {/* Tooltip for locked state */}
                     {tgTooltip && !canUseTelegram && (
                       <div
                         style={{

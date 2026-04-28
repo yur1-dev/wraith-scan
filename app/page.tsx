@@ -109,8 +109,6 @@ const DISPLAY_TIERS = Object.fromEntries(
   TIER_ORDER.map((k) => [k, patchTier(k)]),
 ) as typeof TIERS;
 
-// Canvas is larger than the ghost image and centered on it via negative margins
-// so smoke bleeds freely in all directions without any clipping
 function SmokeCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -125,7 +123,6 @@ function SmokeCanvas() {
     canvas.width = CW;
     canvas.height = CH;
 
-    // Perlin noise
     const perm = new Uint8Array(512);
     const p = new Uint8Array(256);
     for (let i = 0; i < 256; i++) p[i] = i;
@@ -317,12 +314,6 @@ export default function AccessPage() {
 
         .brand { animation: flicker 9s ease-in-out infinite; }
 
-        .live-dot {
-          width:5px;height:5px;border-radius:50%;background:#00c47a;
-          display:inline-block;flex-shrink:0;
-          animation:dotpulse 2s ease-in-out infinite;
-        }
-
         .scan-line {
           position:absolute;left:0;right:0;height:1px;
           background:linear-gradient(to right,transparent,#e8490f18,transparent);
@@ -416,15 +407,51 @@ export default function AccessPage() {
           z-index: 2;
         }
 
+        /* Desktop: image on the right */
+        @media(min-width:961px){
+          .ghost-video-col { order: 1; }
+          .hero-text-col { order: 0; }
+        }
+
+        /* Tablet */
         @media(max-width:960px){
           .pricing-grid { grid-template-columns:1fr 1fr !important; }
-          .hero-inner { flex-direction:column !important; }
-          .ghost-video-col { width:100% !important; max-width:320px !important; height:320px !important; margin:0 auto; }
+          .hero-inner { flex-direction:column !important; align-items:center !important; }
+          .ghost-video-col {
+            width:100% !important;
+            max-width:300px !important;
+            height:300px !important;
+            margin:0 auto;
+            order: -1 !important;
+          }
+          .hero-text-col { order: 1 !important; width:100% !important; }
+          .how-it-works-grid { grid-template-columns:1fr 1fr !important; }
         }
+
+        /* Mobile */
         @media(max-width:600px){
           .pricing-grid { grid-template-columns:1fr !important; }
           .mx-hide { display:none; }
-          .ghost-video-col { max-width:260px !important; height:260px !important; }
+          .ghost-video-col {
+            max-width:240px !important;
+            height:240px !important;
+          }
+          .hero-section { padding:48px 20px 40px !important; }
+          .section-pad { padding-left:20px !important; padding-right:20px !important; }
+          .hero-buttons { flex-direction:column !important; }
+          .hero-buttons a, .hero-buttons > * { width:100% !important; justify-content:center !important; }
+          .stats-row { gap:0 !important; }
+          .stats-row > div { padding-left:16px !important; padding-right:16px !important; }
+          .how-it-works-grid { grid-template-columns:1fr !important; }
+          .how-step {
+            border-left:1px solid #141414 !important;
+            border-top:none !important;
+            border-radius:6px !important;
+          }
+          .telegram-grid { grid-template-columns:1fr !important; }
+          .mx-row { grid-template-columns:1fr repeat(4,52px) !important; }
+          .matrix-header { grid-template-columns:1fr repeat(4,52px) !important; }
+          header { padding:0 16px !important; }
         }
       `}</style>
 
@@ -444,7 +471,15 @@ export default function AccessPage() {
           gap: 28,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}
+        >
+          {/* Logo image */}
+          <img
+            src="/wraith.png"
+            alt="WRAITH"
+            style={{ width: 28, height: 28, objectFit: "contain" }}
+          />
           <span
             className="brand"
             style={{
@@ -456,28 +491,9 @@ export default function AccessPage() {
           >
             WRAITH
           </span>
-          <div className="live-dot" />
-          <span
-            style={{
-              color: "#00c47a",
-              fontSize: 8,
-              letterSpacing: ".18em",
-              fontWeight: 700,
-            }}
-          >
-            LIVE
-          </span>
         </div>
         <nav style={{ display: "flex", gap: 28 }}>
-          {/* <a href="#pricing" className="nav-link">
-            PRICING
-          </a>
-          <a href="#features" className="nav-link">
-            FEATURES
-          </a>
-          <a href="#fees" className="nav-link">
-            FEES
-          </a> */}
+          {/* nav links reserved */}
         </nav>
         <div
           style={{
@@ -578,6 +594,7 @@ export default function AccessPage() {
 
       {/* ── HERO ── */}
       <section
+        className="hero-section"
         style={{
           padding: "80px 40px 64px",
           maxWidth: 1080,
@@ -609,7 +626,7 @@ export default function AccessPage() {
           }}
         >
           {/* ── LEFT: text content ── */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="hero-text-col" style={{ flex: 1, minWidth: 0 }}>
             <div className="a1" style={{ marginBottom: 16 }}>
               <span
                 style={{
@@ -652,7 +669,7 @@ export default function AccessPage() {
               instantly.
             </p>
             <div
-              className="a4"
+              className="a4 hero-buttons"
               style={{
                 display: "flex",
                 gap: 10,
@@ -720,7 +737,7 @@ export default function AccessPage() {
               </Link>
             </div>
             <div
-              className="a5"
+              className="a5 stats-row"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -776,6 +793,7 @@ export default function AccessPage() {
           </div>
 
           {/* ── RIGHT: ghost image with smoke ── */}
+          {/* NOTE: on mobile this renders first (order:-1), on desktop it's on the right (order:1) */}
           <div
             className="ghost-video-col a2"
             style={{
@@ -801,13 +819,13 @@ export default function AccessPage() {
           </div>
         </div>
       </section>
+
       {/* ── TELEGRAM ALERTS ── */}
-      {/* Paste this section between the FEATURE MATRIX section and the FEES section */}
       <section
+        className="section-pad"
         style={{ borderTop: "1px solid #111", padding: "72px 40px 80px" }}
       >
         <div style={{ maxWidth: 960, margin: "0 auto" }}>
-          {/* Header */}
           <div style={{ marginBottom: 52 }}>
             <div
               style={{
@@ -846,6 +864,7 @@ export default function AccessPage() {
           </div>
 
           <div
+            className="telegram-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
@@ -898,11 +917,9 @@ export default function AccessPage() {
                   style={{
                     display: "flex",
                     gap: 16,
-                    marginBottom: i < 3 ? 0 : 0,
                     position: "relative",
                   }}
                 >
-                  {/* connector line */}
                   {i < 3 && (
                     <div
                       style={{
@@ -915,8 +932,6 @@ export default function AccessPage() {
                       }}
                     />
                   )}
-
-                  {/* step number circle */}
                   <div
                     style={{
                       width: 34,
@@ -937,7 +952,6 @@ export default function AccessPage() {
                   >
                     {s.n}
                   </div>
-
                   <div style={{ paddingBottom: 28 }}>
                     <div
                       style={{
@@ -959,7 +973,6 @@ export default function AccessPage() {
                 </div>
               ))}
 
-              {/* tier badge */}
               <div
                 style={{
                   display: "inline-flex",
@@ -1009,7 +1022,6 @@ export default function AccessPage() {
                 EXAMPLE ALERTS
               </div>
 
-              {/* Phone mock */}
               <div
                 style={{
                   background: "#0a0a0a",
@@ -1018,7 +1030,6 @@ export default function AccessPage() {
                   overflow: "hidden",
                 }}
               >
-                {/* Telegram header bar */}
                 <div
                   style={{
                     padding: "12px 16px",
@@ -1093,7 +1104,6 @@ export default function AccessPage() {
                   </div>
                 </div>
 
-                {/* Entry signal */}
                 <div
                   style={{
                     padding: "14px 16px",
@@ -1165,7 +1175,6 @@ export default function AccessPage() {
                   </div>
                 </div>
 
-                {/* Win alert */}
                 <div style={{ padding: "14px 16px" }}>
                   <div
                     style={{
@@ -1223,7 +1232,6 @@ export default function AccessPage() {
                 </div>
               </div>
 
-              {/* commands hint */}
               <div
                 style={{
                   marginTop: 14,
@@ -1275,6 +1283,7 @@ export default function AccessPage() {
       {/* ── PRICING CARDS ── */}
       <section
         id="pricing"
+        className="section-pad"
         style={{ borderTop: "1px solid #111", padding: "72px 40px 80px" }}
       >
         <div style={{ maxWidth: 1080, margin: "0 auto" }}>
@@ -1377,7 +1386,6 @@ export default function AccessPage() {
                       </div>
                     )}
 
-                    {/* ── GHOST ICON + TIER NAME (replaces old glyph) ── */}
                     <div
                       style={{
                         display: "flex",
@@ -1555,6 +1563,7 @@ export default function AccessPage() {
       {/* ── FEATURE MATRIX ── */}
       <section
         id="features"
+        className="section-pad"
         style={{ borderTop: "1px solid #111", padding: "72px 40px 80px" }}
       >
         <div style={{ maxWidth: 960, margin: "0 auto" }}>
@@ -1583,6 +1592,7 @@ export default function AccessPage() {
           </div>
 
           <div
+            className="matrix-header"
             style={{
               display: "grid",
               gridTemplateColumns: "1fr repeat(4,80px)",
@@ -1681,6 +1691,7 @@ export default function AccessPage() {
       {/* ── FEES ── */}
       <section
         id="fees"
+        className="section-pad"
         style={{ borderTop: "1px solid #111", padding: "72px 40px 80px" }}
       >
         <div style={{ maxWidth: 600, margin: "0 auto" }}>
@@ -1861,6 +1872,7 @@ export default function AccessPage() {
 
       {/* ── HOW IT WORKS ── */}
       <section
+        className="section-pad"
         style={{ borderTop: "1px solid #111", padding: "72px 40px 80px" }}
       >
         <div style={{ maxWidth: 960, margin: "0 auto" }}>
@@ -1888,6 +1900,7 @@ export default function AccessPage() {
             </h2>
           </div>
           <div
+            className="how-it-works-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(4,1fr)",
@@ -1922,6 +1935,7 @@ export default function AccessPage() {
             ].map((s, i) => (
               <div
                 key={s.n}
+                className="how-step"
                 style={{
                   padding: "28px 22px",
                   background: "#0a0a0a",
@@ -1976,6 +1990,7 @@ export default function AccessPage() {
 
       {/* ── FOOTER CTA ── */}
       <section
+        className="section-pad"
         style={{
           borderTop: "1px solid #111",
           padding: "80px 40px",

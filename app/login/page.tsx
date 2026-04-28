@@ -147,21 +147,18 @@ export default function LoginPage() {
     <div
       style={{
         height: "100vh",
-        maxHeight: "100vh",
         overflow: "hidden",
         background: "#080808",
-        display: "flex",
-        flexDirection: "row",
         ...MONO,
       }}
     >
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { overflow: hidden !important; height: 100%; }
 
         @keyframes dotpulse { 0%,100%{box-shadow:0 0 4px #00c47a55} 50%{box-shadow:0 0 12px #00c47a} }
         @keyframes scan { 0%{top:-1px;opacity:0} 5%{opacity:1} 95%{opacity:1} 100%{top:100%;opacity:0} }
         @keyframes flicker { 0%,89%,91%,93%,100%{opacity:1} 90%,92%{opacity:.65} }
+        @keyframes fadein { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
 
         .brand { animation: flicker 9s ease-in-out infinite; }
         .live-dot {
@@ -225,570 +222,626 @@ export default function LoginPage() {
           padding:8px 0;border-bottom:1px solid #0f0f0f;flex-shrink:0;
         }
         .step-row:last-child { border-bottom:none; }
+
+        /* ── LAYOUT ── */
+        .login-layout {
+          display: flex;
+          flex-direction: row;
+          height: 100vh;
+          overflow: hidden;
+        }
+        .login-left {
+          width: 52%;
+          border-right: 1px solid #111;
+          display: flex;
+          flex-direction: column;
+          padding: 24px 28px 20px;
+          position: relative;
+          height: 100vh;
+          overflow: hidden;
+        }
+        .login-right {
+          width: 48%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+          padding: 48px 48px;
+          height: 100vh;
+          overflow: hidden;
+        }
+
+        /* Mobile: hide left panel entirely, right panel fills full screen */
+        @media (max-width: 768px) {
+          .login-layout {
+            height: 100vh;
+            overflow: hidden;
+          }
+          .login-left {
+            display: none;
+          }
+          .login-right {
+            width: 100%;
+            padding: 0 24px;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+          }
+          .login-right-inner {
+            width: 100% !important;
+            max-width: 400px !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .login-right { padding: 0 20px; }
+        }
       `}</style>
 
-      {/* ── LEFT — Tier cards ── */}
-      <div
-        style={{
-          width: "52%",
-          height: "100vh",
-          overflow: "hidden",
-          borderRight: "1px solid #111",
-          background: "#080808",
-          position: "relative",
-          display: "flex",
-          flexDirection: "column",
-          padding: "20px 24px 14px",
-        }}
-      >
-        <div className="scan-line" />
-        <div
-          style={{
-            position: "absolute",
-            bottom: -100,
-            left: -80,
-            width: 400,
-            height: 400,
-            borderRadius: "50%",
-            background: "radial-gradient(circle,#e8490f07 0%,transparent 65%)",
-            pointerEvents: "none",
-          }}
-        />
-
-        {/* Wordmark */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 10,
-            flexShrink: 0,
-          }}
-        >
-          <span
-            className="brand"
+      <div className="login-layout">
+        {/* ── LEFT — Tier cards ── */}
+        <div className="login-left">
+          <div className="scan-line" />
+          <div
             style={{
-              color: "#e8490f",
-              fontSize: 11,
-              fontWeight: 900,
-              letterSpacing: ".34em",
+              position: "absolute",
+              bottom: -100,
+              left: -80,
+              width: 400,
+              height: 400,
+              borderRadius: "50%",
+              background:
+                "radial-gradient(circle,#e8490f07 0%,transparent 65%)",
+              pointerEvents: "none",
             }}
-          >
-            WRAITH
-          </span>
-          <div className="live-dot" />
-          <span
-            style={{
-              color: "#00c47a",
-              fontSize: 8,
-              letterSpacing: ".18em",
-              fontWeight: 700,
-            }}
-          >
-            LIVE
-          </span>
-        </div>
+          />
 
-        {/* Headline */}
-        <div style={{ marginBottom: 12, flexShrink: 0 }}>
-          <h2
-            style={{
-              color: "#eaeaea",
-              fontSize: 17,
-              fontWeight: 900,
-              letterSpacing: ".02em",
-              lineHeight: 1.25,
-              marginBottom: 3,
-            }}
-          >
-            HOLD WRAITH. <span style={{ color: "#e8490f" }}>UNLOCK</span> THE
-            MACHINE.
-          </h2>
-          <p style={{ color: "#444", fontSize: 10, lineHeight: 1.5 }}>
-            Four token-gated tiers. Balance auto-detected on wallet connect.
-          </p>
-        </div>
-
-        {/* Cards stacked vertically, fill remaining space */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-            flex: 1,
-            minHeight: 0,
-          }}
-        >
-          {TIER_ORDER.map((key) => {
-            const t = DISPLAY_TIERS[key];
-            const tc = TIER_ACCENT[key];
-            const isActive = activeTier === key;
-            const lit = isActive || hovered === key;
-            const isRecommended = key === "SPECTER";
-
-            return (
-              <div
-                key={key}
-                className={`pc${lit ? " pc-lit" : ""}${isRecommended && !lit ? " pc-recommended" : ""}`}
-                style={
-                  {
-                    "--tc": tc,
-                    "--tc-glow": `${tc}44`,
-                    "--tc-soft": `${tc}0e`,
-                  } as React.CSSProperties
-                }
-                onMouseEnter={() => setHovered(key)}
-                onMouseLeave={() => setHovered(null)}
-              >
-                <div className="pc-bar" />
-                <div className="pc-ambient" />
-
-                <div
-                  style={{
-                    padding: "8px 12px",
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 12,
-                    flex: 1,
-                    minHeight: 0,
-                    position: "relative",
-                  }}
-                >
-                  {/* Badge */}
-                  {(isRecommended || isActive) && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 6,
-                        right: 8,
-                        fontSize: 7,
-                        fontWeight: 900,
-                        letterSpacing: ".1em",
-                        color: isActive ? tc : "#a855f7",
-                        background: isActive ? `${tc}18` : "#a855f714",
-                        border: `1px solid ${isActive ? tc + "44" : "#a855f740"}`,
-                        padding: "2px 6px",
-                        borderRadius: 2,
-                      }}
-                    >
-                      {isActive ? "YOUR TIER" : "POPULAR"}
-                    </div>
-                  )}
-
-                  {/* Ghost icon */}
-                  <GhostIcon tier={key} lit={lit} />
-
-                  {/* Name + subtitle */}
-                  <div style={{ flexShrink: 0, minWidth: 90 }}>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 900,
-                        letterSpacing: ".14em",
-                        color: lit ? tc : "#c0c0c0",
-                        transition: "color .2s",
-                      }}
-                    >
-                      {key}
-                    </div>
-                    <div style={{ fontSize: 8, color: "#444", marginTop: 1 }}>
-                      {TIER_SUBTITLE[key]}
-                    </div>
-                  </div>
-
-                  {/* Divider */}
-                  <div
-                    style={{
-                      width: 1,
-                      height: 24,
-                      background: "#1e1e1e",
-                      flexShrink: 0,
-                    }}
-                  />
-
-                  {/* Fee */}
-                  <div style={{ flexShrink: 0, minWidth: 70 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 3,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 20,
-                          fontWeight: 900,
-                          letterSpacing: "-.02em",
-                          lineHeight: 1,
-                          color:
-                            t.feeBps === 0 ? "#00c47a" : lit ? tc : "#e0e0e0",
-                          transition: "color .2s",
-                        }}
-                      >
-                        {t.feeBps === 0
-                          ? "0%"
-                          : `${(t.feeBps / 100).toFixed(1)}%`}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 8,
-                          color: "#444",
-                          letterSpacing: ".06em",
-                        }}
-                      >
-                        /trade
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 8, color: "#555", marginTop: 1 }}>
-                      {TIER_PITCH[key]}
-                    </div>
-                  </div>
-
-                  {/* Divider */}
-                  <div
-                    style={{
-                      width: 1,
-                      height: 24,
-                      background: "#1e1e1e",
-                      flexShrink: 0,
-                    }}
-                  />
-
-                  {/* Features inline */}
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap" as const,
-                      gap: "2px 8px",
-                      flex: 1,
-                      minWidth: 0,
-                      alignContent: "center",
-                    }}
-                  >
-                    {ALL_FEATURES.map((f) => {
-                      const has =
-                        t.features.find((x) => x.id === f.id)?.unlocked ??
-                        false;
-                      return (
-                        <div
-                          key={f.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 3,
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 9,
-                              color: has ? (lit ? tc : "#00c47a") : "#252525",
-                              fontWeight: 900,
-                            }}
-                          >
-                            {has ? "✓" : "—"}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 8,
-                              color: has ? "#888" : "#2a2a2a",
-                              textDecoration: has ? "none" : "line-through",
-                              whiteSpace: "nowrap" as const,
-                            }}
-                          >
-                            {f.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Buy CTA */}
-        <div
-          style={{
-            marginTop: 10,
-            paddingTop: 10,
-            borderTop: "1px solid #111",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexShrink: 0,
-          }}
-        >
-          <span
-            style={{ color: "#2a2a2a", fontSize: 9, letterSpacing: ".1em" }}
-          >
-            UPGRADE ON PUMP.FUN
-          </span>
-          <a
-            href="https://pump.fun"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              color: "#e8490f",
-              fontSize: 9,
-              fontWeight: 700,
-              letterSpacing: ".12em",
-              textDecoration: "none",
-              border: `1px solid ${buyHovered ? "#e8490f55" : "#e8490f28"}`,
-              background: buyHovered ? "#e8490f12" : "transparent",
-              padding: "5px 10px",
-              borderRadius: 3,
-              transition: "all .15s",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              ...MONO,
-            }}
-            onMouseEnter={() => setBuyHovered(true)}
-            onMouseLeave={() => setBuyHovered(false)}
-          >
-            BUY WRAITH <span style={{ opacity: 0.5 }}>↗</span>
-          </a>
-        </div>
-      </div>
-
-      {/* ── RIGHT — Sign in panel ── */}
-      <div
-        style={{
-          width: "48%",
-          height: "100vh",
-          overflow: "hidden",
-          background: "#080808",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          position: "relative",
-          padding: "0 48px",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: -80,
-            right: -80,
-            width: 320,
-            height: 320,
-            borderRadius: "50%",
-            background: "radial-gradient(circle,#e8490f0a 0%,transparent 70%)",
-            pointerEvents: "none",
-          }}
-        />
-
-        <div style={{ width: "100%", maxWidth: 360 }}>
-          {/* Mini brand */}
-          <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
-            <div
-              style={{
-                color: "#e8490f",
-                fontSize: 10,
-                fontWeight: 900,
-                letterSpacing: ".36em",
-                marginBottom: 5,
-              }}
-            >
-              WRAITH
-            </div>
-            <div style={{ color: "#222", fontSize: 8, letterSpacing: ".22em" }}>
-              MEME TOKEN SNIPER · SOLANA
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 20 }}>
-            <h1
-              style={{
-                color: "#e8e8e8",
-                fontSize: 20,
-                fontWeight: 900,
-                letterSpacing: ".04em",
-                lineHeight: 1.2,
-                marginBottom: 8,
-              }}
-            >
-              SIGN IN TO ACCESS
-            </h1>
-            <p style={{ color: "#525252", fontSize: 11, lineHeight: 1.8 }}>
-              Connect your Google account, then link your Solana wallet — your
-              WRAITH balance auto-detects your tier instantly.
-            </p>
-          </div>
-
-          {errorMsg && (
-            <div
-              style={{
-                background: "#120500",
-                border: "1px solid #e8490f30",
-                borderRadius: 4,
-                padding: "10px 14px",
-                color: "#ff6b35",
-                fontSize: 10,
-                lineHeight: 1.7,
-                marginBottom: 16,
-              }}
-            >
-              {errorMsg}
-            </div>
-          )}
-
+          {/* Wordmark */}
           <div
             style={{
               display: "flex",
               alignItems: "center",
               gap: 10,
-              marginBottom: 10,
+              marginBottom: 14,
+              flexShrink: 0,
             }}
           >
-            <div
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 3,
-                border: "1px solid #e8490f33",
-                background: "#e8490f10",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                color: "#e8490f",
-                fontSize: 8,
-                fontWeight: 900,
-                letterSpacing: ".06em",
-              }}
-            >
-              01
-            </div>
+            <img
+              src="/wraith.png"
+              alt="WRAITH"
+              style={{ width: 26, height: 26, objectFit: "contain" }}
+            />
             <span
+              className="brand"
               style={{
-                color: "#c0c0c0",
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: ".1em",
+                color: "#e8490f",
+                fontSize: 11,
+                fontWeight: 900,
+                letterSpacing: ".34em",
               }}
             >
-              SIGN IN WITH GOOGLE
+              WRAITH
             </span>
           </div>
 
-          <button
-            className="sign-btn"
-            onClick={async () => {
-              setLoading(true);
-              await signIn("google", { callbackUrl: "/app" });
-              setLoading(false);
-            }}
-            disabled={loading}
-          >
-            {loading ? (
-              "REDIRECTING..."
-            ) : (
-              <>
-                <GoogleIcon />
-                CONTINUE WITH GOOGLE
-              </>
-            )}
-          </button>
+          {/* Headline */}
+          <div style={{ marginBottom: 14, flexShrink: 0 }}>
+            <h2
+              style={{
+                color: "#eaeaea",
+                fontSize: 17,
+                fontWeight: 900,
+                letterSpacing: ".02em",
+                lineHeight: 1.25,
+                marginBottom: 4,
+              }}
+            >
+              HOLD WRAITH. <span style={{ color: "#e8490f" }}>UNLOCK</span> THE
+              MACHINE.
+            </h2>
+            <p style={{ color: "#444", fontSize: 10, lineHeight: 1.6 }}>
+              Four token-gated tiers. Balance auto-detected on wallet connect.
+            </p>
+          </div>
 
+          {/* Cards */}
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              gap: 14,
-              margin: "18px 0",
+              flexDirection: "column",
+              gap: 6,
+              flex: 1,
+              minHeight: 0,
             }}
           >
-            <div style={{ flex: 1, height: 1, background: "#111" }} />
-            <span
-              style={{ color: "#242424", fontSize: 8, letterSpacing: ".24em" }}
-            >
-              THEN
-            </span>
-            <div style={{ flex: 1, height: 1, background: "#111" }} />
-          </div>
+            {TIER_ORDER.map((key) => {
+              const t = DISPLAY_TIERS[key];
+              const tc = TIER_ACCENT[key];
+              const isActive = activeTier === key;
+              const lit = isActive || hovered === key;
+              const isRecommended = key === "SPECTER";
 
-          <div style={{ marginBottom: 20 }}>
-            {[
-              {
-                n: "02",
-                title: "CONNECT WALLET",
-                desc: "Link the Solana wallet holding your WRAITH tokens.",
-                color: "#a855f7",
-              },
-              {
-                n: "03",
-                title: "TIER AUTO-DETECTED",
-                desc: "Features and fee discounts activate in real time.",
-                color: "#00b4d8",
-              },
-              {
-                n: "04",
-                title: "START SNIPING",
-                desc: "Scanner, AI signals, sniper — all tier-gated.",
-                color: "#00c47a",
-              },
-            ].map((s) => (
-              <div key={s.n} className="step-row">
+              return (
                 <div
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 3,
-                    border: `1px solid ${s.color}33`,
-                    background: `${s.color}10`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    color: s.color,
-                    fontSize: 8,
-                    fontWeight: 900,
-                    letterSpacing: ".06em",
-                  }}
+                  key={key}
+                  className={`pc${lit ? " pc-lit" : ""}${isRecommended && !lit ? " pc-recommended" : ""}`}
+                  style={
+                    {
+                      "--tc": tc,
+                      "--tc-glow": `${tc}44`,
+                      "--tc-soft": `${tc}0e`,
+                    } as React.CSSProperties
+                  }
+                  onMouseEnter={() => setHovered(key)}
+                  onMouseLeave={() => setHovered(null)}
                 >
-                  {s.n}
-                </div>
-                <div>
+                  <div className="pc-bar" />
+                  <div className="pc-ambient" />
+
                   <div
+                    className="tier-card-inner"
                     style={{
-                      color: "#c0c0c0",
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: ".1em",
-                      marginBottom: 3,
+                      padding: "10px 14px",
+                      display: "flex",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                      position: "relative",
+                      flex: 1,
+                      minHeight: 0,
                     }}
                   >
-                    {s.title}
-                  </div>
-                  <div
-                    style={{ color: "#4a4a4a", fontSize: 10, lineHeight: 1.7 }}
-                  >
-                    {s.desc}
+                    {/* Badge */}
+                    {(isRecommended || isActive) && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          right: 8,
+                          fontSize: 7,
+                          fontWeight: 900,
+                          letterSpacing: ".1em",
+                          color: isActive ? tc : "#a855f7",
+                          background: isActive ? `${tc}18` : "#a855f714",
+                          border: `1px solid ${isActive ? tc + "44" : "#a855f740"}`,
+                          padding: "2px 6px",
+                          borderRadius: 2,
+                        }}
+                      >
+                        {isActive ? "YOUR TIER" : "POPULAR"}
+                      </div>
+                    )}
+
+                    <GhostIcon tier={key} lit={lit} />
+
+                    {/* Name + subtitle */}
+                    <div style={{ flexShrink: 0, minWidth: 90 }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 900,
+                          letterSpacing: ".14em",
+                          color: lit ? tc : "#c0c0c0",
+                          transition: "color .2s",
+                        }}
+                      >
+                        {key}
+                      </div>
+                      <div style={{ fontSize: 8, color: "#444", marginTop: 1 }}>
+                        {TIER_SUBTITLE[key]}
+                      </div>
+                    </div>
+
+                    <div
+                      className="tier-card-divider"
+                      style={{
+                        width: 1,
+                        height: 24,
+                        background: "#1e1e1e",
+                        flexShrink: 0,
+                      }}
+                    />
+
+                    {/* Fee */}
+                    <div style={{ flexShrink: 0, minWidth: 70 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: 3,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 20,
+                            fontWeight: 900,
+                            letterSpacing: "-.02em",
+                            lineHeight: 1,
+                            color:
+                              t.feeBps === 0 ? "#00c47a" : lit ? tc : "#e0e0e0",
+                            transition: "color .2s",
+                          }}
+                        >
+                          {t.feeBps === 0
+                            ? "0%"
+                            : `${(t.feeBps / 100).toFixed(1)}%`}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 8,
+                            color: "#444",
+                            letterSpacing: ".06em",
+                          }}
+                        >
+                          /trade
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 8, color: "#555", marginTop: 1 }}>
+                        {TIER_PITCH[key]}
+                      </div>
+                    </div>
+
+                    <div
+                      className="tier-card-divider"
+                      style={{
+                        width: 1,
+                        height: 24,
+                        background: "#1e1e1e",
+                        flexShrink: 0,
+                      }}
+                    />
+
+                    {/* Features inline */}
+                    <div
+                      className="tier-features-wrap"
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap" as const,
+                        gap: "2px 8px",
+                        flex: 1,
+                        minWidth: 0,
+                        alignContent: "center",
+                      }}
+                    >
+                      {ALL_FEATURES.map((f) => {
+                        const has =
+                          t.features.find((x) => x.id === f.id)?.unlocked ??
+                          false;
+                        return (
+                          <div
+                            key={f.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 3,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 9,
+                                color: has ? (lit ? tc : "#00c47a") : "#252525",
+                                fontWeight: 900,
+                              }}
+                            >
+                              {has ? "✓" : "—"}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 8,
+                                color: has ? "#888" : "#2a2a2a",
+                                textDecoration: has ? "none" : "line-through",
+                                whiteSpace: "nowrap" as const,
+                              }}
+                            >
+                              {f.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
+          {/* Buy CTA */}
           <div
             style={{
-              paddingTop: 14,
-              borderTop: "1px solid #0e0e0e",
-              color: "#1e1e1e",
-              fontSize: 8,
-              letterSpacing: ".16em",
-              lineHeight: 2.2,
-              textAlign: "center" as const,
+              marginTop: 12,
+              paddingTop: 12,
+              borderTop: "1px solid #111",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexShrink: 0,
             }}
           >
-            DATA SYNCS ACROSS DEVICES · NOTHING STORED IN BROWSER
-            <br />
-            WRAITH © {new Date().getFullYear()} · NOT FINANCIAL ADVICE
+            <span
+              style={{ color: "#2a2a2a", fontSize: 9, letterSpacing: ".1em" }}
+            >
+              UPGRADE ON PUMP.FUN
+            </span>
+            <a
+              href="https://pump.fun"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: "#e8490f",
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: ".12em",
+                textDecoration: "none",
+                border: `1px solid ${buyHovered ? "#e8490f55" : "#e8490f28"}`,
+                background: buyHovered ? "#e8490f12" : "transparent",
+                padding: "5px 10px",
+                borderRadius: 3,
+                transition: "all .15s",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                ...MONO,
+              }}
+              onMouseEnter={() => setBuyHovered(true)}
+              onMouseLeave={() => setBuyHovered(false)}
+            >
+              BUY WRAITH <span style={{ opacity: 0.5 }}>↗</span>
+            </a>
+          </div>
+        </div>
+
+        {/* ── RIGHT — Sign in panel ── */}
+        <div className="login-right">
+          <div
+            style={{
+              position: "absolute",
+              top: -80,
+              right: -80,
+              width: 320,
+              height: 320,
+              borderRadius: "50%",
+              background:
+                "radial-gradient(circle,#e8490f0a 0%,transparent 70%)",
+              pointerEvents: "none",
+            }}
+          />
+
+          <div
+            className="login-right-inner"
+            style={{ width: "100%", maxWidth: 360 }}
+          >
+            {/* Mini brand */}
+            <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  marginBottom: 6,
+                }}
+              >
+                <img
+                  src="/wraith.png"
+                  alt="WRAITH"
+                  style={{ width: 22, height: 22, objectFit: "contain" }}
+                />
+                <div
+                  style={{
+                    color: "#e8490f",
+                    fontSize: 10,
+                    fontWeight: 900,
+                    letterSpacing: ".36em",
+                  }}
+                >
+                  WRAITH
+                </div>
+              </div>
+              <div
+                style={{ color: "#222", fontSize: 8, letterSpacing: ".22em" }}
+              >
+                MEME TOKEN SNIPER · SOLANA
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <h1
+                style={{
+                  color: "#e8e8e8",
+                  fontSize: 20,
+                  fontWeight: 900,
+                  letterSpacing: ".04em",
+                  lineHeight: 1.2,
+                  marginBottom: 8,
+                }}
+              >
+                SIGN IN TO ACCESS
+              </h1>
+              <p style={{ color: "#525252", fontSize: 11, lineHeight: 1.8 }}>
+                Connect your Google account, then link your Solana wallet — your
+                WRAITH balance auto-detects your tier instantly.
+              </p>
+            </div>
+
+            {errorMsg && (
+              <div
+                style={{
+                  background: "#120500",
+                  border: "1px solid #e8490f30",
+                  borderRadius: 4,
+                  padding: "10px 14px",
+                  color: "#ff6b35",
+                  fontSize: 10,
+                  lineHeight: 1.7,
+                  marginBottom: 16,
+                }}
+              >
+                {errorMsg}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 10,
+              }}
+            >
+              <div
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 3,
+                  border: "1px solid #e8490f33",
+                  background: "#e8490f10",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  color: "#e8490f",
+                  fontSize: 8,
+                  fontWeight: 900,
+                  letterSpacing: ".06em",
+                }}
+              >
+                01
+              </div>
+              <span
+                style={{
+                  color: "#c0c0c0",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: ".1em",
+                }}
+              >
+                SIGN IN WITH GOOGLE
+              </span>
+            </div>
+
+            <button
+              className="sign-btn"
+              onClick={async () => {
+                setLoading(true);
+                await signIn("google", { callbackUrl: "/app" });
+                setLoading(false);
+              }}
+              disabled={loading}
+            >
+              {loading ? (
+                "REDIRECTING..."
+              ) : (
+                <>
+                  <GoogleIcon />
+                  CONTINUE WITH GOOGLE
+                </>
+              )}
+            </button>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                margin: "18px 0",
+              }}
+            >
+              <div style={{ flex: 1, height: 1, background: "#111" }} />
+              <span
+                style={{
+                  color: "#242424",
+                  fontSize: 8,
+                  letterSpacing: ".24em",
+                }}
+              >
+                THEN
+              </span>
+              <div style={{ flex: 1, height: 1, background: "#111" }} />
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              {[
+                {
+                  n: "02",
+                  title: "CONNECT WALLET",
+                  desc: "Link the Solana wallet holding your WRAITH tokens.",
+                  color: "#a855f7",
+                },
+                {
+                  n: "03",
+                  title: "TIER AUTO-DETECTED",
+                  desc: "Features and fee discounts activate in real time.",
+                  color: "#00b4d8",
+                },
+                {
+                  n: "04",
+                  title: "START SNIPING",
+                  desc: "Scanner, AI signals, sniper — all tier-gated.",
+                  color: "#00c47a",
+                },
+              ].map((s) => (
+                <div key={s.n} className="step-row">
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 3,
+                      border: `1px solid ${s.color}33`,
+                      background: `${s.color}10`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      color: s.color,
+                      fontSize: 8,
+                      fontWeight: 900,
+                      letterSpacing: ".06em",
+                    }}
+                  >
+                    {s.n}
+                  </div>
+                  <div>
+                    <div
+                      style={{
+                        color: "#c0c0c0",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: ".1em",
+                        marginBottom: 3,
+                      }}
+                    >
+                      {s.title}
+                    </div>
+                    <div
+                      style={{
+                        color: "#4a4a4a",
+                        fontSize: 10,
+                        lineHeight: 1.7,
+                      }}
+                    >
+                      {s.desc}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div
+              style={{
+                paddingTop: 14,
+                borderTop: "1px solid #0e0e0e",
+                color: "#1e1e1e",
+                fontSize: 8,
+                letterSpacing: ".16em",
+                lineHeight: 2.2,
+                textAlign: "center" as const,
+              }}
+            >
+              DATA SYNCS ACROSS DEVICES · NOTHING STORED IN BROWSER
+              <br />
+              WRAITH © {new Date().getFullYear()} · NOT FINANCIAL ADVICE
+            </div>
           </div>
         </div>
       </div>

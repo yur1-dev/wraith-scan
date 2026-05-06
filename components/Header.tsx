@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSession, signOut } from "next-auth/react";
 import Image from "next/image";
@@ -29,10 +30,17 @@ export default function Header() {
   const [tgLinked, setTgLinked] = useState(false);
   const [tgTooltip, setTgTooltip] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
+  const [mounted, setMounted] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const profileBtnRef = useRef<HTMLButtonElement>(null);
 
   const canUseTelegram = TELEGRAM_TIERS.includes(tier?.key ?? "");
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -52,11 +60,22 @@ export default function Header() {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  // Close menu on outside click
   useEffect(() => {
     if (!userMenuOpen) return;
-    const handler = () => setUserMenuOpen(false);
-    window.addEventListener("click", handler);
-    return () => window.removeEventListener("click", handler);
+    const handler = (e: MouseEvent) => {
+      // Don't close if clicking inside the menu (portal)
+      const menu = document.getElementById("wraith-user-menu");
+      if (menu && menu.contains(e.target as Node)) return;
+      if (
+        profileBtnRef.current &&
+        profileBtnRef.current.contains(e.target as Node)
+      )
+        return;
+      setUserMenuOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
   }, [userMenuOpen]);
 
   useEffect(() => {
@@ -117,6 +136,259 @@ export default function Header() {
     }
   };
 
+  const handleProfileClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!userMenuOpen && profileBtnRef.current) {
+      const rect = profileBtnRef.current.getBoundingClientRect();
+      setMenuPos({
+        top: rect.bottom + 8,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setUserMenuOpen((v) => !v);
+  };
+
+  const userMenu =
+    mounted && userMenuOpen && session
+      ? createPortal(
+          <div
+            id="wraith-user-menu"
+            style={{
+              position: "fixed",
+              top: menuPos.top,
+              right: menuPos.right,
+              background: "#060606",
+              border: "1px solid #111",
+              borderRadius: 5,
+              minWidth: 200,
+              zIndex: 99999,
+              overflow: "hidden",
+              boxShadow: "0 8px 32px #000000cc",
+              ...MONO,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* User info */}
+            <div
+              style={{
+                padding: "10px 14px",
+                borderBottom: "1px solid #0d0d0d",
+              }}
+            >
+              <div
+                style={{
+                  color: "#555",
+                  fontSize: 9,
+                  ...MONO,
+                  marginBottom: 3,
+                }}
+              >
+                SIGNED IN AS
+              </div>
+              <div
+                style={{
+                  color: "#888",
+                  fontSize: 10,
+                  ...MONO,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: 172,
+                }}
+              >
+                {session.user?.email ?? "—"}
+              </div>
+            </div>
+
+            {/* Connect Telegram */}
+            <div
+              style={{ position: "relative" }}
+              onMouseEnter={() => !canUseTelegram && setTgTooltip(true)}
+              onMouseLeave={() => setTgTooltip(false)}
+            >
+              <button
+                onClick={
+                  canUseTelegram && !tgLinked
+                    ? handleConnectTelegram
+                    : undefined
+                }
+                disabled={tgLinking}
+                style={{
+                  width: "100%",
+                  background: tgLinked ? "#001a0d" : "transparent",
+                  border: "none",
+                  borderBottom: "1px solid #0d0d0d",
+                  color: tgLinked
+                    ? "#00c47a"
+                    : canUseTelegram
+                      ? "#2b9fd4"
+                      : "#2a2a2a",
+                  fontSize: 10,
+                  ...MONO,
+                  padding: "10px 14px",
+                  cursor: tgLinked || !canUseTelegram ? "default" : "pointer",
+                  textAlign: "left",
+                  letterSpacing: ".06em",
+                  transition: "background .15s, color .15s",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+                onMouseEnter={(e) => {
+                  if (canUseTelegram && !tgLinked) {
+                    e.currentTarget.style.background = "#0a1520";
+                    e.currentTarget.style.color = "#3ab8f0";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (canUseTelegram && !tgLinked) {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.color = "#2b9fd4";
+                  }
+                }}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  style={{
+                    flexShrink: 0,
+                    opacity: canUseTelegram ? 1 : 0.3,
+                  }}
+                >
+                  <path
+                    d="M22 2L11 13"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M22 2L15 22L11 13L2 9L22 2Z"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+
+                <span>
+                  {tgLinking
+                    ? "OPENING..."
+                    : tgLinked
+                      ? "TELEGRAM LINKED"
+                      : "CONNECT TELEGRAM"}
+                </span>
+
+                {tgLinked && (
+                  <div
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "#00c47a",
+                      boxShadow: "0 0 6px #00c47a88",
+                      marginLeft: "auto",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+
+                {!canUseTelegram && (
+                  <svg
+                    width="9"
+                    height="9"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    style={{ marginLeft: "auto", opacity: 0.4 }}
+                  >
+                    <rect
+                      x="3"
+                      y="11"
+                      width="18"
+                      height="11"
+                      rx="2"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M7 11V7C7 4.24 9.24 2 12 2C14.76 2 17 4.24 17 7V11"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                )}
+              </button>
+
+              {tgTooltip && !canUseTelegram && (
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: "calc(100% + 6px)",
+                    left: 14,
+                    background: "#0a0a0a",
+                    border: "1px solid #1a1a1a",
+                    borderRadius: 4,
+                    padding: "6px 10px",
+                    fontSize: 9,
+                    color: "#e8490f",
+                    ...MONO,
+                    whiteSpace: "nowrap",
+                    zIndex: 300,
+                    letterSpacing: ".05em",
+                    pointerEvents: "none",
+                  }}
+                >
+                  SPECTER TIER REQUIRED
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: -4,
+                      left: 12,
+                      width: 7,
+                      height: 7,
+                      background: "#0a0a0a",
+                      border: "1px solid #1a1a1a",
+                      borderTop: "none",
+                      borderLeft: "none",
+                      transform: "rotate(45deg)",
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Sign out */}
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              style={{
+                width: "100%",
+                background: "transparent",
+                border: "none",
+                color: "#ff4444",
+                fontSize: 10,
+                ...MONO,
+                padding: "10px 14px",
+                cursor: "pointer",
+                textAlign: "left",
+                letterSpacing: ".06em",
+                transition: "background .15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#1a0000";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              SIGN OUT
+            </button>
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
     <>
       <WalletModal open={modalOpen} onClose={() => setModalOpen(false)} />
@@ -125,15 +397,13 @@ export default function Header() {
         style={{
           background: "#020202",
           borderBottom: "1px solid #0d0d0d",
-          // Use padding not fixed height so it can breathe on mobile
           padding: isMobile ? "0 12px" : "0 24px",
           height: 52,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
-          // Prevent any child from overflowing
-          overflow: "hidden",
+          // ↓ REMOVED overflow: "hidden" — this was clipping the dropdown
           gap: isMobile ? 6 : 0,
           ...MONO,
         }}
@@ -144,7 +414,6 @@ export default function Header() {
             display: "flex",
             alignItems: "center",
             gap: isMobile ? 6 : 12,
-            // Don't let branding shrink on mobile
             flexShrink: 0,
           }}
         >
@@ -177,7 +446,6 @@ export default function Header() {
               fontWeight: 900,
               letterSpacing: ".22em",
               lineHeight: 1,
-              // Hide wordmark on very small screens to save space
               display: isMobile && publicKey ? "none" : "inline",
             }}
           >
@@ -223,7 +491,6 @@ export default function Header() {
             display: "flex",
             alignItems: "center",
             gap: isMobile ? 5 : 8,
-            // Allow this to shrink but not overflow
             minWidth: 0,
             flexShrink: 1,
             justifyContent: "flex-end",
@@ -231,10 +498,8 @@ export default function Header() {
         >
           {connected && publicKey ? (
             <>
-              {/* Tier badge — always show */}
               <TierBadge compact />
 
-              {/* Wallet address — only on desktop */}
               {!isMobile && (
                 <button
                   onClick={handleCopy}
@@ -263,7 +528,6 @@ export default function Header() {
                 </button>
               )}
 
-              {/* On mobile: compact address pill that also copies */}
               {isMobile && (
                 <button
                   onClick={handleCopy}
@@ -290,7 +554,6 @@ export default function Header() {
                 </button>
               )}
 
-              {/* Disconnect — icon only on mobile */}
               <button
                 onClick={() => disconnect()}
                 style={{
@@ -371,12 +634,10 @@ export default function Header() {
           )}
 
           {session && (
-            <div style={{ position: "relative", flexShrink: 0 }}>
+            <div style={{ flexShrink: 0 }}>
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setUserMenuOpen((v) => !v);
-                }}
+                ref={profileBtnRef}
+                onClick={handleProfileClick}
                 style={{
                   background: "transparent",
                   border: "1px solid #181818",
@@ -427,7 +688,6 @@ export default function Header() {
                   </div>
                 )}
 
-                {/* Name — hide on mobile when wallet connected to save space */}
                 {(!isMobile || !connected) && (
                   <span style={{ color: "#333", fontSize: 10, ...MONO }}>
                     {session.user?.name?.split(" ")[0] ??
@@ -467,245 +727,13 @@ export default function Header() {
                   />
                 </svg>
               </button>
-
-              {userMenuOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 8px)",
-                    right: 0,
-                    background: "#060606",
-                    border: "1px solid #111",
-                    borderRadius: 5,
-                    minWidth: 200,
-                    zIndex: 200,
-                    overflow: "hidden",
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* User info */}
-                  <div
-                    style={{
-                      padding: "10px 14px",
-                      borderBottom: "1px solid #0d0d0d",
-                    }}
-                  >
-                    <div
-                      style={{
-                        color: "#555",
-                        fontSize: 9,
-                        ...MONO,
-                        marginBottom: 3,
-                      }}
-                    >
-                      SIGNED IN AS
-                    </div>
-                    <div
-                      style={{
-                        color: "#888",
-                        fontSize: 10,
-                        ...MONO,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        maxWidth: 172,
-                      }}
-                    >
-                      {session.user?.email ?? "—"}
-                    </div>
-                  </div>
-
-                  {/* Connect Telegram */}
-                  <div
-                    style={{ position: "relative" }}
-                    onMouseEnter={() => !canUseTelegram && setTgTooltip(true)}
-                    onMouseLeave={() => setTgTooltip(false)}
-                  >
-                    <button
-                      onClick={
-                        canUseTelegram && !tgLinked
-                          ? handleConnectTelegram
-                          : undefined
-                      }
-                      disabled={tgLinking}
-                      style={{
-                        width: "100%",
-                        background: tgLinked ? "#001a0d" : "transparent",
-                        border: "none",
-                        borderBottom: "1px solid #0d0d0d",
-                        color: tgLinked
-                          ? "#00c47a"
-                          : canUseTelegram
-                            ? "#2b9fd4"
-                            : "#2a2a2a",
-                        fontSize: 10,
-                        ...MONO,
-                        padding: "10px 14px",
-                        cursor:
-                          tgLinked || !canUseTelegram ? "default" : "pointer",
-                        textAlign: "left",
-                        letterSpacing: ".06em",
-                        transition: "background .15s, color .15s",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                      onMouseEnter={(e) => {
-                        if (canUseTelegram && !tgLinked) {
-                          e.currentTarget.style.background = "#0a1520";
-                          e.currentTarget.style.color = "#3ab8f0";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (canUseTelegram && !tgLinked) {
-                          e.currentTarget.style.background = "transparent";
-                          e.currentTarget.style.color = "#2b9fd4";
-                        }
-                      }}
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        style={{
-                          flexShrink: 0,
-                          opacity: canUseTelegram ? 1 : 0.3,
-                        }}
-                      >
-                        <path
-                          d="M22 2L11 13"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M22 2L15 22L11 13L2 9L22 2Z"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-
-                      <span>
-                        {tgLinking
-                          ? "OPENING..."
-                          : tgLinked
-                            ? "TELEGRAM LINKED"
-                            : "CONNECT TELEGRAM"}
-                      </span>
-
-                      {tgLinked && (
-                        <div
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: "50%",
-                            background: "#00c47a",
-                            boxShadow: "0 0 6px #00c47a88",
-                            marginLeft: "auto",
-                            flexShrink: 0,
-                          }}
-                        />
-                      )}
-
-                      {!canUseTelegram && (
-                        <svg
-                          width="9"
-                          height="9"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          style={{ marginLeft: "auto", opacity: 0.4 }}
-                        >
-                          <rect
-                            x="3"
-                            y="11"
-                            width="18"
-                            height="11"
-                            rx="2"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          />
-                          <path
-                            d="M7 11V7C7 4.24 9.24 2 12 2C14.76 2 17 4.24 17 7V11"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          />
-                        </svg>
-                      )}
-                    </button>
-
-                    {tgTooltip && !canUseTelegram && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          bottom: "calc(100% + 6px)",
-                          left: 14,
-                          background: "#0a0a0a",
-                          border: "1px solid #1a1a1a",
-                          borderRadius: 4,
-                          padding: "6px 10px",
-                          fontSize: 9,
-                          color: "#e8490f",
-                          ...MONO,
-                          whiteSpace: "nowrap",
-                          zIndex: 300,
-                          letterSpacing: ".05em",
-                          pointerEvents: "none",
-                        }}
-                      >
-                        SPECTER TIER REQUIRED
-                        <div
-                          style={{
-                            position: "absolute",
-                            bottom: -4,
-                            left: 12,
-                            width: 7,
-                            height: 7,
-                            background: "#0a0a0a",
-                            border: "1px solid #1a1a1a",
-                            borderTop: "none",
-                            borderLeft: "none",
-                            transform: "rotate(45deg)",
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sign out */}
-                  <button
-                    onClick={() => signOut({ callbackUrl: "/login" })}
-                    style={{
-                      width: "100%",
-                      background: "transparent",
-                      border: "none",
-                      color: "#ff4444",
-                      fontSize: 10,
-                      ...MONO,
-                      padding: "10px 14px",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      letterSpacing: ".06em",
-                      transition: "background .15s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "#1a0000";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    SIGN OUT
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>
       </header>
+
+      {/* Portal dropdown — renders outside all overflow:hidden containers */}
+      {userMenu}
     </>
   );
 }

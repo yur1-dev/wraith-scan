@@ -587,7 +587,7 @@ export default function Home() {
 
         {/* Header */}
         <div style={{ flexShrink: 0 }}>
-          <Header />
+          <Header onSelectMeme={handleSelectMeme} />
         </div>
 
         {/* Tab panels — each fills available height exactly */}
@@ -725,7 +725,7 @@ export default function Home() {
         flexDirection: "column",
       }}
     >
-      <Header />
+      <Header onSelectMeme={handleSelectMeme} />
       <main
         style={{
           flex: 1,

@@ -34,6 +34,7 @@ export const TIERS: Record<TierKey, Tier> = {
       { id: "telegram_alerts", label: "Telegram Alerts", unlocked: false },
       { id: "ai_score", label: "AI Score Access", unlocked: false },
       { id: "hot_wallet", label: "Hot Wallet", unlocked: false },
+      { id: "paper_trading", label: "Paper Trading", unlocked: false },
     ],
   },
   SHADE: {
@@ -51,6 +52,7 @@ export const TIERS: Record<TierKey, Tier> = {
       { id: "telegram_alerts", label: "Telegram Alerts", unlocked: false },
       { id: "ai_score", label: "AI Score Access", unlocked: false },
       { id: "hot_wallet", label: "Hot Wallet", unlocked: true },
+      { id: "paper_trading", label: "Paper Trading", unlocked: false },
     ],
   },
   SPECTER: {
@@ -68,6 +70,7 @@ export const TIERS: Record<TierKey, Tier> = {
       { id: "telegram_alerts", label: "Telegram Alerts", unlocked: true },
       { id: "ai_score", label: "AI Score Access", unlocked: true },
       { id: "hot_wallet", label: "Hot Wallet", unlocked: true },
+      { id: "paper_trading", label: "Paper Trading", unlocked: false },
     ],
   },
   WRAITH: {
@@ -86,6 +89,7 @@ export const TIERS: Record<TierKey, Tier> = {
       { id: "telegram_alerts", label: "Telegram Alerts", unlocked: true },
       { id: "ai_score", label: "AI Score Access", unlocked: true },
       { id: "hot_wallet", label: "Hot Wallet", unlocked: true },
+      { id: "paper_trading", label: "Paper Trading", unlocked: true },
     ],
   },
 };

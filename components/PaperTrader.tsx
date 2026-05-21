@@ -89,6 +89,67 @@ interface ShareCardData {
 // ─────────────────────────────────────────────────────────────────────────────
 const HW_KEY = "wraith_hot_wallet_v1";
 const WINS_BOUGHT_KEY = "wraith_bought_keys";
+
+// ── PAPER MODE ──
+const PAPER_MODE_KEY = "wraith_paper_mode_v1";
+const PAPER_BAL_KEY = "wraith_paper_bal_v1";
+const PAPER_POSITIONS_KEY = "wraith_paper_positions_v1";
+const PAPER_LOG_KEY = "wraith_paper_log_v1";
+const PAPER_STARTING_SOL = 10;
+
+interface PaperPosition {
+  id: string;
+  symbol: string;
+  mint: string;
+  entryMcap: number;
+  entryPrice: number;
+  tokenAmount: number;
+  amountSol: number;
+  slPct: number;
+  tpX: number;
+  trailPct: number;
+  peakMcap: number;
+  currentMcap: number;
+  currentPnlPct: number;
+  trailStopMcap: number;
+  status: "watching" | "closed";
+  exitReason?: "TP" | "SL" | "TRAIL" | "MANUAL";
+  exitMcap?: number;
+  exitPnlPct?: number;
+  imageUrl?: string;
+  ts: number;
+}
+
+interface PaperLog {
+  id: string;
+  symbol: string;
+  mint: string;
+  entryMcap: number;
+  exitMcap?: number;
+  amountSol: number;
+  slPct: number;
+  tpX: number;
+  pnlPct?: number;
+  exitReason?: string;
+  imageUrl?: string;
+  ts: number;
+}
+
+function lsGet<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw != null ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function lsSet<T>(key: string, val: T) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(val));
+  } catch {}
+}
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
 };
@@ -546,6 +607,9 @@ interface TokenData {
   links?: { twitter?: string; telegram?: string; website?: string };
 }
 
+// Supply cache — derived from DexScreener once, reused by Jupiter for live mcap
+const _supplyCache = new Map<string, number>();
+
 async function fetchTokenData(
   ca: string,
   signal?: AbortSignal,
@@ -556,31 +620,81 @@ async function fetchTokenData(
       { signal },
     );
     const data = await res.json();
-    const pair = data?.pairs?.[0];
-    if (!pair) return null;
+    if (!data?.pairs?.length) return null;
+
+    const solanaPairs = data.pairs.filter(
+      (p: { chainId?: string }) => p.chainId === "solana",
+    );
+    const pool = (solanaPairs.length ? solanaPairs : data.pairs).sort(
+      (
+        a: { liquidity?: { usd?: number } },
+        b: { liquidity?: { usd?: number } },
+      ) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
+    )[0];
+    if (!pool) return null;
+
+    const dexPrice = parseFloat(pool.priceUsd || "0");
+    const dexMcap = pool.marketCap || pool.fdv || 0;
+
+    if (dexPrice > 0 && dexMcap > 0 && !_supplyCache.has(ca)) {
+      _supplyCache.set(ca, dexMcap / dexPrice);
+    }
+
+    let livePrice = dexPrice;
+    let liveMcap = dexMcap;
+    try {
+      const jupRes = await fetch(`https://api.jup.ag/price/v2?ids=${ca}`, {
+        signal,
+      });
+      const jupData = await jupRes.json();
+      const jupPrice = parseFloat(jupData?.data?.[ca]?.price ?? "0");
+      if (jupPrice > 0) {
+        livePrice = jupPrice;
+        const supply = _supplyCache.get(ca);
+        if (supply && supply > 0) {
+          liveMcap = jupPrice * supply;
+        } else if (dexMcap > 0 && dexPrice > 0) {
+          liveMcap = (jupPrice / dexPrice) * dexMcap;
+        }
+      }
+    } catch {
+      // Jupiter failed — use DexScreener price as fallback
+    }
+
     return {
-      price: parseFloat(pair.priceUsd || "0"),
-      mcap: pair.fdv || pair.marketCap || 0,
-      imageUrl: pair.info?.imageUrl,
+      price: livePrice,
+      mcap: liveMcap,
+      imageUrl: pool.info?.imageUrl,
       links: {
-        twitter: pair.info?.socials?.find(
+        twitter: pool.info?.socials?.find(
           (s: { type: string }) => s.type === "twitter",
         )?.url,
-        telegram: pair.info?.socials?.find(
+        telegram: pool.info?.socials?.find(
           (s: { type: string }) => s.type === "telegram",
         )?.url,
-        website: pair.info?.websites?.[0]?.url,
+        website: pool.info?.websites?.[0]?.url,
       },
     };
   } catch {
     return null;
   }
 }
-async function fetchMcap(ca: string): Promise<number> {
-  const d = await fetchTokenData(ca);
-  return d?.mcap ?? 0;
-}
 
+async function fetchMcap(ca: string): Promise<number> {
+  try {
+    const supply = _supplyCache.get(ca);
+    if (supply && supply > 0) {
+      const res = await fetch(`https://api.jup.ag/price/v2?ids=${ca}`);
+      const data = await res.json();
+      const price = parseFloat(data?.data?.[ca]?.price ?? "0");
+      if (price > 0) return price * supply;
+    }
+    const d = await fetchTokenData(ca);
+    return d?.mcap ?? 0;
+  } catch {
+    return 0;
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -995,14 +1109,279 @@ function NoFillPasswordInput({
 
 // Paste this entire block in place of the existing ShareModal function in PaperTrader.tsx
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARE MODAL  (drop-in replacement — lines 1110-1554 in PaperTrader.tsx)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARE MODAL  — pixel-perfect capture via off-screen render
+// Replace lines 1110–1647 in PaperTrader.tsx with this entire block.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const PROFIT_BG_COUNT = 5;
 const LOSS_BG_COUNT = 5;
 
 function pickBg(isWin: boolean): string {
   const folder = isWin ? "profit" : "loss";
   const count = isWin ? PROFIT_BG_COUNT : LOSS_BG_COUNT;
-  const idx = Math.floor(Math.random() * count) + 1; // 1..5
+  const idx = Math.floor(Math.random() * count) + 1;
   return `/share-bg/${folder}/${folder}-${idx}.png`;
+}
+
+/** Proxy any external URL through /api/proxy-img so we can fetch it */
+function proxyImg(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith("/")) return url;
+  return `/api/proxy-img?url=${encodeURIComponent(url)}`;
+}
+
+/** Fetch any URL (local or proxied) and return a base64 data-URI */
+async function toDataUri(url: string | undefined): Promise<string | undefined> {
+  if (!url) return undefined;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return undefined;
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(undefined);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+// Card dimensions — single source of truth
+const CARD_W = 480;
+const CARD_H = 270;
+
+/**
+ * Build the share card as a hidden, off-screen DOM element,
+ * capture it with html2canvas, then remove it.
+ * This guarantees pixel-perfect output regardless of browser zoom,
+ * devicePixelRatio, modal transforms, or scroll position.
+ */
+async function captureShareCard(opts: {
+  tokenUri: string | undefined;
+  bgUri: string | undefined;
+  data: ShareCardData;
+  pnl: number;
+  exitMcap: number | undefined;
+  isWin: boolean;
+  pnlColor: string;
+  exitReasonColor: string;
+  solPnl: number;
+  letter: string;
+  avatarBg: string;
+}): Promise<HTMLCanvasElement | null> {
+  const {
+    tokenUri,
+    bgUri,
+    data,
+    pnl,
+    exitMcap,
+    isWin,
+    pnlColor,
+    exitReasonColor,
+    solPnl,
+    letter,
+    avatarBg,
+  } = opts;
+
+  const html2canvas = (await import("html2canvas")).default;
+
+  // Create a container positioned far off-screen so it's never visible
+  const container = document.createElement("div");
+  container.style.cssText = `
+    position: fixed;
+    left: -9999px;
+    top: -9999px;
+    width: ${CARD_W}px;
+    height: ${CARD_H}px;
+    overflow: hidden;
+    z-index: -1;
+  `;
+
+  // Build the card HTML using only inline styles (no CSS classes needed)
+  // All images use data-URIs so html2canvas has zero CORS issues
+  container.innerHTML = `
+    <div style="
+      width:${CARD_W}px;
+      height:${CARD_H}px;
+      background:#080808;
+      border:1px solid ${isWin ? "#00c47a33" : "#ff444433"};
+      border-radius:12px;
+      position:relative;
+      overflow:hidden;
+      font-family:'IBM Plex Mono',monospace;
+      box-sizing:border-box;
+    ">
+      ${
+        bgUri
+          ? `<img src="${bgUri}" style="
+              position:absolute;inset:0;width:100%;height:100%;
+              object-fit:cover;object-position:center;display:block;z-index:0;
+            " />`
+          : ""
+      }
+
+      <!-- dark overlay -->
+      <div style="
+        position:absolute;inset:0;z-index:1;
+        background:linear-gradient(135deg,rgba(6,6,6,0.85) 0%,rgba(6,6,6,0.60) 50%,rgba(6,6,6,0.35) 100%);
+      "></div>
+
+      <!-- glow blob -->
+      <div style="
+        position:absolute;top:-40px;right:-40px;width:140px;height:140px;
+        border-radius:50%;z-index:2;pointer-events:none;
+        background:${isWin ? "#00c47a0d" : "#ff44440d"};
+        filter:blur(30px);
+      "></div>
+
+      <!-- content layer -->
+      <div style="
+        position:absolute;inset:0;z-index:3;
+        padding:18px 20px 16px;
+        box-sizing:border-box;
+        display:flex;flex-direction:column;justify-content:space-between;
+      ">
+
+        <!-- TOP: avatar + symbol -->
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${
+            tokenUri
+              ? `<img src="${tokenUri}" style="
+                  width:34px;height:34px;border-radius:50%;
+                  object-fit:cover;border:2px solid ${pnlColor}55;
+                  flex-shrink:0;display:block;
+                " />`
+              : `<div style="
+                  width:34px;height:34px;border-radius:50%;
+                  background:${avatarBg}22;border:2px solid ${avatarBg}55;
+                  display:flex;align-items:center;justify-content:center;
+                  color:${avatarBg};font-size:14px;font-weight:900;flex-shrink:0;
+                ">${letter}</div>`
+          }
+          <div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="color:#fff;font-size:15px;font-weight:900;letter-spacing:0.02em;">
+                $${data.symbol}
+              </span>
+              ${
+                data.status === "watching"
+                  ? `<span style="
+                      font-size:7px;padding:2px 6px;border-radius:2px;
+                      color:#00c47a;border:1px solid #00c47a55;
+                      font-weight:700;letter-spacing:0.1em;background:#00c47a11;
+                    ">LIVE</span>`
+                  : ""
+              }
+              ${
+                data.exitReason
+                  ? `<span style="
+                      font-size:7px;padding:2px 6px;border-radius:2px;
+                      color:${exitReasonColor};border:1px solid ${exitReasonColor}55;
+                      font-weight:700;background:${exitReasonColor}11;
+                    ">${data.exitReason}</span>`
+                  : ""
+              }
+            </div>
+            <div style="color:#ffffff55;font-size:8px;margin-top:2px;">
+              ${data.amountSol} SOL · ${fmtAgo(data.ts)}
+            </div>
+          </div>
+        </div>
+
+        <!-- MIDDLE: big PnL -->
+        <div>
+          <div style="
+            font-size:46px;font-weight:900;color:${pnlColor};
+            line-height:1;letter-spacing:-0.03em;
+            text-shadow:0 0 30px ${pnlColor}77;
+          ">${fmtPnl(pnl)}</div>
+          <div style="font-size:12px;color:${pnlColor}aa;margin-top:5px;font-weight:600;">
+            ${isWin ? "+" : ""}${solPnl.toFixed(3)} SOL
+          </div>
+        </div>
+
+        <!-- BOTTOM: stats + branding -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            ${[
+              {
+                label: "ENTRY",
+                value: fmtMcap(data.entryMcap),
+                highlight: false,
+              },
+              {
+                label: data.status === "sold" ? "EXIT" : "CURRENT",
+                value: fmtMcap(exitMcap ?? 0),
+                highlight: true,
+              },
+              {
+                label: "MULTI",
+                value:
+                  exitMcap && data.entryMcap
+                    ? `${(exitMcap / data.entryMcap).toFixed(2)}×`
+                    : "—",
+                highlight: false,
+              },
+              {
+                label: "SL / TP",
+                value: `${data.slPct}% / ${data.tpX}×`,
+                highlight: false,
+              },
+            ]
+              .map(
+                (row) => `
+              <div style="display:flex;gap:10px;align-items:center;">
+                <span style="color:#ffffff44;font-size:8px;min-width:52px;">${row.label}</span>
+                <span style="color:${row.highlight ? pnlColor : "#ffffffcc"};font-size:10px;font-weight:700;">
+                  ${row.value}
+                </span>
+              </div>`,
+              )
+              .join("")}
+          </div>
+
+          <!-- branding -->
+          <div style="text-align:right;">
+            <div style="color:#e8490f;font-size:11px;font-weight:900;letter-spacing:0.2em;">
+              ⚡ WRAITH
+            </div>
+            <div style="color:#ffffff33;font-size:7px;margin-top:2px;">
+              paper trader
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+
+  let canvas: HTMLCanvasElement | null = null;
+  try {
+    canvas = await html2canvas(container.firstElementChild as HTMLElement, {
+      backgroundColor: null,
+      scale: 2, // 2× for crisp retina quality
+      useCORS: false, // data URIs — no CORS needed
+      allowTaint: false,
+      logging: false,
+      imageTimeout: 0,
+      width: CARD_W,
+      height: CARD_H,
+    });
+  } catch (err) {
+    console.error("captureShareCard failed", err);
+  }
+
+  document.body.removeChild(container);
+  return canvas;
 }
 
 function ShareModal({
@@ -1012,11 +1391,21 @@ function ShareModal({
   data: ShareCardData;
   onClose: () => void;
 }) {
-  const cardRef = useRef<HTMLDivElement>(null);
-  const [downloading, setDownloading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [imgErr, setImgErr] = useState(false);
-  const [bgErr, setBgErr] = useState(false);
+
+  // Proxied URLs — used only for the visible preview (fast, no data-URI round-trip)
+  const [displayTokenImg, setDisplayTokenImg] = useState<string | undefined>(
+    proxyImg(data.imageUrl),
+  );
+  const [displayBgImg] = useState(() =>
+    pickBg(data.currentPnlPct >= 0 || (data.exitPnlPct ?? 0) >= 0),
+  );
+
+  // Data-URI versions — loaded once, used for off-screen capture
+  const [captureTokenUri, setCaptureTokenUri] = useState<string | undefined>();
+  const [captureBgUri, setCaptureBgUri] = useState<string | undefined>();
+  const [assetsReady, setAssetsReady] = useState(false);
 
   const pnl =
     data.status === "sold"
@@ -1026,9 +1415,6 @@ function ShareModal({
   const isWin = pnl >= 0;
   const pnlColor = isWin ? "#00c47a" : "#ff4444";
   const solPnl = data.amountSol * (pnl / 100);
-
-  // Pick a random background image once per modal open
-  const [bgUrl] = useState(() => pickBg(isWin));
 
   const exitReasonColor =
     data.exitReason === "TP"
@@ -1043,18 +1429,46 @@ function ShareModal({
   const palette = [C.orange, C.purple, C.blue, C.green, C.yellow];
   const avatarBg = palette[letter.charCodeAt(0) % palette.length];
 
+  // Pre-load data-URIs in background so capture is instant when user clicks
+  useEffect(() => {
+    let cancelled = false;
+    async function preload() {
+      const [tokenUri, bgUri] = await Promise.all([
+        toDataUri(proxyImg(data.imageUrl)),
+        toDataUri(displayBgImg),
+      ]);
+      if (!cancelled) {
+        setCaptureTokenUri(tokenUri);
+        setCaptureBgUri(bgUri);
+        setAssetsReady(true);
+      }
+    }
+    preload();
+    return () => {
+      cancelled = true;
+    };
+  }, [data.imageUrl, displayBgImg]);
+
+  const getCanvas = () =>
+    captureShareCard({
+      tokenUri: captureTokenUri,
+      bgUri: captureBgUri,
+      data,
+      pnl,
+      exitMcap,
+      isWin,
+      pnlColor,
+      exitReasonColor,
+      solPnl,
+      letter,
+      avatarBg,
+    });
+
   const handleDownload = async () => {
-    if (!cardRef.current) return;
-    setDownloading(true);
+    setBusy(true);
     try {
-      const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(cardRef.current, {
-        backgroundColor: null,
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-      });
+      const canvas = await getCanvas();
+      if (!canvas) return;
       canvas.toBlob((blob) => {
         if (!blob) return;
         const url = URL.createObjectURL(blob);
@@ -1067,20 +1481,14 @@ function ShareModal({
     } catch (e) {
       console.error("Share card export failed", e);
     }
-    setDownloading(false);
+    setBusy(false);
   };
 
   const handleCopy = async () => {
-    if (!cardRef.current) return;
+    setBusy(true);
     try {
-      const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(cardRef.current, {
-        backgroundColor: null,
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-      });
+      const canvas = await getCanvas();
+      if (!canvas) return;
       canvas.toBlob(async (blob) => {
         if (!blob) return;
         try {
@@ -1092,6 +1500,7 @@ function ShareModal({
         } catch {}
       }, "image/png");
     } catch {}
+    setBusy(false);
   };
 
   return (
@@ -1117,59 +1526,52 @@ function ShareModal({
           gap: 10,
         }}
       >
-        {/* ── THE CARD ── */}
+        {/* ── PREVIEW CARD (display only — NOT captured) ── */}
         <div
-          ref={cardRef}
           style={{
-            width: 480,
-            height: 270,
-            background: "transparent",
+            width: CARD_W,
+            height: CARD_H,
+            background: "#080808",
             border: `1px solid ${isWin ? "#00c47a33" : "#ff444433"}`,
             borderRadius: 12,
-            padding: "18px 20px 16px",
             position: "relative",
             overflow: "hidden",
             boxShadow: `0 0 60px ${isWin ? "#00c47a18" : "#ff444418"}, 0 20px 60px #00000099`,
             fontFamily: "'IBM Plex Mono', monospace",
+            boxSizing: "border-box",
           }}
         >
-          {/* ── FULL BACKGROUND IMAGE ── */}
-          {!bgErr && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                pointerEvents: "none",
-                zIndex: 0,
-              }}
-            >
-              <img
-                src={bgUrl}
-                alt=""
-                onError={() => setBgErr(true)}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  objectPosition: "center",
-                  display: "block",
-                }}
-              />
-              {/* dark overlay so text stays readable, lighter than before */}
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background:
-                    "linear-gradient(135deg, rgba(6,6,6,0.82) 0%, rgba(6,6,6,0.55) 50%, rgba(6,6,6,0.3) 100%)",
-                }}
-              />
-            </div>
-          )}
+          {/* Background image — proxied src for display */}
+          <img
+            src={displayBgImg}
+            alt=""
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              display: "block",
+              zIndex: 0,
+            }}
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
 
-          {/* glow blob — above bg, below content */}
+          {/* Dark overlay */}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "linear-gradient(135deg, rgba(6,6,6,0.85) 0%, rgba(6,6,6,0.60) 50%, rgba(6,6,6,0.35) 100%)",
+              zIndex: 1,
+            }}
+          />
+
+          {/* Glow blob */}
           <div
             style={{
               position: "absolute",
@@ -1180,32 +1582,30 @@ function ShareModal({
               borderRadius: "50%",
               background: isWin ? "#00c47a0d" : "#ff44440d",
               filter: "blur(30px)",
+              zIndex: 2,
               pointerEvents: "none",
-              zIndex: 1,
             }}
           />
 
-          {/* ── CONTENT (z above background) ── */}
+          {/* Content */}
           <div
             style={{
-              position: "relative",
-              zIndex: 2,
-              padding: "22px 24px",
-              height: "100%",
-              boxSizing: "border-box" as const,
+              position: "absolute",
+              inset: 0,
+              zIndex: 3,
+              padding: "18px 20px 16px",
+              boxSizing: "border-box",
               display: "flex",
               flexDirection: "column",
               justifyContent: "space-between",
-              width: "55%",
             }}
           >
             {/* TOP: avatar + symbol */}
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {data.imageUrl && !imgErr ? (
+              {displayTokenImg ? (
                 <img
-                  src={data.imageUrl}
+                  src={displayTokenImg}
                   alt={data.symbol}
-                  onError={() => setImgErr(true)}
                   style={{
                     width: 34,
                     height: 34,
@@ -1214,6 +1614,7 @@ function ShareModal({
                     border: `2px solid ${pnlColor}55`,
                     flexShrink: 0,
                   }}
+                  onError={() => setDisplayTokenImg(undefined)}
                 />
               ) : (
                 <div
@@ -1312,41 +1713,45 @@ function ShareModal({
               </div>
             </div>
 
-            {/* BOTTOM: clean stat rows + branding */}
-            <div>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 5,
-                  marginBottom: 12,
-                }}
-              >
+            {/* BOTTOM: stats + branding */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-end",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 {[
-                  { label: "Entry", value: fmtMcap(data.entryMcap) },
+                  { label: "ENTRY", value: fmtMcap(data.entryMcap) },
                   {
-                    label: data.status === "sold" ? "Exit" : "Current",
+                    label: data.status === "sold" ? "EXIT" : "CURRENT",
                     value: fmtMcap(exitMcap ?? 0),
                     highlight: true,
                   },
                   {
-                    label: "Multi",
+                    label: "MULTI",
                     value:
                       exitMcap && data.entryMcap
                         ? `${(exitMcap / data.entryMcap).toFixed(2)}×`
                         : "—",
                   },
-                  { label: "SL / TP", value: `${data.slPct}% / ${data.tpX}×` },
+                  {
+                    label: "SL / TP",
+                    value: `${data.slPct}% / ${data.tpX}×`,
+                  },
                 ].map((row) => (
                   <div
                     key={row.label}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
+                    style={{ display: "flex", gap: 10, alignItems: "center" }}
                   >
-                    <span style={{ color: "#ffffff55", fontSize: 9 }}>
+                    <span
+                      style={{
+                        color: "#ffffff44",
+                        fontSize: 8,
+                        minWidth: 52,
+                      }}
+                    >
                       {row.label}
                     </span>
                     <span
@@ -1361,48 +1766,51 @@ function ShareModal({
                   </div>
                 ))}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span
+
+              {/* Branding */}
+              <div style={{ textAlign: "right" as const }}>
+                <div
                   style={{
                     color: "#e8490f",
-                    fontSize: 9,
+                    fontSize: 11,
                     fontWeight: 900,
                     letterSpacing: "0.2em",
                   }}
                 >
                   ⚡ WRAITH
-                </span>
-                <span style={{ color: "#ffffff33", fontSize: 7 }}>
+                </div>
+                <div style={{ color: "#ffffff33", fontSize: 7, marginTop: 2 }}>
                   paper trader
-                </span>
+                </div>
               </div>
             </div>
           </div>
-          {/* end z:2 content wrapper */}
         </div>
 
-        {/* action buttons */}
+        {/* ── ACTION BUTTONS ── */}
         <div style={{ display: "flex", gap: 6 }}>
           <button
             onClick={handleDownload}
-            disabled={downloading}
+            disabled={busy || !assetsReady}
             style={{
-              background: downloading ? "#0d0d0d" : C.orange,
+              background: busy ? "#0d0d0d" : C.orange,
               border: "none",
               color: "#fff",
               fontSize: 9,
               fontWeight: 700,
               padding: "7px 14px",
               borderRadius: 4,
-              cursor: downloading ? "not-allowed" : "pointer",
+              cursor: busy || !assetsReady ? "not-allowed" : "pointer",
               letterSpacing: "0.1em",
+              opacity: !assetsReady ? 0.5 : 1,
               ...MONO,
             }}
           >
-            {downloading ? "RENDERING…" : "↓ DOWNLOAD PNG"}
+            {busy ? "RENDERING…" : !assetsReady ? "LOADING…" : "↓ DOWNLOAD PNG"}
           </button>
           <button
             onClick={handleCopy}
+            disabled={busy || !assetsReady}
             style={{
               background: copied ? "#001a0a" : "#111",
               border: `1px solid ${copied ? C.green + "55" : C.border}`,
@@ -1411,8 +1819,9 @@ function ShareModal({
               fontWeight: 700,
               padding: "7px 14px",
               borderRadius: 4,
-              cursor: "pointer",
+              cursor: busy || !assetsReady ? "not-allowed" : "pointer",
               letterSpacing: "0.1em",
+              opacity: !assetsReady ? 0.5 : 1,
               ...MONO,
             }}
           >
@@ -1434,6 +1843,12 @@ function ShareModal({
             ✕
           </button>
         </div>
+
+        {!assetsReady && (
+          <div style={{ color: C.muted, fontSize: 8, ...MONO }}>
+            loading assets…
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2111,6 +2526,32 @@ function HotWalletSetup({
 // ─────────────────────────────────────────────────────────────────────────────
 // POSITION CARD
 // ─────────────────────────────────────────────────────────────────────────────
+// SVG share icon
+const ShareIcon = ({
+  size = 12,
+  color = "currentColor",
+}: {
+  size?: number;
+  color?: string;
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+  </svg>
+);
+
 function PositionCard({
   pos,
   onManualSell,
@@ -2132,38 +2573,49 @@ function PositionCard({
     pos.peakMcap > pos.entryMcap
       ? (pos.currentMcap / pos.peakMcap - 1) * 100
       : null;
+  const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
+  const tpMcap = pos.entryMcap * pos.tpX;
+
   return (
     <div
       style={{
-        padding: "8px 10px",
+        padding: "10px 12px",
         borderBottom: `1px solid ${C.border}`,
-        background: flash ? "#1a0500" : "transparent",
-        transition: "background 0.4s",
+        background: flash ? "#1a0800" : "transparent",
+        transition: "background 0.5s",
       }}
     >
+      {/* ── ROW 1: avatar · symbol · pnl · status · actions ── */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 7,
-          marginBottom: 5,
+          gap: 8,
+          marginBottom: 7,
         }}
       >
         <TokenAvatar
           imageUrl={pos.imageUrl}
           symbol={pos.symbol}
-          size={28}
+          size={30}
           links={{
             dex: `https://dexscreener.com/solana/${pos.mint}`,
             pump: `https://pump.fun/${pos.mint}`,
           }}
         />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              marginBottom: 2,
+            }}
+          >
             <span
               style={{
                 color: C.primary,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 900,
                 ...MONO,
               }}
@@ -2172,21 +2624,21 @@ function PositionCard({
             </span>
             <span
               style={{
-                fontSize: 10,
-                fontWeight: 700,
+                fontSize: 11,
+                fontWeight: 800,
                 color: pnlColor,
                 ...MONO,
               }}
             >
               {fmtPnl(pnl)}
             </span>
-            {pos.status === "selling" && (
+            {pos.status === "selling" ? (
               <span
                 style={{
                   fontSize: 7,
                   color: C.amber,
-                  border: `1px solid ${C.amber}33`,
-                  padding: "1px 4px",
+                  border: `1px solid ${C.amber}44`,
+                  padding: "1px 5px",
                   borderRadius: 2,
                   ...MONO,
                   animation: "pulse 1s infinite",
@@ -2194,14 +2646,14 @@ function PositionCard({
               >
                 SELLING…
               </span>
-            )}
-            {pos.status === "watching" && (
+            ) : (
               <span
                 style={{
                   fontSize: 7,
                   color: C.green,
-                  border: `1px solid ${C.green}22`,
-                  padding: "1px 4px",
+                  background: `${C.green}11`,
+                  border: `1px solid ${C.green}33`,
+                  padding: "1px 5px",
                   borderRadius: 2,
                   ...MONO,
                 }}
@@ -2211,137 +2663,209 @@ function PositionCard({
             )}
           </div>
           <div style={{ color: C.muted, fontSize: 7, ...MONO }}>
-            {pos.amountSol} SOL · entry {fmtMcap(pos.entryMcap)} → now{" "}
+            {pos.amountSol} SOL · {fmtMcap(pos.entryMcap)} →{" "}
             {fmtMcap(pos.currentMcap)}
           </div>
           {trailFromPeak !== null && pos.peakMcap > pos.entryMcap && (
-            <div style={{ color: C.amber, fontSize: 6, ...MONO }}>
-              peak {fmtMcap(pos.peakMcap)} · trail {trailFromPeak.toFixed(1)}%
-              from peak
+            <div style={{ color: C.amber, fontSize: 6, ...MONO, marginTop: 1 }}>
+              ▲ peak {fmtMcap(pos.peakMcap)} · {trailFromPeak.toFixed(1)}% from
+              peak
             </div>
           )}
         </div>
-        {/* action buttons stacked */}
+        {/* action icons */}
         {pos.status === "watching" && (
           <div
             style={{
               display: "flex",
-              flexDirection: "column",
-              gap: 3,
+              alignItems: "center",
+              gap: 4,
               flexShrink: 0,
             }}
           >
             <button
+              title="Share"
               onClick={() => onShare(pos)}
               style={{
+                width: 26,
+                height: 26,
+                borderRadius: "50%",
                 background: "transparent",
                 border: `1px solid ${C.orange}44`,
                 color: C.orange,
-                fontSize: 7,
-                padding: "3px 7px",
-                borderRadius: 2,
                 cursor: "pointer",
-                ...MONO,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  `${C.orange}18`;
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  `${C.orange}88`;
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  "transparent";
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  `${C.orange}44`;
               }}
             >
-              ↗ SHARE
+              <ShareIcon size={12} color={C.orange} />
             </button>
             <button
+              title="Sell now"
               onClick={() => onManualSell(pos.id)}
               style={{
-                background: "transparent",
+                height: 26,
+                paddingInline: 8,
+                borderRadius: 3,
+                background: `${C.red}11`,
                 border: `1px solid ${C.red}44`,
                 color: C.red,
-                fontSize: 7,
-                padding: "3px 7px",
-                borderRadius: 2,
+                fontSize: 8,
+                fontWeight: 700,
                 cursor: "pointer",
                 ...MONO,
+                letterSpacing: "0.06em",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  `${C.red}22`;
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  `${C.red}88`;
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  `${C.red}11`;
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  `${C.red}44`;
               }}
             >
-              SELL NOW
+              SELL
             </button>
           </div>
         )}
       </div>
-      <div style={{ marginBottom: 5 }}>
+
+      {/* ── ROW 2: progress bar ── */}
+      <div style={{ marginBottom: 7 }}>
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            marginBottom: 2,
+            marginBottom: 3,
           }}
         >
-          <span style={{ fontSize: 6, color: C.label, ...MONO }}>
+          <span
+            style={{
+              fontSize: 6,
+              color: C.label,
+              ...MONO,
+              letterSpacing: "0.1em",
+            }}
+          >
             TO {pos.tpX}× TP
           </span>
           <span
             style={{
               fontSize: 6,
-              color: progressToTP >= 100 ? C.green : C.muted,
+              color: progressToTP >= 100 ? C.green : C.dim,
               ...MONO,
             }}
           >
             {progressToTP.toFixed(0)}%
           </span>
         </div>
-        <div style={{ height: 3, background: C.border, borderRadius: 2 }}>
+        <div style={{ height: 3, background: "#1a1a1a", borderRadius: 99 }}>
           <div
             style={{
               height: "100%",
               width: `${progressToTP}%`,
-              background: pnl > 0 ? C.green : C.red,
-              borderRadius: 2,
-              transition: "width 0.5s",
+              background:
+                pnl > 0
+                  ? `linear-gradient(90deg, ${C.green}88, ${C.green})`
+                  : `linear-gradient(90deg, ${C.red}88, ${C.red})`,
+              borderRadius: 99,
+              transition: "width 0.6s ease",
             }}
           />
         </div>
       </div>
-      <div style={{ display: "flex", gap: 3 }}>
+
+      {/* ── ROW 3: SL / TRAIL / TP tiles ── */}
+      <div style={{ display: "flex", gap: 4 }}>
         {[
           {
-            label: `SL ${pos.slPct}%`,
-            value: fmtMcap(pos.entryMcap * (1 + pos.slPct / 100)),
+            label: "STOP LOSS",
+            sub: `${pos.slPct}%`,
+            value: fmtMcap(slMcap),
             color: C.red,
+            bg: `${C.red}08`,
           },
           {
-            label: `TRAIL -${pos.trailPct}%`,
+            label: "TRAIL STOP",
+            sub: `-${pos.trailPct}%`,
             value: fmtMcap(pos.trailStopMcap),
             color: C.amber,
+            bg: `${C.amber}08`,
           },
           {
-            label: `TP ${pos.tpX}×`,
-            value: fmtMcap(pos.entryMcap * pos.tpX),
+            label: "TAKE PROFIT",
+            sub: `${pos.tpX}×`,
+            value: fmtMcap(tpMcap),
             color: C.green,
+            bg: `${C.green}08`,
           },
         ].map((item) => (
           <div
             key={item.label}
             style={{
               flex: 1,
-              background: C.bgCard,
-              border: `1px solid ${C.border}`,
-              borderRadius: 3,
-              padding: "3px 5px",
-              textAlign: "center" as const,
+              background: item.bg,
+              border: `1px solid ${item.color}22`,
+              borderRadius: 4,
+              padding: "5px 6px",
             }}
           >
             <div
               style={{
-                color: C.label,
-                fontSize: 5,
-                ...MONO,
-                letterSpacing: "0.08em",
-                marginBottom: 1,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                marginBottom: 2,
               }}
             >
-              {item.label}
+              <span
+                style={{
+                  color: item.color,
+                  fontSize: 6,
+                  fontWeight: 700,
+                  ...MONO,
+                  letterSpacing: "0.08em",
+                  opacity: 0.7,
+                }}
+              >
+                {item.label}
+              </span>
+              <span
+                style={{
+                  color: item.color,
+                  fontSize: 7,
+                  fontWeight: 800,
+                  ...MONO,
+                }}
+              >
+                {item.sub}
+              </span>
             </div>
             <div
               style={{
                 color: item.color,
-                fontSize: 8,
-                fontWeight: 700,
+                fontSize: 10,
+                fontWeight: 900,
                 ...MONO,
               }}
             >
@@ -2363,7 +2887,7 @@ export default function PaperTrader({
   onCollapseChange,
 }: Props) {
   const { connection } = useConnection();
-  const { tier } = useWraithTier();
+  const { tier, canUse } = useWraithTier();
 
   const connRef = useRef<Connection | null>(null);
   const getConn = useCallback((): Connection => {
@@ -2410,6 +2934,45 @@ export default function PaperTrader({
   const [borderFlash, setBorderFlash] = useState(false);
 
   const [dbLoaded, setDbLoaded] = useState(false);
+
+  // ── PAPER MODE STATE ──
+  const canUsePaper = canUse("paper_trading");
+  const [paperMode, setPaperMode] = useState<boolean>(() =>
+    lsGet<boolean>(PAPER_MODE_KEY, false),
+  );
+
+  // Force paper mode off if tier drops below WRAITH
+  useEffect(() => {
+    if (!canUsePaper && paperMode) {
+      setPaperMode(false);
+    }
+  }, [canUsePaper, paperMode]);
+
+  const [paperBal, setPaperBal] = useState<number>(() =>
+    lsGet<number>(PAPER_BAL_KEY, PAPER_STARTING_SOL),
+  );
+  const [paperPositions, setPaperPositions] = useState<PaperPosition[]>(() =>
+    lsGet<PaperPosition[]>(PAPER_POSITIONS_KEY, []),
+  );
+  const [paperLog, setPaperLog] = useState<PaperLog[]>(() =>
+    lsGet<PaperLog[]>(PAPER_LOG_KEY, []),
+  );
+  const paperPositionsRef = useRef<PaperPosition[]>(paperPositions);
+
+  // Sync paper state to LS
+  useEffect(() => {
+    lsSet(PAPER_MODE_KEY, paperMode);
+  }, [paperMode]);
+  useEffect(() => {
+    lsSet(PAPER_BAL_KEY, paperBal);
+  }, [paperBal]);
+  useEffect(() => {
+    lsSet(PAPER_POSITIONS_KEY, paperPositions);
+    paperPositionsRef.current = paperPositions;
+  }, [paperPositions]);
+  useEffect(() => {
+    lsSet(PAPER_LOG_KEY, paperLog);
+  }, [paperLog]);
 
   // ── SHARE STATE
   const [shareData, setShareData] = useState<ShareCardData | null>(null);
@@ -2548,10 +3111,23 @@ export default function PaperTrader({
     const ctrl = new AbortController();
     fetchAbortRef.current = ctrl;
     setTokenData(null);
-    fetchTokenData(ca, ctrl.signal).then((d) => {
-      if (!ctrl.signal.aborted && mountedRef.current) setTokenData(d);
-    });
-    return () => ctrl.abort();
+
+    const doFetch = () => {
+      fetchTokenData(ca, ctrl.signal).then((d) => {
+        if (!ctrl.signal.aborted && mountedRef.current && d) setTokenData(d);
+      });
+    };
+    doFetch();
+
+    // 5s polling — Jupiter Price v2 is fast, keeps panel in sync with chart
+    const iv = setInterval(() => {
+      if (!ctrl.signal.aborted && mountedRef.current) doFetch();
+    }, 5000);
+
+    return () => {
+      ctrl.abort();
+      clearInterval(iv);
+    };
   }, [selectedMeme]);
 
   const triggerSell = useCallback(
@@ -2736,6 +3312,90 @@ export default function PaperTrader({
     };
   }, [triggerSell, setPositionsSync]);
 
+  // ── PAPER MONITOR (same TP/SL/Trail logic, no real txs)
+  useEffect(() => {
+    const paperMonitor = async () => {
+      const watching = paperPositionsRef.current.filter(
+        (p) => p.status === "watching",
+      );
+      if (!watching.length) return;
+      await Promise.all(
+        watching.map(async (pos) => {
+          try {
+            const mcap = await fetchMcap(pos.mint);
+            if (!mcap || mcap <= 0) return;
+            const pnlPct = (mcap / pos.entryMcap - 1) * 100;
+            const newPeak = Math.max(pos.peakMcap, mcap);
+            const trailFrac = pos.trailPct / 100;
+            const trailStop = newPeak * (1 - trailFrac);
+            const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
+            const tpMcap = pos.entryMcap * pos.tpX;
+            const slValid = pos.slPct < 0;
+
+            const updated: PaperPosition = {
+              ...pos,
+              currentMcap: mcap,
+              currentPnlPct: pnlPct,
+              peakMcap: newPeak,
+              trailStopMcap: trailStop,
+            };
+
+            let exitReason: "TP" | "SL" | "TRAIL" | undefined;
+            if (mcap >= tpMcap) exitReason = "TP";
+            else if (slValid && mcap <= slMcap) exitReason = "SL";
+            else if (newPeak > pos.entryMcap && mcap <= trailStop)
+              exitReason = "TRAIL";
+
+            if (exitReason) {
+              const exitPnl = (mcap / pos.entryMcap - 1) * 100;
+              const solReturn = pos.amountSol * (1 + exitPnl / 100);
+              const closed: PaperPosition = {
+                ...updated,
+                status: "closed",
+                exitReason,
+                exitMcap: mcap,
+                exitPnlPct: exitPnl,
+              };
+              setPaperPositions((prev) =>
+                prev.map((p) => (p.id === pos.id ? closed : p)),
+              );
+              setPaperBal((b) => parseFloat((b + solReturn).toFixed(6)));
+              const logEntry: PaperLog = {
+                id: pos.id,
+                symbol: pos.symbol,
+                mint: pos.mint,
+                entryMcap: pos.entryMcap,
+                exitMcap: mcap,
+                amountSol: pos.amountSol,
+                slPct: pos.slPct,
+                tpX: pos.tpX,
+                pnlPct: exitPnl,
+                exitReason,
+                imageUrl: pos.imageUrl,
+                ts: pos.ts,
+              };
+              setPaperLog((prev) => [logEntry, ...prev].slice(0, 200));
+              playAlert(
+                exitReason === "TP"
+                  ? "sell_tp"
+                  : exitReason === "SL"
+                    ? "sell_sl"
+                    : "sell_trail",
+              );
+            } else {
+              setPaperPositions((prev) =>
+                prev.map((p) => (p.id === pos.id ? updated : p)),
+              );
+            }
+          } catch {}
+        }),
+      );
+    };
+    const iv = setInterval(paperMonitor, POLL_MS);
+    paperMonitor();
+    return () => clearInterval(iv);
+  }, []); // intentionally no deps — uses refs
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ca = (selectedMeme as any)?.contractAddress || null;
   const sym = selectedMeme ? (selectedMeme.keyword || "").toUpperCase() : null;
@@ -2760,6 +3420,117 @@ export default function PaperTrader({
     !buying &&
     slIsValid &&
     (hotBal ?? 0) >= parseFloat(amountSol);
+
+  const canPaperBuy =
+    !!ca &&
+    !!sym &&
+    !isAvoid &&
+    parseFloat(amountSol) > 0 &&
+    slIsValid &&
+    paperBal >= parseFloat(amountSol);
+
+  // ── PAPER BUY ──
+  const handlePaperBuy = useCallback(() => {
+    const amt = parseFloat(amountSol);
+    if (!ca || !sym || isNaN(amt) || amt <= 0) return;
+    if (amt > paperBal) {
+      setStatus({ msg: "Insufficient paper SOL balance", type: "err" });
+      return;
+    }
+    if (!slIsValid) {
+      setStatus({ msg: "Stop loss must be negative", type: "err" });
+      return;
+    }
+    const entryMcap = tokenData?.mcap || mcap;
+    if (!entryMcap) {
+      setStatus({ msg: "No mcap data yet", type: "err" });
+      return;
+    }
+    const trailFrac = trailPct / 100;
+    const pos: PaperPosition = {
+      id: `paper-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      symbol: sym,
+      mint: ca,
+      entryMcap,
+      entryPrice: tokenData?.price || 0,
+      tokenAmount: 0, // paper — no real tokens
+      amountSol: amt,
+      slPct,
+      tpX,
+      trailPct,
+      peakMcap: entryMcap,
+      currentMcap: entryMcap,
+      currentPnlPct: 0,
+      trailStopMcap: entryMcap * (1 - trailFrac),
+      status: "watching",
+      imageUrl: tokenData?.imageUrl,
+      ts: Date.now(),
+    };
+    setPaperBal((b) => parseFloat((b - amt).toFixed(6)));
+    setPaperPositions((prev) => [pos, ...prev]);
+    markBoughtInWinsPanel((sym || "").toLowerCase());
+    setStatus({
+      msg: `📄 Paper bought $${sym} @ ${fmtMcap(entryMcap)} · auto-sell armed`,
+      type: "ok",
+    });
+    setTab("positions");
+    setTimeout(() => {
+      if (mountedRef.current) setStatus(null);
+    }, 6000);
+  }, [
+    ca,
+    sym,
+    amountSol,
+    paperBal,
+    slPct,
+    slIsValid,
+    tpX,
+    trailPct,
+    mcap,
+    tokenData,
+  ]);
+
+  // ── PAPER MANUAL SELL ──
+  const handlePaperManualSell = useCallback(async (posId: string) => {
+    const pos = paperPositionsRef.current.find((p) => p.id === posId);
+    if (!pos || pos.status !== "watching") return;
+    const exitMcap = await fetchMcap(pos.mint).catch(() => pos.currentMcap);
+    const exitPnl = (exitMcap / pos.entryMcap - 1) * 100;
+    const solReturn = pos.amountSol * (1 + exitPnl / 100);
+    setPaperPositions((prev) =>
+      prev.map((p) =>
+        p.id === posId
+          ? {
+              ...p,
+              status: "closed" as const,
+              exitReason: "MANUAL",
+              exitMcap,
+              exitPnlPct: exitPnl,
+            }
+          : p,
+      ),
+    );
+    setPaperBal((b) => parseFloat((b + solReturn).toFixed(6)));
+    setPaperLog((prev) =>
+      [
+        {
+          id: posId,
+          symbol: pos.symbol,
+          mint: pos.mint,
+          entryMcap: pos.entryMcap,
+          exitMcap,
+          amountSol: pos.amountSol,
+          slPct: pos.slPct,
+          tpX: pos.tpX,
+          pnlPct: exitPnl,
+          exitReason: "MANUAL",
+          imageUrl: pos.imageUrl,
+          ts: pos.ts,
+        },
+        ...prev,
+      ].slice(0, 200),
+    );
+  }, []);
 
   const handleBuy = useCallback(async () => {
     if (!canBuy || !hotKeypair) return;
@@ -2877,6 +3648,15 @@ export default function PaperTrader({
   const filledLogs = log.filter((t) => t.status === "filled");
   const wins = filledLogs.filter((t) => (t.pnlPct ?? 0) > 0).length;
 
+  // Paper derived
+  const paperWatching = paperPositions.filter((p) => p.status === "watching");
+  const paperFilledLogs = paperLog;
+  const paperWins = paperFilledLogs.filter((t) => (t.pnlPct ?? 0) > 0).length;
+  const paperOpenPnlPct = paperWatching.length
+    ? paperWatching.reduce((sum, p) => sum + p.currentPnlPct, 0) /
+      paperWatching.length
+    : 0;
+
   const SL_PRESETS = [-10, -20, -30, -50];
   const TP_PRESETS = [1.5, 2, 3, 5, 10];
   const TRAIL_PRESETS = [5, 10, 15, 20, 25];
@@ -2892,7 +3672,7 @@ export default function PaperTrader({
     <div
       style={{
         background: C.bg,
-        border: `1px solid ${borderFlash ? C.orange + "88" : C.border}`,
+        border: `1px solid ${borderFlash ? C.orange + "88" : paperMode ? C.green + "44" : C.border}`,
         borderRadius: 8,
         overflow: "hidden",
         height: "100%",
@@ -2941,6 +3721,23 @@ export default function PaperTrader({
           >
             ⚡ SNIPER
           </span>
+          {paperMode && (
+            <span
+              style={{
+                fontSize: 7,
+                color: C.green,
+                border: `1px solid ${C.green}55`,
+                background: "#001a08",
+                padding: "1px 6px",
+                borderRadius: 2,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                ...MONO,
+              }}
+            >
+              📄 DEMO · {paperBal.toFixed(3)} SOL
+            </span>
+          )}
           <span
             style={{
               fontSize: 7,
@@ -3071,7 +3868,173 @@ export default function PaperTrader({
               gap: 6,
             }}
           >
-            {/* Wallet bar */}
+            {/* ── MODE SWITCHER ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 3,
+                background: "#0a0a0a",
+                border: `1px solid ${C.border}`,
+                borderRadius: 5,
+                padding: 3,
+              }}
+            >
+              <button
+                onClick={() => setPaperMode(false)}
+                style={{
+                  flex: 1,
+                  padding: "6px 0",
+                  borderRadius: 3,
+                  border: "none",
+                  background: !paperMode ? C.orange : "transparent",
+                  color: !paperMode ? "#fff" : C.dim,
+                  fontSize: 9,
+                  fontWeight: !paperMode ? 800 : 500,
+                  letterSpacing: "0.12em",
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  ...MONO,
+                }}
+              >
+                ⚡ LIVE
+              </button>
+              <button
+                onClick={() => {
+                  if (!canUsePaper) return;
+                  setPaperMode(true);
+                }}
+                title={!canUsePaper ? "WRAITH tier required" : undefined}
+                style={{
+                  flex: 1,
+                  padding: "6px 0",
+                  borderRadius: 3,
+                  border: "none",
+                  background: paperMode ? "#001a08" : "transparent",
+                  color: paperMode ? C.green : canUsePaper ? C.dim : C.label,
+                  fontSize: 9,
+                  fontWeight: paperMode ? 800 : 500,
+                  letterSpacing: "0.12em",
+                  cursor: canUsePaper ? "pointer" : "not-allowed",
+                  opacity: canUsePaper ? 1 : 0.4,
+                  transition: "all 0.15s",
+                  ...MONO,
+                  boxShadow: paperMode
+                    ? `inset 0 0 0 1px ${C.green}44`
+                    : "none",
+                }}
+              >
+                📄 PAPER{!canUsePaper ? " 🔒" : ""}
+              </button>
+            </div>
+
+            {/* ── PAPER BALANCE BANNER (shown only in paper mode) ── */}
+            {paperMode && (
+              <div
+                style={{
+                  background:
+                    "linear-gradient(135deg, #001a08 0%, #000d04 100%)",
+                  border: `1px solid ${C.green}33`,
+                  borderRadius: 5,
+                  padding: "8px 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 6,
+                      color: C.green + "88",
+                      ...MONO,
+                      letterSpacing: "0.12em",
+                      marginBottom: 2,
+                    }}
+                  >
+                    DEMO BALANCE
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 900,
+                      color: C.green,
+                      ...MONO,
+                    }}
+                  >
+                    {paperBal.toFixed(4)} SOL
+                  </div>
+                  <div style={{ fontSize: 6, color: C.dim, ...MONO }}>
+                    simulated · no real funds at risk
+                  </div>
+                </div>
+                {paperWatching.length > 0 && (
+                  <div style={{ textAlign: "right" as const }}>
+                    <div
+                      style={{
+                        fontSize: 6,
+                        color: C.dim,
+                        ...MONO,
+                        marginBottom: 2,
+                      }}
+                    >
+                      OPEN PnL
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color:
+                          paperWatching.reduce(
+                            (s, p) => s + p.currentPnlPct,
+                            0,
+                          ) /
+                            paperWatching.length >=
+                          0
+                            ? C.green
+                            : C.red,
+                        ...MONO,
+                      }}
+                    >
+                      {paperWatching.reduce((s, p) => s + p.currentPnlPct, 0) /
+                        paperWatching.length >=
+                      0
+                        ? "+"
+                        : ""}
+                      {(
+                        paperWatching.reduce((s, p) => s + p.currentPnlPct, 0) /
+                        paperWatching.length
+                      ).toFixed(1)}
+                      %
+                    </div>
+                    <div style={{ fontSize: 6, color: C.dim, ...MONO }}>
+                      {paperWatching.length} open
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    if (confirm("Reset demo account to 10 SOL?")) {
+                      setPaperBal(10);
+                      setPaperPositions([]);
+                      setPaperLog([]);
+                    }
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${C.border}`,
+                    color: C.dim,
+                    fontSize: 6,
+                    padding: "3px 6px",
+                    borderRadius: 2,
+                    cursor: "pointer",
+                    ...MONO,
+                    alignSelf: "flex-start" as const,
+                  }}
+                >
+                  RESET
+                </button>
+              </div>
+            )}
             <div
               style={{
                 display: "flex",
@@ -3519,53 +4482,97 @@ export default function PaperTrader({
               </div>
             )}
 
-            <button
-              className="sb"
-              onClick={handleBuy}
-              disabled={!canBuy}
-              style={{
-                background: isAvoid
-                  ? "#1a0000"
+            {/* ── UNIFIED BUY BUTTON — changes based on mode ── */}
+            {!paperMode ? (
+              <button
+                className="sb"
+                onClick={handleBuy}
+                disabled={!canBuy}
+                style={{
+                  background: isAvoid
+                    ? "#1a0000"
+                    : !ca
+                      ? "#0d0d0d"
+                      : buying
+                        ? "#0d2200"
+                        : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                          ? "#111"
+                          : C.orange,
+                  border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : buying ? C.green + "44" : "transparent"}`,
+                  color: isAvoid
+                    ? C.red
+                    : !ca
+                      ? C.dim
+                      : buying
+                        ? C.green
+                        : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                          ? C.amber
+                          : "#fff",
+                  fontSize: 11,
+                  fontWeight: 900,
+                  letterSpacing: "0.14em",
+                  padding: "9px 10px",
+                  borderRadius: 4,
+                  cursor: canBuy ? "pointer" : "not-allowed",
+                  width: "100%",
+                  ...MONO,
+                  transition: "all 0.15s",
+                  boxShadow:
+                    canBuy && !buying ? `0 0 16px ${C.orange}33` : "none",
+                }}
+              >
+                {isAvoid
+                  ? "🚫 HONEYPOT — BUY BLOCKED"
                   : !ca
-                    ? "#0d0d0d"
-                    : buying
-                      ? "#0d2200"
-                      : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                        ? "#111"
-                        : C.orange,
-                border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : buying ? C.green + "44" : "transparent"}`,
-                color: isAvoid
-                  ? C.red
+                    ? "SELECT A TOKEN"
+                    : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                      ? `LOW FUNDS — ${hotBal?.toFixed(3)} SOL`
+                      : buying
+                        ? "SNIPING…"
+                        : `⚡ BUY ${sym || ""} — ${amountSol} SOL`}
+              </button>
+            ) : (
+              <button
+                className="sb"
+                onClick={handlePaperBuy}
+                disabled={!canPaperBuy}
+                style={{
+                  background: isAvoid
+                    ? "#1a0000"
+                    : !ca
+                      ? "#0d0d0d"
+                      : canPaperBuy
+                        ? "#001a08"
+                        : "#111",
+                  border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : canPaperBuy ? C.green + "66" : C.border}`,
+                  color: isAvoid
+                    ? C.red
+                    : !ca
+                      ? C.dim
+                      : canPaperBuy
+                        ? C.green
+                        : C.dim,
+                  fontSize: 11,
+                  fontWeight: 900,
+                  letterSpacing: "0.14em",
+                  padding: "9px 10px",
+                  borderRadius: 4,
+                  cursor: canPaperBuy ? "pointer" : "not-allowed",
+                  width: "100%",
+                  ...MONO,
+                  transition: "all 0.15s",
+                  boxShadow: canPaperBuy ? `0 0 16px ${C.green}22` : "none",
+                }}
+              >
+                {isAvoid
+                  ? "🚫 HONEYPOT — BLOCKED"
                   : !ca
-                    ? C.dim
-                    : buying
-                      ? C.green
-                      : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                        ? C.amber
-                        : "#fff",
-                fontSize: 11,
-                fontWeight: 900,
-                letterSpacing: "0.14em",
-                padding: "9px 10px",
-                borderRadius: 4,
-                cursor: canBuy ? "pointer" : "not-allowed",
-                width: "100%",
-                ...MONO,
-                transition: "all 0.15s",
-                boxShadow:
-                  canBuy && !buying ? `0 0 16px ${C.orange}33` : "none",
-              }}
-            >
-              {isAvoid
-                ? "🚫 HONEYPOT — BUY BLOCKED"
-                : !ca
-                  ? "SELECT A TOKEN"
-                  : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                    ? `LOW FUNDS — ${hotBal?.toFixed(3)} SOL`
-                    : buying
-                      ? "SNIPING…"
-                      : `⚡ BUY ${sym || ""} — ${amountSol} SOL`}
-            </button>
+                    ? "📄 SELECT A TOKEN"
+                    : paperBal < parseFloat(amountSol || "0")
+                      ? `📄 LOW DEMO BAL — ${paperBal.toFixed(3)} SOL`
+                      : `📄 PAPER TRADE ${sym || ""} — ${amountSol} SOL`}
+              </button>
+            )}
           </div>
         )}
 
@@ -3886,7 +4893,334 @@ export default function PaperTrader({
         {/* ── POSITIONS TAB */}
         {!collapsed && hotKeypair && tab === "positions" && (
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {watchingPositions.length === 0 ? (
+            {/* Paper positions section */}
+            {paperWatching.length > 0 && (
+              <div>
+                <div
+                  style={{
+                    padding: "5px 10px 3px",
+                    borderBottom: `1px solid ${C.border}`,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 7,
+                      color: C.green,
+                      fontWeight: 700,
+                      ...MONO,
+                      letterSpacing: "0.1em",
+                    }}
+                  >
+                    📄 PAPER POSITIONS
+                  </span>
+                  <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
+                    bal: {paperBal.toFixed(4)} SOL
+                  </span>
+                </div>
+                {paperWatching.map((pos) => {
+                  const pnlColor = pos.currentPnlPct >= 0 ? C.green : C.red;
+                  const progressToTP = Math.min(
+                    (pos.currentMcap / (pos.entryMcap * pos.tpX)) * 100,
+                    100,
+                  );
+                  const trailFromPeak =
+                    pos.peakMcap > pos.entryMcap
+                      ? (pos.currentMcap / pos.peakMcap - 1) * 100
+                      : null;
+                  return (
+                    <div
+                      key={pos.id}
+                      style={{
+                        padding: "10px 12px",
+                        borderBottom: `1px solid ${C.border}`,
+                        background: "#030a04",
+                      }}
+                    >
+                      {/* row 1 */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 7,
+                        }}
+                      >
+                        <TokenAvatar
+                          imageUrl={pos.imageUrl}
+                          symbol={pos.symbol}
+                          size={30}
+                          links={{
+                            dex: `https://dexscreener.com/solana/${pos.mint}`,
+                            pump: `https://pump.fun/${pos.mint}`,
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 5,
+                              marginBottom: 2,
+                            }}
+                          >
+                            <span
+                              style={{
+                                color: C.primary,
+                                fontSize: 12,
+                                fontWeight: 900,
+                                ...MONO,
+                              }}
+                            >
+                              ${pos.symbol}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 800,
+                                color: pnlColor,
+                                ...MONO,
+                              }}
+                            >
+                              {fmtPnl(pos.currentPnlPct)}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 7,
+                                color: C.green,
+                                background: `${C.green}11`,
+                                border: `1px solid ${C.green}33`,
+                                padding: "1px 5px",
+                                borderRadius: 2,
+                                ...MONO,
+                              }}
+                            >
+                              📄 PAPER
+                            </span>
+                          </div>
+                          <div style={{ color: C.muted, fontSize: 7, ...MONO }}>
+                            {pos.amountSol} SOL · {fmtMcap(pos.entryMcap)} →{" "}
+                            {fmtMcap(pos.currentMcap)}
+                          </div>
+                          {trailFromPeak !== null &&
+                            pos.peakMcap > pos.entryMcap && (
+                              <div
+                                style={{
+                                  color: C.amber,
+                                  fontSize: 6,
+                                  ...MONO,
+                                  marginTop: 1,
+                                }}
+                              >
+                                ▲ peak {fmtMcap(pos.peakMcap)} ·{" "}
+                                {trailFromPeak.toFixed(1)}% from peak
+                              </div>
+                            )}
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <button
+                            title="Share"
+                            onClick={() =>
+                              setShareData({
+                                symbol: pos.symbol,
+                                mint: pos.mint,
+                                entryMcap: pos.entryMcap,
+                                currentMcap: pos.currentMcap,
+                                exitMcap: undefined,
+                                amountSol: pos.amountSol,
+                                currentPnlPct: pos.currentPnlPct,
+                                exitPnlPct: undefined,
+                                tpX: pos.tpX,
+                                slPct: pos.slPct,
+                                trailPct: pos.trailPct,
+                                exitReason: undefined,
+                                imageUrl: pos.imageUrl,
+                                buyTxSig: undefined,
+                                exitTxSig: undefined,
+                                status: "watching",
+                                ts: pos.ts,
+                              })
+                            }
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: "50%",
+                              background: "transparent",
+                              border: `1px solid ${C.orange}44`,
+                              color: C.orange,
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <ShareIcon size={12} color={C.orange} />
+                          </button>
+                          <button
+                            onClick={() => handlePaperManualSell(pos.id)}
+                            style={{
+                              height: 26,
+                              paddingInline: 8,
+                              borderRadius: 3,
+                              background: `${C.red}11`,
+                              border: `1px solid ${C.red}44`,
+                              color: C.red,
+                              fontSize: 8,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              ...MONO,
+                            }}
+                          >
+                            CLOSE
+                          </button>
+                        </div>
+                      </div>
+                      {/* progress */}
+                      <div style={{ marginBottom: 7 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            marginBottom: 3,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 6,
+                              color: C.label,
+                              ...MONO,
+                              letterSpacing: "0.1em",
+                            }}
+                          >
+                            TO {pos.tpX}× TP
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 6,
+                              color: progressToTP >= 100 ? C.green : C.dim,
+                              ...MONO,
+                            }}
+                          >
+                            {progressToTP.toFixed(0)}%
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            height: 3,
+                            background: "#1a1a1a",
+                            borderRadius: 99,
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: "100%",
+                              width: `${progressToTP}%`,
+                              background:
+                                pos.currentPnlPct > 0
+                                  ? `linear-gradient(90deg, ${C.green}88, ${C.green})`
+                                  : `linear-gradient(90deg, ${C.red}88, ${C.red})`,
+                              borderRadius: 99,
+                              transition: "width 0.6s ease",
+                            }}
+                          />
+                        </div>
+                      </div>
+                      {/* SL/TRAIL/TP tiles */}
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {[
+                          {
+                            label: "STOP LOSS",
+                            sub: `${pos.slPct}%`,
+                            value: fmtMcap(
+                              pos.entryMcap * (1 + pos.slPct / 100),
+                            ),
+                            color: C.red,
+                            bg: `${C.red}08`,
+                          },
+                          {
+                            label: "TRAIL STOP",
+                            sub: `-${pos.trailPct}%`,
+                            value: fmtMcap(pos.trailStopMcap),
+                            color: C.amber,
+                            bg: `${C.amber}08`,
+                          },
+                          {
+                            label: "TAKE PROFIT",
+                            sub: `${pos.tpX}×`,
+                            value: fmtMcap(pos.entryMcap * pos.tpX),
+                            color: C.green,
+                            bg: `${C.green}08`,
+                          },
+                        ].map((item) => (
+                          <div
+                            key={item.label}
+                            style={{
+                              flex: 1,
+                              background: item.bg,
+                              border: `1px solid ${item.color}22`,
+                              borderRadius: 4,
+                              padding: "5px 6px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "baseline",
+                                marginBottom: 2,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  color: item.color,
+                                  fontSize: 6,
+                                  fontWeight: 700,
+                                  ...MONO,
+                                  letterSpacing: "0.08em",
+                                  opacity: 0.7,
+                                }}
+                              >
+                                {item.label}
+                              </span>
+                              <span
+                                style={{
+                                  color: item.color,
+                                  fontSize: 7,
+                                  fontWeight: 800,
+                                  ...MONO,
+                                }}
+                              >
+                                {item.sub}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                color: item.color,
+                                fontSize: 10,
+                                fontWeight: 900,
+                                ...MONO,
+                              }}
+                            >
+                              {item.value}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {watchingPositions.length === 0 && paperWatching.length === 0 ? (
               <div
                 style={{
                   padding: "16px",
@@ -3971,6 +5305,219 @@ export default function PaperTrader({
         {/* ── LOG TAB */}
         {!collapsed && hotKeypair && tab === "log" && (
           <div style={{ flex: 1, overflowY: "auto" }}>
+            {/* Paper log summary */}
+            {paperFilledLogs.length > 0 && (
+              <div
+                style={{
+                  padding: "6px 10px",
+                  borderBottom: `1px solid ${C.border}`,
+                  background: "#040a04",
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 7,
+                    color: C.green,
+                    fontWeight: 700,
+                    ...MONO,
+                  }}
+                >
+                  📄 PAPER
+                </span>
+                <span style={{ fontSize: 7, color: C.muted, ...MONO }}>
+                  TOTAL {paperFilledLogs.length}
+                </span>
+                <span style={{ fontSize: 7, color: C.green, ...MONO }}>
+                  WIN {paperWins}
+                </span>
+                <span style={{ fontSize: 7, color: C.red, ...MONO }}>
+                  LOSS {paperFilledLogs.length - paperWins}
+                </span>
+                <span style={{ fontSize: 7, color: C.amber, ...MONO }}>
+                  RATE{" "}
+                  {paperFilledLogs.length
+                    ? ((paperWins / paperFilledLogs.length) * 100).toFixed(0)
+                    : 0}
+                  %
+                </span>
+                <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
+                  BAL {paperBal.toFixed(4)} SOL
+                </span>
+                <button
+                  onClick={() => {
+                    if (confirm("Reset paper account to 10 SOL?")) {
+                      setPaperBal(PAPER_STARTING_SOL);
+                      setPaperPositions([]);
+                      setPaperLog([]);
+                    }
+                  }}
+                  style={{
+                    marginLeft: "auto",
+                    background: "transparent",
+                    border: `1px solid ${C.border}`,
+                    color: C.dim,
+                    fontSize: 6,
+                    padding: "2px 5px",
+                    borderRadius: 2,
+                    cursor: "pointer",
+                    ...MONO,
+                  }}
+                >
+                  RESET
+                </button>
+              </div>
+            )}
+            {paperFilledLogs.map((t) => {
+              const pnl = t.pnlPct ?? 0;
+              return (
+                <div
+                  key={`paper-${t.id}`}
+                  style={{
+                    padding: "8px 12px",
+                    borderBottom: `1px solid ${C.border}`,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "#030a04",
+                  }}
+                >
+                  <TokenAvatar
+                    imageUrl={t.imageUrl}
+                    symbol={t.symbol}
+                    size={28}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 5,
+                        marginBottom: 2,
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: C.primary,
+                          fontSize: 11,
+                          fontWeight: 800,
+                          ...MONO,
+                        }}
+                      >
+                        ${t.symbol}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          color: pnl >= 0 ? C.green : C.red,
+                          ...MONO,
+                        }}
+                      >
+                        {fmtPnl(pnl)}
+                      </span>
+                      {t.exitReason && (
+                        <span
+                          style={{
+                            fontSize: 7,
+                            padding: "1px 5px",
+                            borderRadius: 2,
+                            fontWeight: 700,
+                            ...MONO,
+                            color:
+                              t.exitReason === "TP"
+                                ? C.green
+                                : t.exitReason === "SL"
+                                  ? C.red
+                                  : C.amber,
+                            background:
+                              t.exitReason === "TP"
+                                ? `${C.green}11`
+                                : t.exitReason === "SL"
+                                  ? `${C.red}11`
+                                  : `${C.amber}11`,
+                            border: `1px solid ${t.exitReason === "TP" ? C.green + "33" : t.exitReason === "SL" ? C.red + "33" : C.amber + "33"}`,
+                          }}
+                        >
+                          {t.exitReason}
+                        </span>
+                      )}
+                      <span
+                        style={{
+                          fontSize: 7,
+                          color: C.green,
+                          background: `${C.green}11`,
+                          border: `1px solid ${C.green}33`,
+                          padding: "1px 5px",
+                          borderRadius: 2,
+                          ...MONO,
+                        }}
+                      >
+                        📄 PAPER
+                      </span>
+                    </div>
+                    <div style={{ color: C.muted, fontSize: 7, ...MONO }}>
+                      {t.amountSol} SOL · {fmtMcap(t.entryMcap)} →{" "}
+                      {fmtMcap(t.exitMcap ?? 0)}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span style={{ color: C.dim, fontSize: 7, ...MONO }}>
+                      {fmtAgo(t.ts)}
+                    </span>
+                    <button
+                      title="Share"
+                      onClick={() =>
+                        setShareData({
+                          symbol: t.symbol,
+                          mint: t.mint,
+                          entryMcap: t.entryMcap,
+                          currentMcap: t.exitMcap ?? t.entryMcap,
+                          exitMcap: t.exitMcap,
+                          amountSol: t.amountSol,
+                          currentPnlPct: t.pnlPct ?? 0,
+                          exitPnlPct: t.pnlPct,
+                          tpX: t.tpX,
+                          slPct: t.slPct,
+                          trailPct: 15,
+                          exitReason:
+                            t.exitReason as ShareCardData["exitReason"],
+                          imageUrl: t.imageUrl,
+                          buyTxSig: undefined,
+                          exitTxSig: undefined,
+                          status: "sold",
+                          ts: t.ts,
+                        })
+                      }
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: "50%",
+                        background: "transparent",
+                        border: `1px solid ${C.orange}44`,
+                        color: C.orange,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <ShareIcon size={11} color={C.orange} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
             {filledLogs.length > 0 && (
               <div
                 style={{
@@ -4017,32 +5564,32 @@ export default function PaperTrader({
                   <div
                     key={t.id}
                     style={{
-                      padding: "7px 10px",
-                      borderBottom: `1px solid ${C.bgCard}`,
+                      padding: "8px 12px",
+                      borderBottom: `1px solid ${C.border}`,
                       display: "flex",
                       alignItems: "center",
-                      gap: 7,
+                      gap: 8,
                     }}
                   >
                     <TokenAvatar
                       imageUrl={t.imageUrl}
                       symbol={t.symbol}
-                      size={26}
+                      size={28}
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
                           display: "flex",
                           alignItems: "center",
-                          gap: 4,
-                          marginBottom: 1,
+                          gap: 5,
+                          marginBottom: 2,
                         }}
                       >
                         <span
                           style={{
                             color: C.primary,
-                            fontSize: 10,
-                            fontWeight: 700,
+                            fontSize: 11,
+                            fontWeight: 800,
                             ...MONO,
                           }}
                         >
@@ -4050,8 +5597,8 @@ export default function PaperTrader({
                         </span>
                         <span
                           style={{
-                            fontSize: 8,
-                            fontWeight: 700,
+                            fontSize: 10,
+                            fontWeight: 800,
                             color: pnl >= 0 ? C.green : C.red,
                             ...MONO,
                           }}
@@ -4061,9 +5608,10 @@ export default function PaperTrader({
                         {t.exitReason && (
                           <span
                             style={{
-                              fontSize: 6,
-                              padding: "1px 4px",
+                              fontSize: 7,
+                              padding: "1px 5px",
                               borderRadius: 2,
+                              fontWeight: 700,
                               ...MONO,
                               color:
                                 t.exitReason === "TP"
@@ -4071,6 +5619,12 @@ export default function PaperTrader({
                                   : t.exitReason === "SL"
                                     ? C.red
                                     : C.amber,
+                              background:
+                                t.exitReason === "TP"
+                                  ? `${C.green}11`
+                                  : t.exitReason === "SL"
+                                    ? `${C.red}11`
+                                    : `${C.amber}11`,
                               border: `1px solid ${t.exitReason === "TP" ? C.green + "33" : t.exitReason === "SL" ? C.red + "33" : C.amber + "33"}`,
                             }}
                           >
@@ -4085,17 +5639,12 @@ export default function PaperTrader({
                     </div>
                     <div
                       style={{
-                        textAlign: "right" as const,
                         flexShrink: 0,
                         display: "flex",
-                        flexDirection: "column",
-                        alignItems: "flex-end",
-                        gap: 2,
+                        alignItems: "center",
+                        gap: 6,
                       }}
                     >
-                      <div style={{ color: C.dim, fontSize: 7, ...MONO }}>
-                        {fmtAgo(t.ts)}
-                      </div>
                       {t.exitTxSig && (
                         <a
                           href={`https://solscan.io/tx/${t.exitTxSig}`}
@@ -4111,21 +5660,27 @@ export default function PaperTrader({
                           {t.exitTxSig.slice(0, 8)}↗
                         </a>
                       )}
+                      <span style={{ color: C.dim, fontSize: 7, ...MONO }}>
+                        {fmtAgo(t.ts)}
+                      </span>
                       {/* share button in log */}
                       <button
+                        title="Share"
                         onClick={() => handleShareFromLog(t)}
                         style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: "50%",
                           background: "transparent",
-                          border: `1px solid ${C.orange}33`,
+                          border: `1px solid ${C.orange}44`,
                           color: C.orange,
-                          fontSize: 6,
-                          padding: "2px 5px",
-                          borderRadius: 2,
                           cursor: "pointer",
-                          ...MONO,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                         }}
                       >
-                        ↗ SHARE
+                        <ShareIcon size={11} color={C.orange} />
                       </button>
                     </div>
                   </div>

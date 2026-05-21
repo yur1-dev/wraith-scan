@@ -129,8 +129,12 @@ function fmtPrice(n?: number): string {
   return `$${n.toFixed(2)}`;
 }
 
+// Supply cache shared across fetches — derived once from DexScreener, used by Jupiter
+const _tokenSupplyCache = new Map<string, number>();
+
 async function fetchLiveTokenData(ca: string): Promise<LiveTokenData> {
   try {
+    // ── Step 1: DexScreener for metadata + supply baseline ──
     const res = await fetch(
       `https://api.dexscreener.com/latest/dex/tokens/${ca}`,
       { signal: AbortSignal.timeout(8000) },
@@ -147,6 +151,7 @@ async function fetchLiveTokenData(ca: string): Promise<LiveTokenData> {
       );
     if (!pairs.length) return {};
     const pair = pairs[0];
+
     const ageMin = pair.pairCreatedAt
       ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
       : undefined;
@@ -158,13 +163,45 @@ async function fetchLiveTokenData(ca: string): Promise<LiveTokenData> {
             ? `${Math.floor(ageMin / 60)}h old`
             : `${Math.floor(ageMin / 1440)}d old`
         : undefined;
+
+    // Use marketCap (circulating) not fdv (total supply, inflated for memecoins)
+    const dexMcap = pair.marketCap || pair.fdv || 0;
+    const dexPrice = parseFloat(pair.priceUsd || "0") || 0;
+
+    // Cache circulating supply for Jupiter price calculation
+    if (dexPrice > 0 && dexMcap > 0 && !_tokenSupplyCache.has(ca)) {
+      _tokenSupplyCache.set(ca, dexMcap / dexPrice);
+    }
+
+    // ── Step 2: Jupiter Price v2 — real-time, matches what swaps execute at ──
+    let liveMcap = dexMcap;
+    let livePrice = dexPrice;
+    try {
+      const jupRes = await fetch(`https://api.jup.ag/price/v2?ids=${ca}`, {
+        signal: AbortSignal.timeout(4000),
+      });
+      const jupData = await jupRes.json();
+      const jupPrice = parseFloat(jupData?.data?.[ca]?.price ?? "0");
+      if (jupPrice > 0) {
+        livePrice = jupPrice;
+        const supply = _tokenSupplyCache.get(ca);
+        if (supply && supply > 0) {
+          liveMcap = jupPrice * supply;
+        } else if (dexMcap > 0 && dexPrice > 0) {
+          liveMcap = (jupPrice / dexPrice) * dexMcap;
+        }
+      }
+    } catch {
+      // Jupiter unavailable — DexScreener values are still better than nothing
+    }
+
     return {
-      mcap: pair.fdv || pair.marketCap,
+      mcap: liveMcap,
       liquidity: pair.liquidity?.usd,
       priceChange1h: pair.priceChange?.h1,
       priceChange24h: pair.priceChange?.h24,
       volume24h: pair.volume?.h24,
-      price: parseFloat(pair.priceUsd || "0") || undefined,
+      price: livePrice || undefined,
       age,
     };
   } catch {
@@ -517,10 +554,13 @@ export default function TokenPanel({ selectedMeme }: Props) {
       setLiveData(d);
       setLiveLoading(false);
     });
+    // Poll every 8s — Jupiter Price v2 is fast enough, matches chart update cadence
     const t = setInterval(() => {
       if (selectedMeme?.contractAddress)
-        fetchLiveTokenData(selectedMeme.contractAddress).then(setLiveData);
-    }, 30000);
+        fetchLiveTokenData(selectedMeme.contractAddress).then((d) => {
+          if (d && Object.keys(d).length) setLiveData(d);
+        });
+    }, 8000);
     return () => clearInterval(t);
   }, [selectedMeme?.contractAddress]);
 
@@ -622,7 +662,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
     );
   }
 
-  const displayMcap = liveData.mcap || selectedMeme.mcap;
+  // liveData.mcap comes from Jupiter (real-time) — never fall back to selectedMeme.mcap
+  // which was captured at scan time and is always stale
+  const displayMcap = liveData.mcap ?? undefined;
   const displayLiq = liveData.liquidity || selectedMeme.liquidity;
   const displayCh1h = liveData.priceChange1h ?? selectedMeme.priceChange1h;
   const displayCh24h = liveData.priceChange24h ?? selectedMeme.priceChange24h;

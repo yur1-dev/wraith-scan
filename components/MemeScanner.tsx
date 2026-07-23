@@ -631,10 +631,10 @@ function ConvictionBadge({ tier, score }: { tier?: string; score?: number }) {
   if (!tier || tier === "SKIP" || tier === "LOW") return null;
   const cfg =
     tier === "ULTRA"
-      ? { label: "🔥 ULTRA", color: "#ffd700", bg: "#120c00" }
+      ? { label: "🔥 ULTRA", color: "#ffd700", bg: "#161000" }
       : tier === "HIGH"
-        ? { label: "⚡ HIGH", color: "#00c47a", bg: "#001610" }
-        : { label: "✦ MED", color: "#ffaa00", bg: "#0e0800" };
+        ? { label: "⚡ HIGH", color: "#00c47a", bg: "#001c14" }
+        : { label: "✦ MED", color: "#ffaa00", bg: "#120c00" };
   return (
     <span
       style={{
@@ -643,10 +643,15 @@ function ConvictionBadge({ tier, score }: { tier?: string; score?: number }) {
         ...MONO,
         color: cfg.color,
         background: cfg.bg,
-        border: `1px solid ${cfg.color}44`,
-        padding: "1px 5px",
-        borderRadius: 2,
-        letterSpacing: "0.06em",
+        border: `1px solid ${cfg.color}55`,
+        padding: "2px 7px",
+        borderRadius: 3,
+        letterSpacing: "0.08em",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        animation:
+          tier === "ULTRA" ? "wraithScan 2.2s ease-in-out infinite" : undefined,
       }}
     >
       {cfg.label}
@@ -782,8 +787,10 @@ function DecisionChain({ item }: { item: ScanResult }) {
         flexDirection: "column",
         gap: 10,
         padding: "12px 14px",
-        background: "#040404",
-        borderTop: "1px solid #111",
+        marginTop: 4,
+        background: "#080808",
+        border: "1px solid #161616",
+        borderRadius: 10,
       }}
     >
       <div>
@@ -1014,7 +1021,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
           results: ScanResult[];
           logs: string[];
           scannedAt: string;
-        }>("/api/scan", { timeout: 85000 });
+        }>("/api/scan", { timeout: 120000 });
         clearInterval(ticker);
         setProgress(100);
         const { results, logs } = res.data;
@@ -1032,7 +1039,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
           ? err.response?.data?.error || err.message
           : "Unknown error";
         if (axios.isAxiosError(err) && err.response?.status === 429) {
-          setError("Rate limit — wait ~2 min before next scan");
+          setError("Rate limit — wait a few minutes before next scan");
           setAutoScan(false);
         } else {
           setError(`Scan failed: ${msg}`);
@@ -1179,6 +1186,13 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         flexDirection: "column",
       }}
     >
+      <style>{`
+        @keyframes wraithScan {
+          0%   { box-shadow: 0 0 0 0 #ffd70055, inset 0 0 0 0 #ffd70000; }
+          50%  { box-shadow: 0 0 10px 1px #ffd70055, inset 0 0 6px 0 #ffd70022; }
+          100% { box-shadow: 0 0 0 0 #ffd70055, inset 0 0 0 0 #ffd70000; }
+        }
+      `}</style>
       {/* Header */}
       <div
         style={{
@@ -1423,14 +1437,27 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
               key={key}
               onClick={() => setFilter(key)}
               style={{
-                background: active ? "#111" : "transparent",
-                border: `1px solid ${active ? col + "55" : "transparent"}`,
+                background: active ? `${col}14` : "#0a0a0a",
+                border: `1px solid ${active ? col + "55" : "#161616"}`,
                 color: active ? col : "#555",
-                borderRadius: 3,
-                padding: "3px 8px",
+                borderRadius: 20,
+                padding: "4px 11px",
                 fontSize: 9,
+                fontWeight: active ? 700 : 400,
                 cursor: "pointer",
+                transition:
+                  "background .15s ease, border-color .15s ease, color .15s ease",
                 ...MONO,
+              }}
+              onMouseEnter={(e) => {
+                if (!active)
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    "#2a2a2a";
+              }}
+              onMouseLeave={(e) => {
+                if (!active)
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    "#161616";
               }}
             >
               {label}
@@ -1475,7 +1502,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       )}
 
       {/* Token list */}
-      <div style={{ flex: 1, overflowY: "auto" as const }}>
+      <div style={{ flex: 1, overflowY: "auto" as const, padding: "4px 0" }}>
         {filtered.map((t, i) => {
           const sig = getSignal(t);
           const isSelected = selectedMeme?.keyword === t.keyword;
@@ -1499,7 +1526,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
               : null;
 
           return (
-            <div key={t.keyword} style={{ borderBottom: "1px solid #0d0d0d" }}>
+            <div key={t.keyword} style={{ padding: "3px 8px" }}>
               <button
                 onClick={() => {
                   onSelectMeme(t);
@@ -1508,36 +1535,46 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                 style={{
                   width: "100%",
                   textAlign: "left",
-                  padding: "10px 14px",
+                  padding: "12px 14px",
                   background: isSelected
                     ? isCeleb
-                      ? "#0d0a00"
-                      : "#0d0300"
-                    : "transparent",
-                  borderTop: "none",
-                  borderRight: "none",
-                  borderBottom: "none",
-                  borderLeft: `2px solid ${isSelected ? (isCeleb ? "#ffd700" : "#e8490f") : "transparent"}`,
+                      ? "#141000"
+                      : "#140800"
+                    : "#0a0a0a",
+                  border: `1px solid ${isSelected ? (isCeleb ? "#ffd70044" : "#e8490f44") : "#161616"}`,
+                  borderRadius: 10,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
                   cursor: "pointer",
                   gap: 8,
                   opacity: qualityWarning ? 0.6 : ageDisplay.isStale ? 0.4 : 1,
+                  transition:
+                    "background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease",
                 }}
                 onMouseEnter={(e) => {
-                  if (!isSelected)
-                    (e.currentTarget as HTMLElement).style.background =
-                      "#0a0a0a";
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = "translateY(-1px)";
+                  el.style.boxShadow = "0 6px 16px -8px rgba(0,0,0,0.6)";
+                  if (!isSelected) {
+                    el.style.background = "#0d0d0d";
+                    el.style.borderColor = "#242424";
+                  }
                 }}
                 onMouseLeave={(e) => {
-                  if (!isSelected)
-                    (e.currentTarget as HTMLElement).style.background =
-                      isSelected
-                        ? isCeleb
-                          ? "#0d0a00"
-                          : "#0d0300"
-                        : "transparent";
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.transform = "translateY(0)";
+                  el.style.boxShadow = "none";
+                  el.style.background = isSelected
+                    ? isCeleb
+                      ? "#141000"
+                      : "#140800"
+                    : "#0a0a0a";
+                  el.style.borderColor = isSelected
+                    ? isCeleb
+                      ? "#ffd70044"
+                      : "#e8490f44"
+                    : "#161616";
                 }}
               >
                 <div
@@ -1837,7 +1874,11 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                 </div>
               </button>
 
-              {isExpanded && <DecisionChain item={t} />}
+              {isExpanded && (
+                <div style={{ marginTop: 2 }}>
+                  <DecisionChain item={t} />
+                </div>
+              )}
             </div>
           );
         })}

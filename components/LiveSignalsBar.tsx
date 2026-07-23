@@ -282,17 +282,18 @@ export default function LiveSignalsBar({
       style={{
         background: "#030303",
         borderBottom: "1px solid #141414",
-        padding: "5px 14px 7px",
+        padding: "5px 0 7px",
         flexShrink: 0,
       }}
     >
       <style>{`
-        @keyframes sigpulse { 0%,100%{opacity:1} 50%{opacity:.2} }
-        .sig-card { cursor:pointer; transition:background .15s, border-color .15s, transform .1s; }
-        .sig-card:hover { background:#0b0b0b !important; transform:translateY(-1px); border-top-color: rgba(232,73,15,.7) !important; }
-        .sig-nav { background:transparent; border:none; cursor:pointer; padding:2px 6px; transition:color .15s; }
-        .sig-nav:disabled { opacity:.15; cursor:default; }
-        .sig-nav:not(:disabled):hover { color:#e8490f !important; }
+        @keyframes sigpulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+        .sig-card { cursor:pointer; transition:background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+        .sig-card:hover { background:#0d0d0d !important; transform:translateY(-2px); box-shadow: 0 8px 20px -8px rgba(0,0,0,0.6); border-color: #242424 !important; }
+        .sig-nav { background:#0d0d0d; border:1px solid #1c1c1c; border-radius:6px; cursor:pointer; padding:4px 9px; transition:color .15s, border-color .15s, background .15s; }
+        .sig-nav:disabled { opacity:.25; cursor:default; }
+        .sig-nav:not(:disabled):hover { color:#e8490f !important; border-color:#e8490f44 !important; background:#0f0a06 !important; }
+        .sig-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
       `}</style>
 
       {/* Header */}
@@ -403,7 +404,7 @@ export default function LiveSignalsBar({
       )}
 
       {sigs.length > 0 && (
-        <div style={{ display: "flex", gap: 5 }}>
+        <div className="sig-grid">
           {visible.map((sig) => {
             const sym = (sig.tokenSymbol || sig.keyword)
               .toUpperCase()
@@ -440,137 +441,147 @@ export default function LiveSignalsBar({
                 className="sig-card"
                 onClick={() => click(sig)}
                 style={{
-                  flex: 1,
+                  position: "relative",
                   minWidth: 0,
-                  background: "#070707",
-                  border: `1px solid ${tc}20`,
-                  borderTop: `2px solid ${tc}`,
-                  borderRadius: "0 0 4px 4px",
-                  padding: "5px 9px 7px",
+                  background: "#0a0a0a",
+                  border: "1px solid #161616",
+                  borderRadius: 10,
+                  padding: "10px 11px 9px",
+                  display: "flex",
+                  flexDirection: "column" as const,
+                  gap: 7,
                 }}
               >
-                {/* Row 1 */}
+                {/* Tier chip — a status tab hanging off the top edge,
+                    rather than crammed inline next to the ticker */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: -1,
+                    left: 10,
+                    fontSize: 7,
+                    fontWeight: 900,
+                    ...MONO,
+                    color: "#0a0a0a",
+                    background: tc,
+                    padding: "2px 7px",
+                    borderRadius: "0 0 4px 4px",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  {tierLabel}
+                </div>
+
+                {/* Symbol + age */}
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    marginBottom: 4,
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 6,
+                    marginTop: 6,
                   }}
                 >
                   <span
                     style={{
-                      fontSize: 7,
-                      fontWeight: 900,
+                      color: "#f0f0f0",
+                      fontSize: 15,
+                      fontWeight: 800,
                       ...MONO,
-                      color: tc,
-                      background: `${tc}18`,
-                      border: `1px solid ${tc}30`,
-                      padding: "1px 5px",
-                      borderRadius: 2,
-                      flexShrink: 0,
-                      letterSpacing: "0.06em",
-                    }}
-                  >
-                    {tierLabel}
-                  </span>
-                  <span
-                    style={{
-                      color: "#e0e0e0",
-                      fontSize: 13,
-                      fontWeight: 900,
-                      ...MONO,
-                      flex: 1,
+                      letterSpacing: "-0.01em",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap" as const,
-                      lineHeight: 1,
+                      lineHeight: 1.1,
                     }}
                   >
                     ${sym}
                   </span>
                   <span
                     style={{
-                      color: "#2e2e2e",
+                      color: "#3a3a3a",
                       fontSize: 8,
                       ...MONO,
                       flexShrink: 0,
+                      marginTop: 2,
                     }}
                   >
                     {ageMin < 1 ? "now" : `${ageMin}m`}
                   </span>
                 </div>
 
-                {/* Row 2: mcap + AI score */}
-                <div
+                {/* Mcap */}
+                <span
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    marginBottom: 4,
+                    color: "#e8490f",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    ...MONO,
                   }}
                 >
-                  <span
+                  {fmtMcap(sig.initialMcap)}
+                </span>
+
+                {/* AI score — a real gauge bar, not a dot grid */}
+                {canSeeAiScore && typeof sig.aiScore === "number" && (
+                  <div
                     style={{
-                      color: "#e8490f",
-                      fontSize: 11,
-                      fontWeight: 800,
-                      ...MONO,
+                      display: "flex",
+                      flexDirection: "column" as const,
+                      gap: 3,
                     }}
                   >
-                    {fmtMcap(sig.initialMcap)}
-                  </span>
-                  {canSeeAiScore && typeof sig.aiScore === "number" ? (
                     <div
                       style={{
-                        marginLeft: "auto",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 2,
+                        height: 4,
+                        borderRadius: 3,
+                        background: "#141414",
+                        overflow: "hidden",
                       }}
                     >
-                      {Array.from({ length: 5 }).map((_, i) => {
-                        const filled = Math.round(sig.aiScore! / 20);
-                        const dc =
-                          sig.aiTier === "HOT"
-                            ? HOT_COLOR
-                            : sig.aiTier === "WATCH"
-                              ? "#ffaa00"
-                              : "#00c47a";
-                        return (
-                          <div
-                            key={i}
-                            style={{
-                              width: 5,
-                              height: 5,
-                              borderRadius: 1,
-                              background: i < filled ? dc : "#141414",
-                            }}
-                          />
-                        );
-                      })}
-                      <span
+                      <div
                         style={{
-                          fontSize: 8,
-                          fontWeight: 800,
-                          ...MONO,
-                          marginLeft: 2,
-                          color:
+                          height: "100%",
+                          width: `${Math.max(0, Math.min(100, sig.aiScore))}%`,
+                          background:
                             sig.aiTier === "HOT"
                               ? HOT_COLOR
                               : sig.aiTier === "WATCH"
                                 ? "#ffaa00"
                                 : "#00c47a",
+                          borderRadius: 3,
+                          transition: "width .3s ease",
                         }}
-                      >
-                        {sig.aiScore}
-                      </span>
+                      />
                     </div>
-                  ) : null}
-                </div>
+                    <span
+                      style={{
+                        fontSize: 8,
+                        fontWeight: 700,
+                        ...MONO,
+                        alignSelf: "flex-end",
+                        color:
+                          sig.aiTier === "HOT"
+                            ? HOT_COLOR
+                            : sig.aiTier === "WATCH"
+                              ? "#ffaa00"
+                              : "#00c47a",
+                      }}
+                    >
+                      {sig.aiScore}/100
+                    </span>
+                  </div>
+                )}
 
-                {/* Row 3: platforms */}
+                {/* Platforms */}
                 <div
-                  style={{ display: "flex", gap: 3, flexWrap: "wrap" as const }}
+                  style={{
+                    display: "flex",
+                    gap: 3,
+                    flexWrap: "wrap" as const,
+                    marginTop: "auto",
+                    paddingTop: 2,
+                  }}
                 >
                   {keyPlats.map((p) => (
                     <span
@@ -579,18 +590,25 @@ export default function LiveSignalsBar({
                         fontSize: 7,
                         ...MONO,
                         color: PLAT_COLOR[p] || "#444",
-                        background: `${PLAT_COLOR[p] || "#444"}14`,
-                        border: `1px solid ${PLAT_COLOR[p] || "#444"}28`,
-                        padding: "1px 5px",
-                        borderRadius: 2,
-                        letterSpacing: "0.04em",
+                        background: `${PLAT_COLOR[p] || "#444"}12`,
+                        border: `1px solid ${PLAT_COLOR[p] || "#444"}26`,
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        letterSpacing: "0.03em",
                       }}
                     >
                       {PLAT_LABEL[p] || p.slice(0, 3).toUpperCase()}
                     </span>
                   ))}
                   {sig.platforms.length > 4 && (
-                    <span style={{ fontSize: 7, color: "#2a2a2a", ...MONO }}>
+                    <span
+                      style={{
+                        fontSize: 7,
+                        color: "#333",
+                        ...MONO,
+                        alignSelf: "center",
+                      }}
+                    >
                       +{sig.platforms.length - 4}
                     </span>
                   )}
@@ -598,10 +616,6 @@ export default function LiveSignalsBar({
               </div>
             );
           })}
-          {visible.length < PAGE_SIZE &&
-            Array.from({ length: PAGE_SIZE - visible.length }).map((_, i) => (
-              <div key={`g${i}`} style={{ flex: 1, minWidth: 0 }} />
-            ))}
         </div>
       )}
     </div>

@@ -3116,7 +3116,7 @@ export async function GET() {
   const { success: rateLimitOk } = await checkLimit(
     scanLimiter,
     session.user.id,
-    false,
+    process.env.NODE_ENV !== "production",
   );
   if (!rateLimitOk) {
     return NextResponse.json(

@@ -3,6 +3,20 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { MemeTrend } from "@/app/app/page";
 import {
+  Flame,
+  Rocket,
+  Bell,
+  Trash2,
+  Undo2,
+  Star,
+  Send,
+  ExternalLink,
+  RefreshCw,
+  Check,
+  AlertTriangle,
+  DollarSign,
+} from "lucide-react";
+import {
   saveHistory,
   fetchCurrentMcap,
   fetchTokenMeta,
@@ -1032,8 +1046,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         @keyframes aglow{0%,100%{box-shadow:0 0 8px #ffd70022}50%{box-shadow:0 0 18px #ffd70055}}
         @keyframes tgsend{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
         @keyframes hotpulse{0%,100%{box-shadow:0 0 0 0 #ff6b3500}50%{box-shadow:0 0 8px 2px #ff6b3533}}
-        .wc{cursor:pointer;transition:background .1s;position:relative}
-        .wc:hover{background:#0a0a0a!important}
+.wc{cursor:pointer;transition:background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;position:relative}
+        .wc:hover{background:#0d0d0d!important;transform:translateY(-1px);box-shadow:0 6px 16px -8px rgba(0,0,0,0.6)}
         .wdel{opacity:0;transition:opacity .12s}
         .wc:hover .wdel{opacity:1}
         .tpb{animation:aglow 2s ease-in-out infinite}
@@ -1097,9 +1111,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 borderRadius: 3,
                 ...MONO,
                 background: `${C.yellow}0f`,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
               }}
             >
-              💰 {tpAlerts.length}× TAKE PROFIT
+              <DollarSign size={10} />
+              {tpAlerts.length}× TAKE PROFIT
             </span>
           )}
           {hotWins > 0 && (
@@ -1112,13 +1132,27 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 borderRadius: 3,
                 ...MONO,
                 background: `${C.hot}0f`,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
               }}
             >
-              🔥 {hotWins} HOT WIN{hotWins !== 1 ? "S" : ""}
+              <Flame size={10} />
+              {hotWins} HOT WIN{hotWins !== 1 ? "S" : ""}
             </span>
           )}
           <span style={{ color: C.dim, fontSize: 9, ...MONO, flexShrink: 0 }}>
-            {refreshing ? "refreshing..." : `↻ ${nextIn}s`}
+            {refreshing ? (
+              "refreshing..."
+            ) : (
+              <span
+                style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
+              >
+                <RefreshCw size={9} /> {nextIn}s
+              </span>
+            )}
           </span>
           {tgEnabled && tgStatus !== "idle" && (
             <span
@@ -1156,9 +1190,10 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               background: "transparent",
               border: "none",
               color: notifEnabled ? `${C.green}88` : C.dim,
-              fontSize: 14,
               cursor: notifEnabled ? "default" : "pointer",
               padding: "2px 4px",
+              display: "flex",
+              alignItems: "center",
             }}
             title={
               notifEnabled
@@ -1166,14 +1201,18 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                 : "Click to enable notifications"
             }
           >
-            🔔
+            <Bell size={13} />
           </button>
           {tgEnabled && (
             <span
-              style={{ fontSize: 11, color: `${C.blue}88` }}
+              style={{
+                color: `${C.blue}88`,
+                display: "flex",
+                alignItems: "center",
+              }}
               title="Telegram alerts on"
             >
-              ✈
+              <Send size={12} />
             </span>
           )}
           <button
@@ -1190,7 +1229,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               cursor: "pointer",
             }}
           >
-            {refreshing ? "···" : "↻ NOW"}
+            {refreshing ? (
+              "···"
+            ) : (
+              <span
+                style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+              >
+                <RefreshCw size={10} /> NOW
+              </span>
+            )}
           </button>
           <button
             onClick={clearAll}
@@ -1323,8 +1370,13 @@ export default function WinsPanel({ onSelectMeme }: Props) {
             <div
               style={{ color: C.amber, fontSize: 10, fontWeight: 700, ...MONO }}
             >
-              🗑 {deadCount} dead / stale token{deadCount !== 1 ? "s" : ""}{" "}
-              detected
+              <span
+                style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+              >
+                <Trash2 size={11} />
+                {deadCount} dead / stale token{deadCount !== 1 ? "s" : ""}{" "}
+                detected
+              </span>
             </div>
             <div style={{ color: C.dim, fontSize: 8, ...MONO, marginTop: 2 }}>
               Down {(DEAD_THRESHOLD * 100).toFixed(0)}%+ from entry or older
@@ -1427,7 +1479,11 @@ export default function WinsPanel({ onSelectMeme }: Props) {
               cursor: "pointer",
             }}
           >
-            ↩ UNDO
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+            >
+              <Undo2 size={11} /> UNDO
+            </span>
           </button>
         </div>
       )}
@@ -1482,7 +1538,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       )}
 
       {/* CARD LIST */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "6px 8px" }}>
         {list.map((entry) => {
           const snaps = safeSnapshots(entry.snapshots);
           const xNow = calcX(entry.initialMcap, entry.currentMcap);
@@ -1531,11 +1587,11 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                   } as React.MouseEvent);
               }}
               style={{
-                borderBottom: `1px solid ${C.bgCard}`,
-                borderTop: "none",
-                borderRight: "none",
-                borderLeft: `2px solid ${isSel ? (isMega ? C.yellow : C.orange) : isHot ? C.hot : accent}`,
-                background: isSel ? "#0d0300" : isHot ? "#0d0500" : C.bg,
+                marginBottom: 8,
+                borderRadius: 6,
+                overflow: "hidden",
+                border: `1px solid ${isSel ? C.orange + "55" : "#1a1a1a"}`,
+                background: "#0a0a0a",
               }}
             >
               {showTP && (
@@ -1560,10 +1616,23 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         ...MONO,
                       }}
                     >
-                      {xNow >= 5 ? "🚨 TAKE PROFIT — " : "💰 TAKE PROFIT — "}
-                      {xNow >= 10
-                        ? `${xNow.toFixed(1)}x`
-                        : `${xNow.toFixed(2)}x`}
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                        }}
+                      >
+                        {xNow >= 5 ? (
+                          <AlertTriangle size={11} />
+                        ) : (
+                          <DollarSign size={11} />
+                        )}
+                        TAKE PROFIT —{" "}
+                        {xNow >= 10
+                          ? `${xNow.toFixed(1)}x`
+                          : `${xNow.toFixed(2)}x`}
+                      </span>
                     </div>
                     <div
                       style={{
@@ -1611,7 +1680,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         cursor: "pointer",
                       }}
                     >
-                      SOLD ✓
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        SOLD <Check size={10} strokeWidth={3} />
+                      </span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -1706,7 +1783,12 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             background: `${C.green}0f`,
                           }}
                         >
-                          ✓ IN
+                          <Check
+                            size={9}
+                            strokeWidth={3}
+                            style={{ verticalAlign: -1 }}
+                          />{" "}
+                          IN
                         </span>
                       )}
                       {isMega && (
@@ -1721,7 +1803,7 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             background: `${C.yellow}1a`,
                           }}
                         >
-                          🚀 MEGA
+                          <Rocket size={9} style={{ verticalAlign: -1 }} /> MEGA
                         </span>
                       )}
                       {!isMega && isWin && (
@@ -1735,7 +1817,12 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             ...MONO,
                           }}
                         >
-                          ✓ WIN
+                          <Check
+                            size={9}
+                            strokeWidth={3}
+                            style={{ verticalAlign: -1 }}
+                          />{" "}
+                          WIN
                         </span>
                       )}
                       {hasDumped && (
@@ -1777,7 +1864,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             ...MONO,
                           }}
                         >
-                          ⭐ {entry.celebMention?.split(" ")[0]}
+                          <Star size={9} style={{ verticalAlign: -1 }} />{" "}
+                          {entry.celebMention?.split(" ")[0]}
                         </span>
                       )}
                       {!earned && xNow < 1.5 && xPeak < 1.5 && (
@@ -2045,7 +2133,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                           ...MONO,
                         }}
                       >
-                        CHART↗
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 3,
+                          }}
+                        >
+                          CHART <ExternalLink size={9} />
+                        </span>
                       </button>
                     )}
                     {entry.contractAddress && (
@@ -2065,7 +2161,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             ...MONO,
                           }}
                         >
-                          DEX↗
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 3,
+                            }}
+                          >
+                            DEX <ExternalLink size={9} />
+                          </span>
                         </a>
                         <a
                           href={`https://pump.fun/${entry.contractAddress}`}
@@ -2082,7 +2186,15 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                             ...MONO,
                           }}
                         >
-                          PUMP↗
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 3,
+                            }}
+                          >
+                            PUMP <ExternalLink size={9} />
+                          </span>
                         </a>
                       </>
                     )}
@@ -2104,7 +2216,19 @@ export default function WinsPanel({ onSelectMeme }: Props) {
                         fontWeight: hasBought ? 700 : 400,
                       }}
                     >
-                      {hasBought ? "✓ IN" : "BUY?"}
+                      {hasBought ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 3,
+                          }}
+                        >
+                          <Check size={9} strokeWidth={3} /> IN
+                        </span>
+                      ) : (
+                        "BUY?"
+                      )}
                     </button>
                     <button
                       className="wdel"

@@ -50,6 +50,242 @@ interface TokenResult {
 
 const TELEGRAM_TIERS = ["SPECTER", "WRAITH"];
 
+function TokenRow({
+  token,
+  isLast,
+  copiedAddr,
+  onSelect,
+  onCopy,
+  onOpenDex,
+  showOpenCta,
+}: {
+  token: TokenResult;
+  isLast: boolean;
+  copiedAddr: string | null;
+  onSelect: (t: TokenResult) => void;
+  onCopy: (e: React.MouseEvent, addr: string) => void;
+  onOpenDex: (e: React.MouseEvent, t: TokenResult) => void;
+  showOpenCta: boolean;
+}) {
+  return (
+    <div style={{ borderBottom: isLast ? "none" : "1px solid #0d0d0d" }}>
+      <div
+        onClick={() => onSelect(token)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          padding: "10px 14px 6px",
+          cursor: "pointer",
+          transition: "background .1s",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "#0d0d0d";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.background = "transparent";
+        }}
+      >
+        <div style={{ flexShrink: 0, width: 32, height: 32 }}>
+          {token.icon ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={token.icon}
+              alt={token.symbol}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: "1px solid #1a1a1a",
+                display: "block",
+              }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: "#e8490f14",
+                border: "1px solid #e8490f2a",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#e8490f",
+                fontSize: 12,
+                fontWeight: 700,
+                ...MONO,
+              }}
+            >
+              {token.symbol[0]}
+            </div>
+          )}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              color: "#d0d0d0",
+              fontSize: 12,
+              fontWeight: 700,
+              ...MONO,
+              letterSpacing: ".04em",
+            }}
+          >
+            {token.symbol}
+          </div>
+          <div
+            style={{
+              color: "#2e2e2e",
+              fontSize: 9,
+              ...MONO,
+              marginTop: 2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {token.name}
+          </div>
+        </div>
+
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ color: "#888", fontSize: 11, ...MONO }}>
+            {formatPrice(token.priceUsd)}
+          </div>
+          <div
+            style={{
+              fontSize: 9,
+              ...MONO,
+              marginTop: 2,
+              color: token.priceChange24h >= 0 ? "#00c47a" : "#ff4444",
+            }}
+          >
+            {token.priceChange24h >= 0 ? "+" : ""}
+            {token.priceChange24h.toFixed(1)}%
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "#0d0d0d",
+            border: "1px solid #161616",
+            borderRadius: 4,
+            padding: "3px 8px",
+            color: "#383838",
+            fontSize: 9,
+            ...MONO,
+            flexShrink: 0,
+            minWidth: 56,
+            textAlign: "center",
+          }}
+        >
+          {formatMcap(token.marketCap)}
+        </div>
+
+        {showOpenCta && (
+          <div
+            style={{
+              background: "#e8490f0e",
+              border: "1px solid #e8490f2a",
+              borderRadius: 4,
+              padding: "3px 8px",
+              color: "#e8490f88",
+              fontSize: 9,
+              ...MONO,
+              flexShrink: 0,
+              letterSpacing: ".06em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            OPEN →
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "0 14px 8px 57px",
+        }}
+      >
+        <span
+          style={{
+            color: "#1e1e1e",
+            fontSize: 9,
+            ...MONO,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          {token.address}
+        </span>
+
+        <button
+          onClick={(e) => onCopy(e, token.address)}
+          style={{
+            background: "transparent",
+            border: "1px solid #181818",
+            borderRadius: 3,
+            padding: "2px 7px",
+            color: copiedAddr === token.address ? "#00c47a" : "#2a2a2a",
+            fontSize: 8,
+            ...MONO,
+            cursor: "pointer",
+            letterSpacing: ".06em",
+            flexShrink: 0,
+            transition: "all .15s",
+          }}
+          onMouseEnter={(e) => {
+            if (copiedAddr !== token.address)
+              e.currentTarget.style.color = "#555";
+          }}
+          onMouseLeave={(e) => {
+            if (copiedAddr !== token.address)
+              e.currentTarget.style.color = "#2a2a2a";
+          }}
+        >
+          {copiedAddr === token.address ? "COPIED" : "COPY CA"}
+        </button>
+
+        <button
+          onClick={(e) => onOpenDex(e, token)}
+          style={{
+            background: "transparent",
+            border: "1px solid #181818",
+            borderRadius: 3,
+            padding: "2px 7px",
+            color: "#2a2a2a",
+            fontSize: 8,
+            ...MONO,
+            cursor: "pointer",
+            letterSpacing: ".06em",
+            flexShrink: 0,
+            transition: "all .15s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "#555";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "#2a2a2a";
+          }}
+        >
+          DEX ↗
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Coin Search ──────────────────────────────────────────────────────────────
 function CoinSearch({
   onSelectMeme,
@@ -66,6 +302,10 @@ function CoinSearch({
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [trending, setTrending] = useState<TokenResult[]>([]);
+  const [trendingLoading, setTrendingLoading] = useState(false);
+  const trendingFetchedRef = useRef(false);
 
   const search = useCallback(async (q: string) => {
     const trimmed = q.trim();
@@ -132,6 +372,74 @@ function CoinSearch({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query, search]);
+
+  const fetchTrending = useCallback(async () => {
+    if (trendingFetchedRef.current) return;
+    trendingFetchedRef.current = true;
+    setTrendingLoading(true);
+    try {
+      const boostRes = await fetch(
+        "https://api.dexscreener.com/token-boosts/top/v1",
+      );
+      const boosts = await boostRes.json();
+      const solanaAddrs: string[] = (Array.isArray(boosts) ? boosts : [])
+        .filter((b: { chainId?: string }) => b.chainId === "solana")
+        .map((b: { tokenAddress: string }) => b.tokenAddress)
+        .slice(0, 8);
+
+      if (!solanaAddrs.length) {
+        setTrendingLoading(false);
+        return;
+      }
+
+      const results = await Promise.all(
+        solanaAddrs.map(async (addr) => {
+          try {
+            const r = await fetch(
+              `https://api.dexscreener.com/latest/dex/tokens/${addr}`,
+            );
+            const d = await r.json();
+            const pairs = (d?.pairs || [])
+              .filter((p: { chainId: string }) => p.chainId === "solana")
+              .sort(
+                (
+                  a: { liquidity?: { usd?: number } },
+                  b: { liquidity?: { usd?: number } },
+                ) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
+              );
+            const pair = pairs[0];
+            if (!pair) return null;
+            const t: TokenResult = {
+              address: pair.baseToken?.address ?? addr,
+              name: pair.baseToken?.name ?? "Unknown",
+              symbol: pair.baseToken?.symbol ?? "???",
+              icon: pair.info?.imageUrl ?? undefined,
+              priceUsd: parseFloat(pair.priceUsd ?? "0"),
+              marketCap: pair.marketCap ?? pair.fdv ?? 0,
+              liquidity: pair.liquidity?.usd ?? 0,
+              volume24h: pair.volume?.h24 ?? 0,
+              priceChange24h: pair.priceChange?.h24 ?? 0,
+              chainId: pair.chainId ?? "",
+              pairAddress: pair.pairAddress ?? "",
+            };
+            return t;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      setTrending(results.filter((t): t is TokenResult => t !== null));
+    } catch {
+      /* silent — falls back to empty state text */
+    } finally {
+      setTrendingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open && !query) fetchTrending();
+  }, [open, query, fetchTrending]);
 
   // Close on outside click
   useEffect(() => {
@@ -369,8 +677,8 @@ function CoinSearch({
             )}
           </div>
 
-          {/* Empty state */}
-          {!query && (
+          {/* Empty state — only if trending failed/returned nothing */}
+          {!query && !trendingLoading && trending.length === 0 && (
             <div
               style={{
                 padding: "20px 14px",
@@ -401,239 +709,81 @@ function CoinSearch({
             </div>
           )}
 
-          {/* Results */}
-          {results.map((token, i) => (
-            <div
-              key={token.address}
-              style={{
-                borderBottom:
-                  i < results.length - 1 ? "1px solid #0d0d0d" : "none",
-                cursor: "pointer",
-              }}
-            >
-              {/* Main row — click to load in panel */}
-              <div
-                onClick={() => handleSelectToken(token)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 11,
-                  padding: "10px 14px 6px",
-                  transition: "background .1s",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = "#0d0d0d";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background =
-                    "transparent";
-                }}
-              >
-                {/* Logo */}
-                <div style={{ flexShrink: 0, width: 32, height: 32 }}>
-                  {token.icon ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={token.icon}
-                      alt={token.symbol}
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: "50%",
-                        objectFit: "cover",
-                        border: "1px solid #1a1a1a",
-                        display: "block",
-                      }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: "50%",
-                        background: "#e8490f14",
-                        border: "1px solid #e8490f2a",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "#e8490f",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        ...MONO,
-                      }}
-                    >
-                      {token.symbol[0]}
-                    </div>
-                  )}
-                </div>
-
-                {/* Name */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      color: "#d0d0d0",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      ...MONO,
-                      letterSpacing: ".04em",
-                    }}
-                  >
-                    {token.symbol}
-                  </div>
-                  <div
-                    style={{
-                      color: "#2e2e2e",
-                      fontSize: 9,
-                      ...MONO,
-                      marginTop: 2,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {token.name}
-                  </div>
-                </div>
-
-                {/* Price + change */}
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <div style={{ color: "#888", fontSize: 11, ...MONO }}>
-                    {formatPrice(token.priceUsd)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 9,
-                      ...MONO,
-                      marginTop: 2,
-                      color: token.priceChange24h >= 0 ? "#00c47a" : "#ff4444",
-                    }}
-                  >
-                    {token.priceChange24h >= 0 ? "+" : ""}
-                    {token.priceChange24h.toFixed(1)}%
-                  </div>
-                </div>
-
-                {/* Mcap */}
+          {/* Trending (shown when no query yet) */}
+          {!query && !error && (
+            <>
+              {trendingLoading && !trending.length && (
                 <div
                   style={{
-                    background: "#0d0d0d",
-                    border: "1px solid #161616",
-                    borderRadius: 4,
-                    padding: "3px 8px",
-                    color: "#383838",
-                    fontSize: 9,
-                    ...MONO,
-                    flexShrink: 0,
-                    minWidth: 56,
-                    textAlign: "center",
+                    padding: "20px 14px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
                   }}
                 >
-                  {formatMcap(token.marketCap)}
-                </div>
-
-                {/* Load in panel CTA */}
-                {onSelectMeme && (
                   <div
                     style={{
-                      background: "#e8490f0e",
-                      border: "1px solid #e8490f2a",
-                      borderRadius: 4,
-                      padding: "3px 8px",
-                      color: "#e8490f88",
+                      width: 12,
+                      height: 12,
+                      border: "1.5px solid #222",
+                      borderTop: "1.5px solid #e8490f",
+                      borderRadius: "50%",
+                      animation: "wraith-spin 0.6s linear infinite",
+                    }}
+                  />
+                  <span
+                    style={{
+                      color: "#333",
                       fontSize: 9,
                       ...MONO,
-                      flexShrink: 0,
-                      letterSpacing: ".06em",
-                      whiteSpace: "nowrap",
+                      letterSpacing: ".1em",
                     }}
                   >
-                    OPEN →
-                  </div>
-                )}
-              </div>
-
-              {/* Sub-row: CA + actions */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "0 14px 8px 57px",
-                }}
-              >
-                <span
+                    LOADING TRENDING
+                  </span>
+                </div>
+              )}
+              {trending.length > 0 && (
+                <div
                   style={{
-                    color: "#1e1e1e",
-                    fontSize: 9,
-                    ...MONO,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flex: 1,
-                    minWidth: 0,
-                  }}
-                >
-                  {token.address}
-                </span>
-
-                {/* Copy CA */}
-                <button
-                  onClick={(e) => handleCopyCA(e, token.address)}
-                  style={{
-                    background: "transparent",
-                    border: "1px solid #181818",
-                    borderRadius: 3,
-                    padding: "2px 7px",
-                    color: copiedAddr === token.address ? "#00c47a" : "#2a2a2a",
+                    padding: "9px 14px 5px",
+                    color: "#e8490f88",
                     fontSize: 8,
                     ...MONO,
-                    cursor: "pointer",
-                    letterSpacing: ".06em",
-                    flexShrink: 0,
-                    transition: "all .15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (copiedAddr !== token.address)
-                      e.currentTarget.style.color = "#555";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (copiedAddr !== token.address)
-                      e.currentTarget.style.color = "#2a2a2a";
+                    letterSpacing: ".14em",
                   }}
                 >
-                  {copiedAddr === token.address ? "COPIED" : "COPY CA"}
-                </button>
+                  TRENDING NOW
+                </div>
+              )}
+              {trending.map((token, i) => (
+                <TokenRow
+                  key={`t-${token.address}`}
+                  token={token}
+                  isLast={i === trending.length - 1}
+                  copiedAddr={copiedAddr}
+                  onSelect={handleSelectToken}
+                  onCopy={handleCopyCA}
+                  onOpenDex={handleOpenDex}
+                  showOpenCta={!!onSelectMeme}
+                />
+              ))}
+            </>
+          )}
 
-                {/* DexScreener */}
-                <button
-                  onClick={(e) => handleOpenDex(e, token)}
-                  style={{
-                    background: "transparent",
-                    border: "1px solid #181818",
-                    borderRadius: 3,
-                    padding: "2px 7px",
-                    color: "#2a2a2a",
-                    fontSize: 8,
-                    ...MONO,
-                    cursor: "pointer",
-                    letterSpacing: ".06em",
-                    flexShrink: 0,
-                    transition: "all .15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = "#555";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = "#2a2a2a";
-                  }}
-                >
-                  DEX ↗
-                </button>
-              </div>
-            </div>
+          {/* Results */}
+          {results.map((token, i) => (
+            <TokenRow
+              key={token.address}
+              token={token}
+              isLast={i === results.length - 1}
+              copiedAddr={copiedAddr}
+              onSelect={handleSelectToken}
+              onCopy={handleCopyCA}
+              onOpenDex={handleOpenDex}
+              showOpenCta={!!onSelectMeme}
+            />
           ))}
 
           <style>{`@keyframes wraith-spin { to { transform: rotate(360deg); } }`}</style>
@@ -655,6 +805,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
   const [tgLinking, setTgLinking] = useState(false);
   const [tgLinked, setTgLinked] = useState(false);
   const [tgTooltip, setTgTooltip] = useState(false);
@@ -704,6 +855,13 @@ export default function Header({ onSelectMeme }: HeaderProps) {
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
   }, [userMenuOpen]);
+
+  useEffect(() => {
+    if (!walletMenuOpen) return;
+    const handler = () => setWalletMenuOpen(false);
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [walletMenuOpen]);
 
   useEffect(() => {
     if (!session) return;
@@ -1084,87 +1242,127 @@ export default function Header({ onSelectMeme }: HeaderProps) {
           {connected && publicKey ? (
             <>
               <TierBadge compact />
-              {!isMobile && (
+              <div style={{ position: "relative" }}>
                 <button
-                  onClick={handleCopy}
+                  onClick={() => setWalletMenuOpen((v) => !v)}
                   style={{
-                    background: "#080808",
-                    border: "1px solid #181818",
-                    color: copied ? "#00c47a" : "#444",
-                    fontSize: 10,
+                    background: "transparent",
+                    border: "none",
+                    color: copied ? "#00c47a" : "#555",
+                    fontSize: isMobile ? 10 : 11,
                     ...MONO,
-                    padding: "0 12px",
+                    padding: "0 4px",
                     height: 30,
-                    borderRadius: 4,
-                    cursor: "pointer",
-                    letterSpacing: ".05em",
-                    transition: "all .15s",
-                    flexShrink: 0,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!copied) e.currentTarget.style.color = "#666";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!copied) e.currentTarget.style.color = "#444";
-                  }}
-                >
-                  {copied ? "COPIED" : trimAddress(publicKey.toString())}
-                </button>
-              )}
-              {isMobile && (
-                <button
-                  onClick={handleCopy}
-                  style={{
-                    background: "#080808",
-                    border: "1px solid #181818",
-                    color: copied ? "#00c47a" : "#333",
-                    fontSize: 9,
-                    ...MONO,
-                    padding: "0 8px",
-                    height: 28,
-                    borderRadius: 4,
                     cursor: "pointer",
                     letterSpacing: ".04em",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
                     flexShrink: 0,
-                    maxWidth: 90,
+                    maxWidth: isMobile ? 90 : "none",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
+                    transition: "color .15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!copied) e.currentTarget.style.color = "#888";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!copied) e.currentTarget.style.color = "#555";
                   }}
                 >
-                  {copied ? "✓" : trimAddress(publicKey.toString())}
+                  <div
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: "50%",
+                      background: "#00c47a",
+                      boxShadow: "0 0 5px #00c47a88",
+                      flexShrink: 0,
+                    }}
+                  />
+                  {copied ? "COPIED" : trimAddress(publicKey.toString())}
+                  <svg
+                    width="7"
+                    height="7"
+                    viewBox="0 0 8 8"
+                    style={{
+                      transform: walletMenuOpen
+                        ? "rotate(180deg)"
+                        : "rotate(0deg)",
+                      transition: "transform .15s",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <path
+                      d="M1 2.5L4 5.5L7 2.5"
+                      stroke="#444"
+                      strokeWidth="1.5"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                  </svg>
                 </button>
-              )}
-              <button
-                onClick={() => disconnect()}
-                style={{
-                  background: "transparent",
-                  borderWidth: 1,
-                  borderStyle: "solid",
-                  borderColor: "#181818",
-                  color: "#2a2a2a",
-                  fontSize: isMobile ? 12 : 10,
-                  ...MONO,
-                  padding: isMobile ? "0 8px" : "0 12px",
-                  height: 30,
-                  borderRadius: 4,
-                  cursor: "pointer",
-                  transition: "all .15s",
-                  flexShrink: 0,
-                  letterSpacing: isMobile ? 0 : ".1em",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = "#ff444433";
-                  e.currentTarget.style.color = "#ff4444";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "#181818";
-                  e.currentTarget.style.color = "#2a2a2a";
-                }}
-                title="Disconnect wallet"
-              >
-                {isMobile ? "✕" : "DISCONNECT"}
-              </button>
+                {walletMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 8px)",
+                      right: 0,
+                      background: "#060606",
+                      border: "1px solid #111",
+                      borderRadius: 5,
+                      minWidth: 160,
+                      zIndex: 99999,
+                      overflow: "hidden",
+                      boxShadow: "0 8px 32px #000000cc",
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        handleCopy();
+                        setWalletMenuOpen(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: "1px solid #0d0d0d",
+                        color: "#666",
+                        fontSize: 10,
+                        ...MONO,
+                        padding: "10px 14px",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        letterSpacing: ".05em",
+                      }}
+                    >
+                      COPY ADDRESS
+                    </button>
+                    <button
+                      onClick={() => {
+                        disconnect();
+                        setWalletMenuOpen(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        background: "transparent",
+                        border: "none",
+                        color: "#ff4444",
+                        fontSize: 10,
+                        ...MONO,
+                        padding: "10px 14px",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        letterSpacing: ".05em",
+                      }}
+                    >
+                      DISCONNECT
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <button

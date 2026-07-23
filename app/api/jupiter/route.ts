@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { jupiterLimiter, checkLimit } from "@/lib/ratelimit";
 
 const JUP_BASE = "https://api.jup.ag/swap/v1";
+const JUP_PRICE_BASE = "https://api.jup.ag/price/v3";
 const TIMEOUT_MS = 30000;
 const MAX_BODY_BYTES = 10_000;
 
@@ -20,6 +21,7 @@ const QUOTE_ALLOWED_PARAMS = new Set([
   "swapMode",
   "onlyDirectRoutes",
   "asLegacyTransaction",
+  "ids", // Price v3 — comma-separated mints
 ]);
 
 const SWAP_ALLOWED_FIELDS = new Set([
@@ -69,7 +71,10 @@ export async function GET(req: NextRequest) {
     if (QUOTE_ALLOWED_PARAMS.has(key)) forwardedParams.set(key, value);
   }
 
-  const upstreamUrl = `${JUP_BASE}/${endpoint}?${forwardedParams.toString()}`;
+  const upstreamUrl =
+    endpoint === "price"
+      ? `${JUP_PRICE_BASE}?${forwardedParams.toString()}`
+      : `${JUP_BASE}/${endpoint}?${forwardedParams.toString()}`;
 
   try {
     const res = await fetchWithTimeout(

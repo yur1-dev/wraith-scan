@@ -1001,9 +1001,20 @@ function NoFillPasswordInput({
   inputId: string;
 }) {
   const [focused, setFocused] = useState(false);
+  const [selRange, setSelRange] = useState<[number, number] | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const syncSelection = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    setSelRange(end > start ? [start, end] : null);
+  };
   return (
     <div style={{ position: "relative", width: "100%" }}>
       <input
+        ref={inputRef}
         id={inputId}
         name={`wraith_nofill_${inputId}`}
         type="text"
@@ -1018,9 +1029,19 @@ function NoFillPasswordInput({
         aria-autocomplete="none"
         role="presentation"
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
+        onKeyDown={(e) => {
+          onKeyDown?.(e);
+          requestAnimationFrame(syncSelection);
+        }}
+        onKeyUp={syncSelection}
+        onMouseUp={syncSelection}
+        onSelect={syncSelection}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false);
+          setSelRange(null);
+        }}
+        className="wraith-nofill-input"
         style={
           {
             position: "absolute",
@@ -1058,20 +1079,35 @@ function NoFillPasswordInput({
           <div
             style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                background: selRange ? `${C.orange}22` : "transparent",
+                borderRadius: 3,
+                padding: selRange ? "3px 4px" : 0,
+                margin: selRange ? "-3px -4px" : 0,
+                transition: "background 0.1s",
+              }}
+            >
               {Array.from({ length: Math.min(value.length, 32) }).map(
-                (_, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      background: C.primary,
-                      flexShrink: 0,
-                    }}
-                  />
-                ),
+                (_, i) => {
+                  const isSelected =
+                    selRange && i >= selRange[0] && i < selRange[1];
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: "50%",
+                        background: isSelected ? C.orange : C.primary,
+                        flexShrink: 0,
+                      }}
+                    />
+                  );
+                },
               )}
             </div>
             {focused && (
@@ -1092,7 +1128,11 @@ function NoFillPasswordInput({
           </span>
         )}
       </div>
-      <style>{`@keyframes pwcursor { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
+      <style>{`
+        @keyframes pwcursor { 0%,100%{opacity:1} 50%{opacity:0} }
+        .wraith-nofill-input::selection { background: transparent; color: transparent; }
+        .wraith-nofill-input::-moz-selection { background: transparent; color: transparent; }
+      `}</style>
     </div>
   );
 }
@@ -1117,6 +1157,31 @@ function NoFillPasswordInput({
 // SHARE MODAL  — pixel-perfect capture via off-screen render
 // Replace lines 1110–1647 in PaperTrader.tsx with this entire block.
 // ─────────────────────────────────────────────────────────────────────────────
+
+function roundCanvasCorners(
+  source: HTMLCanvasElement,
+  radiusCss: number,
+): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = source.width;
+  out.height = source.height;
+  const ctx = out.getContext("2d");
+  if (!ctx) return source;
+  const scale = source.width / CARD_W;
+  const r = radiusCss * scale;
+  const w = out.width;
+  const h = out.height;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.arcTo(w, 0, w, h, r);
+  ctx.arcTo(w, h, 0, h, r);
+  ctx.arcTo(0, h, 0, 0, r);
+  ctx.arcTo(0, 0, w, 0, r);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(source, 0, 0);
+  return out;
+}
 
 const PROFIT_BG_COUNT = 5;
 const LOSS_BG_COUNT = 5;
@@ -1233,14 +1298,6 @@ async function captureShareCard(opts: {
         background:linear-gradient(135deg,rgba(6,6,6,0.85) 0%,rgba(6,6,6,0.60) 50%,rgba(6,6,6,0.35) 100%);
       "></div>
 
-      <!-- glow blob -->
-      <div style="
-        position:absolute;top:-40px;right:-40px;width:140px;height:140px;
-        border-radius:50%;z-index:2;pointer-events:none;
-        background:${isWin ? "#00c47a0d" : "#ff44440d"};
-        filter:blur(30px);
-      "></div>
-
       <!-- content layer -->
       <div style="
         position:absolute;inset:0;z-index:3;
@@ -1250,14 +1307,15 @@ async function captureShareCard(opts: {
       ">
 
         <!-- TOP: avatar + symbol -->
-        <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;">
           ${
             tokenUri
-              ? `<img src="${tokenUri}" style="
-                  width:34px;height:34px;border-radius:50%;
-                  object-fit:cover;border:2px solid ${pnlColor}55;
-                  flex-shrink:0;display:block;
-                " />`
+              ? `<div style="
+                  width:34px;height:34px;border-radius:50%;overflow:hidden;
+                  border:2px solid ${pnlColor}55;flex-shrink:0;
+                "><img src="${tokenUri}" style="
+                  width:100%;height:100%;object-fit:cover;display:block;
+                " /></div>`
               : `<div style="
                   width:34px;height:34px;border-radius:50%;
                   background:${avatarBg}22;border:2px solid ${avatarBg}55;
@@ -1297,10 +1355,9 @@ async function captureShareCard(opts: {
 
         <!-- MIDDLE: big PnL -->
         <div>
-          <div style="
+        <div style="
             font-size:46px;font-weight:900;color:${pnlColor};
             line-height:1;letter-spacing:-0.03em;
-            text-shadow:0 0 30px ${pnlColor}77;
           ">${fmtPnl(pnl)}</div>
           <div style="font-size:12px;color:${pnlColor}aa;margin-top:5px;font-weight:600;">
             ${isWin ? "+" : ""}${solPnl.toFixed(3)} SOL
@@ -1347,13 +1404,10 @@ async function captureShareCard(opts: {
               .join("")}
           </div>
 
-          <!-- branding -->
+     <!-- branding -->
           <div style="text-align:right;">
-            <div style="color:#e8490f;font-size:11px;font-weight:900;letter-spacing:0.2em;">
-              ⚡ WRAITH
-            </div>
-            <div style="color:#ffffff33;font-size:7px;margin-top:2px;">
-              paper trader
+            <div style="color:#e8490f;font-size:13px;font-weight:800;letter-spacing:0.22em;">
+              WRAITH
             </div>
           </div>
         </div>
@@ -1367,7 +1421,7 @@ async function captureShareCard(opts: {
   let canvas: HTMLCanvasElement | null = null;
   try {
     canvas = await html2canvas(container.firstElementChild as HTMLElement, {
-      backgroundColor: null,
+      backgroundColor: "#080808",
       scale: 2, // 2× for crisp retina quality
       useCORS: false, // data URIs — no CORS needed
       allowTaint: false,
@@ -1376,6 +1430,7 @@ async function captureShareCard(opts: {
       width: CARD_W,
       height: CARD_H,
     });
+    if (canvas) canvas = roundCanvasCorners(canvas, 12);
   } catch (err) {
     console.error("captureShareCard failed", err);
   }
@@ -1536,7 +1591,7 @@ function ShareModal({
             borderRadius: 12,
             position: "relative",
             overflow: "hidden",
-            boxShadow: `0 0 60px ${isWin ? "#00c47a18" : "#ff444418"}, 0 20px 60px #00000099`,
+            boxShadow: "0 12px 32px #00000066",
             fontFamily: "'IBM Plex Mono', monospace",
             boxSizing: "border-box",
           }}
@@ -1568,22 +1623,6 @@ function ShareModal({
               background:
                 "linear-gradient(135deg, rgba(6,6,6,0.85) 0%, rgba(6,6,6,0.60) 50%, rgba(6,6,6,0.35) 100%)",
               zIndex: 1,
-            }}
-          />
-
-          {/* Glow blob */}
-          <div
-            style={{
-              position: "absolute",
-              top: -40,
-              right: -40,
-              width: 140,
-              height: 140,
-              borderRadius: "50%",
-              background: isWin ? "#00c47a0d" : "#ff44440d",
-              filter: "blur(30px)",
-              zIndex: 2,
-              pointerEvents: "none",
             }}
           />
 
@@ -1695,7 +1734,6 @@ function ShareModal({
                   color: pnlColor,
                   lineHeight: 1,
                   letterSpacing: "-0.03em",
-                  textShadow: `0 0 30px ${pnlColor}77`,
                 }}
               >
                 {fmtPnl(pnl)}
@@ -1772,15 +1810,12 @@ function ShareModal({
                 <div
                   style={{
                     color: "#e8490f",
-                    fontSize: 11,
-                    fontWeight: 900,
-                    letterSpacing: "0.2em",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    letterSpacing: "0.22em",
                   }}
                 >
-                  ⚡ WRAITH
-                </div>
-                <div style={{ color: "#ffffff33", fontSize: 7, marginTop: 2 }}>
-                  paper trader
+                  WRAITH
                 </div>
               </div>
             </div>
@@ -2078,14 +2113,14 @@ function HotWalletSetup({
         </div>
         {hasWallet ? (
           <Btn
-            label="🔓 UNLOCK HOT WALLET"
+            label="UNLOCK HOT WALLET"
             onClick={() => reset("unlock")}
             primary
           />
         ) : (
           <>
             <Btn
-              label="⚡ GENERATE NEW WALLET"
+              label="GENERATE NEW WALLET"
               onClick={() => reset("create")}
               primary
             />
@@ -2132,7 +2167,7 @@ function HotWalletSetup({
             letterSpacing: "0.1em",
           }}
         >
-          ⚠ WRITE DOWN YOUR BACKUP PHRASE
+          WRITE DOWN YOUR BACKUP PHRASE
         </div>
         <div style={{ color: C.dim, fontSize: 8, ...MONO, lineHeight: 1.6 }}>
           This is the only way to recover your wallet. Store offline — never
@@ -2201,12 +2236,20 @@ function HotWalletSetup({
             ...MONO,
           }}
         >
-          {copied ? "✓ COPIED" : "COPY TO CLIPBOARD"}
+          {copied ? (
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+            >
+              <CheckIcon size={9} /> COPIED
+            </span>
+          ) : (
+            "COPY TO CLIPBOARD"
+          )}
         </button>
         {err && <div style={{ color: C.red, fontSize: 8, ...MONO }}>{err}</div>}
         <div style={{ display: "flex", gap: 4 }}>
           <Btn
-            label="✓ I'VE SAVED IT — CONTINUE"
+            label="I'VE SAVED IT — CONTINUE"
             onClick={doConfirmBackup}
             primary
             disabled={busy}
@@ -2281,7 +2324,7 @@ function HotWalletSetup({
         }}
       >
         <div style={{ color: C.green, fontSize: 9, fontWeight: 700, ...MONO }}>
-          ✓ PHRASE VALID
+          PHRASE VALID
         </div>
         <div style={{ color: C.dim, fontSize: 8, ...MONO, lineHeight: 1.6 }}>
           This phrase maps to:
@@ -2307,7 +2350,7 @@ function HotWalletSetup({
           </div>
         </div>
         <div style={{ color: C.amber, fontSize: 8, ...MONO, lineHeight: 1.5 }}>
-          ⚠ This will overwrite your currently stored wallet. Make sure this is
+          This will overwrite your currently stored wallet. Make sure this is
           the correct address.
         </div>
         <div style={{ display: "flex", gap: 4 }}>
@@ -2527,6 +2570,94 @@ function HotWalletSetup({
 // POSITION CARD
 // ─────────────────────────────────────────────────────────────────────────────
 // SVG share icon
+const LockIcon = ({
+  size = 12,
+  color = "currentColor",
+}: {
+  size?: number;
+  color?: string;
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <rect x="4" y="10" width="16" height="11" rx="2" />
+    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+  </svg>
+);
+
+const UnlockIcon = ({
+  size = 12,
+  color = "currentColor",
+}: {
+  size?: number;
+  color?: string;
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <rect x="4" y="10" width="16" height="11" rx="2" />
+    <path d="M8 10V7a4 4 0 0 1 7.75-1.4" />
+  </svg>
+);
+
+const CheckIcon = ({
+  size = 10,
+  color = "currentColor",
+}: {
+  size?: number;
+  color?: string;
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M20 6L9 17l-5-5" />
+  </svg>
+);
+
+const AlertIcon = ({
+  size = 12,
+  color = "currentColor",
+}: {
+  size?: number;
+  color?: string;
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
 const ShareIcon = ({
   size = 12,
   color = "currentColor",
@@ -2668,7 +2799,7 @@ function PositionCard({
           </div>
           {trailFromPeak !== null && pos.peakMcap > pos.entryMcap && (
             <div style={{ color: C.amber, fontSize: 6, ...MONO, marginTop: 1 }}>
-              ▲ peak {fmtMcap(pos.peakMcap)} · {trailFromPeak.toFixed(1)}% from
+              peak {fmtMcap(pos.peakMcap)} · {trailFromPeak.toFixed(1)}% from
               peak
             </div>
           )}
@@ -2958,6 +3089,7 @@ export default function PaperTrader({
     lsGet<PaperLog[]>(PAPER_LOG_KEY, []),
   );
   const paperPositionsRef = useRef<PaperPosition[]>(paperPositions);
+  const paperSellingRef = useRef<Set<string>>(new Set());
 
   // Sync paper state to LS
   useEffect(() => {
@@ -3231,7 +3363,7 @@ export default function PaperTrader({
 
         if (mountedRef.current) {
           setStatus({
-            msg: `✓ ${reason} — SOLD $${pos.symbol} ${fmtPnl(exitPnl)}`,
+            msg: `${reason} — SOLD $${pos.symbol} ${fmtPnl(exitPnl)}`,
             type: "ok",
           });
           setTimeout(() => {
@@ -3255,7 +3387,7 @@ export default function PaperTrader({
               p.id === posId ? { ...p, status: "watching" as const } : p,
             ),
           );
-          setStatus({ msg: `✕ Sell failed: ${msg.slice(0, 60)}`, type: "err" });
+          setStatus({ msg: `Sell failed: ${msg.slice(0, 60)}`, type: "err" });
           setTimeout(() => {
             if (mountedRef.current) setStatus(null);
           }, 10000);
@@ -3347,6 +3479,8 @@ export default function PaperTrader({
               exitReason = "TRAIL";
 
             if (exitReason) {
+              if (paperSellingRef.current.has(pos.id)) return;
+              paperSellingRef.current.add(pos.id);
               const exitPnl = (mcap / pos.entryMcap - 1) * 100;
               const solReturn = pos.amountSol * (1 + exitPnl / 100);
               const closed: PaperPosition = {
@@ -3361,7 +3495,7 @@ export default function PaperTrader({
               );
               setPaperBal((b) => parseFloat((b + solReturn).toFixed(6)));
               const logEntry: PaperLog = {
-                id: pos.id,
+                id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 symbol: pos.symbol,
                 mint: pos.mint,
                 entryMcap: pos.entryMcap,
@@ -3470,7 +3604,7 @@ export default function PaperTrader({
     setPaperPositions((prev) => [pos, ...prev]);
     markBoughtInWinsPanel((sym || "").toLowerCase());
     setStatus({
-      msg: `📄 Paper bought $${sym} @ ${fmtMcap(entryMcap)} · auto-sell armed`,
+      msg: `Paper bought $${sym} @ ${fmtMcap(entryMcap)} · auto-sell armed`,
       type: "ok",
     });
     setTab("positions");
@@ -3494,6 +3628,8 @@ export default function PaperTrader({
   const handlePaperManualSell = useCallback(async (posId: string) => {
     const pos = paperPositionsRef.current.find((p) => p.id === posId);
     if (!pos || pos.status !== "watching") return;
+    if (paperSellingRef.current.has(posId)) return;
+    paperSellingRef.current.add(posId);
     const exitMcap = await fetchMcap(pos.mint).catch(() => pos.currentMcap);
     const exitPnl = (exitMcap / pos.entryMcap - 1) * 100;
     const solReturn = pos.amountSol * (1 + exitPnl / 100);
@@ -3514,7 +3650,7 @@ export default function PaperTrader({
     setPaperLog((prev) =>
       [
         {
-          id: posId,
+          id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           symbol: pos.symbol,
           mint: pos.mint,
           entryMcap: pos.entryMcap,
@@ -3613,7 +3749,7 @@ export default function PaperTrader({
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       if (mountedRef.current) {
-        setStatus({ msg: `✕ ${msg.slice(0, 80)}`, type: "err" });
+        setStatus({ msg: msg.slice(0, 80), type: "err" });
         setTimeout(() => {
           if (mountedRef.current) setStatus(null);
         }, 12000);
@@ -3719,7 +3855,7 @@ export default function PaperTrader({
               ...MONO,
             }}
           >
-            ⚡ SNIPER
+            SNIPER
           </span>
           {paperMode && (
             <span
@@ -3735,7 +3871,7 @@ export default function PaperTrader({
                 ...MONO,
               }}
             >
-              📄 DEMO · {paperBal.toFixed(3)} SOL
+              DEMO · {paperBal.toFixed(3)} SOL
             </span>
           )}
           <span
@@ -3896,7 +4032,7 @@ export default function PaperTrader({
                   ...MONO,
                 }}
               >
-                ⚡ LIVE
+                LIVE
               </button>
               <button
                 onClick={() => {
@@ -3923,7 +4059,19 @@ export default function PaperTrader({
                     : "none",
                 }}
               >
-                📄 PAPER{!canUsePaper ? " 🔒" : ""}
+                {canUsePaper ? (
+                  "PAPER"
+                ) : (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    PAPER <LockIcon size={9} />
+                  </span>
+                )}
               </button>
             </div>
 
@@ -4141,7 +4289,16 @@ export default function PaperTrader({
                   ...MONO,
                 }}
               >
-                🚫 BLOCKED — Honeypot / AVOID flagged by scanner.
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                >
+                  <AlertIcon size={11} /> BLOCKED — Honeypot / AVOID flagged by
+                  scanner.
+                </span>
               </div>
             )}
 
@@ -4386,7 +4543,7 @@ export default function PaperTrader({
                   ...MONO,
                 }}
               >
-                ⚡ TRAIL -{trailPct}%
+                TRAIL -{trailPct}%
               </span>
               <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
                 Locks gains · sells {trailPct}% below peak
@@ -4522,14 +4679,14 @@ export default function PaperTrader({
                 }}
               >
                 {isAvoid
-                  ? "🚫 HONEYPOT — BUY BLOCKED"
+                  ? "HONEYPOT — BUY BLOCKED"
                   : !ca
                     ? "SELECT A TOKEN"
                     : (hotBal ?? 0) < parseFloat(amountSol || "0")
                       ? `LOW FUNDS — ${hotBal?.toFixed(3)} SOL`
                       : buying
                         ? "SNIPING…"
-                        : `⚡ BUY ${sym || ""} — ${amountSol} SOL`}
+                        : `BUY ${sym || ""} — ${amountSol} SOL`}
               </button>
             ) : (
               <button
@@ -4565,12 +4722,12 @@ export default function PaperTrader({
                 }}
               >
                 {isAvoid
-                  ? "🚫 HONEYPOT — BLOCKED"
+                  ? "HONEYPOT — BLOCKED"
                   : !ca
-                    ? "📄 SELECT A TOKEN"
+                    ? "SELECT A TOKEN"
                     : paperBal < parseFloat(amountSol || "0")
-                      ? `📄 LOW DEMO BAL — ${paperBal.toFixed(3)} SOL`
-                      : `📄 PAPER TRADE ${sym || ""} — ${amountSol} SOL`}
+                      ? `LOW DEMO BAL — ${paperBal.toFixed(3)} SOL`
+                      : `PAPER TRADE ${sym || ""} — ${amountSol} SOL`}
               </button>
             )}
           </div>

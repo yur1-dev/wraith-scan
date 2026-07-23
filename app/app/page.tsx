@@ -501,6 +501,7 @@ export default function Home() {
       hDragging.current = side;
       hStartX.current = e.clientX;
       hStartW.current = side === "left" ? leftW : rightW;
+      document.body.style.cursor = "col-resize";
     },
     [leftW, rightW],
   );
@@ -513,12 +514,20 @@ export default function Home() {
       vDragging.current = true;
       vStartY.current = e.clientY;
       vStartH.current = paperTraderH;
+      document.body.style.cursor = "row-resize";
     },
     [paperTraderH, traderCollapsed],
   );
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+    let rafId: number | null = null;
+    let pendingEvent: MouseEvent | null = null;
+
+    const applyMove = () => {
+      rafId = null;
+      const e = pendingEvent;
+      if (!e) return;
+
       if (hDragging.current && containerRef.current) {
         const dx = e.clientX - hStartX.current;
         const totalW = containerRef.current.offsetWidth;
@@ -553,9 +562,24 @@ export default function Home() {
         lastExpandedH.current = next;
       }
     };
+
+    const onMove = (e: MouseEvent) => {
+      pendingEvent = e;
+      if (rafId === null) {
+        rafId = requestAnimationFrame(applyMove);
+      }
+    };
+
     const onUp = () => {
       hDragging.current = null;
       vDragging.current = false;
+      document.body.style.cursor = "";
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      // force a render so the height transition re-enables after drag ends
+      setPaperTraderH((h) => h);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -913,7 +937,9 @@ export default function Home() {
               height: paperTraderH,
               flexShrink: 0,
               overflow: "hidden",
-              transition: "height 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
+              transition: vDragging.current
+                ? "none"
+                : "height 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
             }}
           >
             {canSnipe ? (

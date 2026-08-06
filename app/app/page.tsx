@@ -31,6 +31,7 @@ export interface MemeTrend {
   isNewCoin?: boolean;
   ageLabel?: string;
   mcap?: number;
+  liquidity?: number;
   volume?: number;
   platforms?: string[];
   contractAddress?: string;
@@ -39,12 +40,18 @@ export interface MemeTrend {
 }
 
 const MIN_PX = 220;
+const MIN_RIGHT_PX = 260;
 const HANDLE_W = 6;
-const HANDLE_H = 6;
-const MIN_TRADER_H = 48;
-const COLLAPSED_H = 36;
-const MIN_WINS_H = 80;
-const DEFAULT_TRADER_H = 320;
+const MIN_TRADER_W = 300;
+const COLLAPSED_W = 40;
+const MIN_WINS_W = 260;
+const DEFAULT_TRADER_W = 340;
+
+// vertical split (PaperTrader collapse) — height-based
+const MIN_TRADER_H = 180;
+const COLLAPSED_H = 40;
+const MIN_WINS_H = 140;
+const DEFAULT_TRADER_H = 260;
 const MOBILE_NAV_H = 58;
 
 type MobileTab = "scan" | "wins" | "sniper";
@@ -121,10 +128,12 @@ function TokenBottomSheet({
   meme,
   onClose,
   canSnipe,
+  onSelectToken,
 }: {
   meme: MemeTrend | null;
   onClose: () => void;
   canSnipe: boolean;
+  onSelectToken?: (mint: string, symbol: string, imageUrl?: string) => void;
 }) {
   const dragStartY = useRef(0);
   const dragStartTopPct = useRef(15);
@@ -133,11 +142,9 @@ function TokenBottomSheet({
   const [transitioning, setTransitioning] = useState(false);
   const [activeTab, setActiveTab] = useState<"chart" | "trade">("chart");
 
-  // Slide in when meme is set
   useEffect(() => {
     if (meme) {
       setActiveTab("chart");
-      // Next frame: slide up to full
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setTransitioning(true);
@@ -158,7 +165,6 @@ function TokenBottomSheet({
     setTimeout(onClose, 320);
   }, [onClose]);
 
-  // ── Touch drag ──
   const onTouchStart = (e: React.TouchEvent) => {
     isDragging.current = true;
     setTransitioning(false);
@@ -181,9 +187,9 @@ function TokenBottomSheet({
     if (topPct > 72) {
       handleClose();
     } else if (topPct > 40) {
-      snapTo(52); // half screen
+      snapTo(52);
     } else {
-      snapTo(15); // full screen
+      snapTo(15);
     }
   };
 
@@ -196,7 +202,6 @@ function TokenBottomSheet({
 
   return (
     <>
-      {/* Backdrop */}
       <div
         onClick={handleClose}
         style={{
@@ -209,7 +214,6 @@ function TokenBottomSheet({
         }}
       />
 
-      {/* Sheet */}
       <div
         style={{
           position: "fixed",
@@ -230,7 +234,6 @@ function TokenBottomSheet({
             : "none",
         }}
       >
-        {/* ── Drag zone: handle + token header + tabs ── */}
         <div
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
@@ -244,7 +247,6 @@ function TokenBottomSheet({
             touchAction: "none",
           }}
         >
-          {/* Pill */}
           <div
             style={{
               display: "flex",
@@ -262,7 +264,6 @@ function TokenBottomSheet({
             />
           </div>
 
-          {/* Token identity row */}
           <div
             style={{
               display: "flex",
@@ -272,7 +273,6 @@ function TokenBottomSheet({
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {/* Avatar */}
               <div
                 style={{
                   width: 36,
@@ -320,9 +320,7 @@ function TokenBottomSheet({
               </div>
             </div>
 
-            {/* Snap buttons + close */}
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {/* Half/Full toggle */}
               <button
                 onClick={() => (topPct > 30 ? snapTo(15) : snapTo(52))}
                 style={{
@@ -342,7 +340,6 @@ function TokenBottomSheet({
               >
                 {topPct > 30 ? "↑" : "↓"}
               </button>
-              {/* Close */}
               <button
                 onClick={handleClose}
                 style={{
@@ -364,7 +361,6 @@ function TokenBottomSheet({
             </div>
           </div>
 
-          {/* Chart / Trade tabs */}
           <div
             style={{
               display: "flex",
@@ -397,7 +393,6 @@ function TokenBottomSheet({
           </div>
         </div>
 
-        {/* ── Sheet content ── */}
         <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
           <div
             style={{
@@ -423,6 +418,7 @@ function TokenBottomSheet({
                 selectedMeme={meme}
                 collapsed={false}
                 onCollapseChange={() => {}}
+                onSelectToken={onSelectToken}
               />
             ) : (
               <LockedSniper />
@@ -448,23 +444,49 @@ export default function Home() {
   const [traderCollapsed, setTraderCollapsed] = useState(false);
   const lastExpandedH = useRef(DEFAULT_TRADER_H);
   const [paperTraderH, setPaperTraderH] = useState<number>(DEFAULT_TRADER_H);
+  const [scannerCollapsed, setScannerCollapsed] = useState(false);
+
+  // ── Floating SNIPER widget — always present, draggable + minimizable ──
+  const [sniperMinimized, setSniperMinimized] = useState(true);
+  const [sniperPos, setSniperPos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+  const sniperDragging = useRef(false);
+  const sniperDragOff = useRef({ x: 0, y: 0 });
+  const sniperMoved = useRef(false);
+  const sniperDragStart = useRef({ x: 0, y: 0 });
+
   const [mobileTab, setMobileTab] = useState<MobileTab>("scan");
   const [isMobile, setIsMobile] = useState(false);
+
+  const [posBarNode, setPosBarNode] = useState<HTMLDivElement | null>(null);
+  const posBarRef = useCallback((node: HTMLDivElement | null) => {
+    setPosBarNode(node);
+  }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const rightColRef = useRef<HTMLDivElement>(null);
   const hDragging = useRef<null | "left" | "right">(null);
   const hStartX = useRef(0);
   const hStartW = useRef(0);
-  const vDragging = useRef(false);
-  const vStartY = useRef(0);
-  const vStartH = useRef(0);
+  const cDragging = useRef(false);
+  const cStartX = useRef(0);
+  const cStartY = useRef(0);
+  const cStartW = useRef(0);
+  const cStartH = useRef(0);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
+    setSniperPos({
+      x: Math.max(0, (window.innerWidth - 340) / 2),
+      y: window.innerHeight - 80,
+    });
   }, []);
 
   const handleCollapseChange = useCallback(
@@ -480,7 +502,6 @@ export default function Home() {
     [paperTraderH],
   );
 
-  // Mobile: open bottom sheet on token select
   const handleSelectMeme = useCallback(
     (meme: MemeTrend) => {
       setSelectedMeme(meme);
@@ -495,6 +516,26 @@ export default function Home() {
     setSheetMeme(null);
   }, []);
 
+  // Re-select a token from a held paper-trader position (e.g. click avatar/symbol
+  // on a position card to bring it back up on chart + trade form).
+  const handleSelectToken = useCallback(
+    (mint: string, symbol: string, imageUrl?: string) => {
+      const meme: MemeTrend = {
+        keyword: symbol,
+        score: 0,
+        posts: 0,
+        source: "paper-position",
+        contractAddress: mint,
+      };
+      setSelectedMeme(meme);
+      if (isMobile) {
+        setSheetMeme(meme);
+        setMobileTab("sniper");
+      }
+    },
+    [isMobile],
+  );
+
   const onHMouseDown = useCallback(
     (side: "left" | "right") => (e: React.MouseEvent) => {
       e.preventDefault();
@@ -506,17 +547,31 @@ export default function Home() {
     [leftW, rightW],
   );
 
-  const onVMouseDown = useCallback(
+  const onSniperDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    sniperDragging.current = true;
+    sniperMoved.current = false;
+    sniperDragStart.current = { x: e.clientX, y: e.clientY };
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    sniperDragOff.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+  }, []);
+
+  const onCMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (traderCollapsed) return;
       e.preventDefault();
       e.stopPropagation();
-      vDragging.current = true;
-      vStartY.current = e.clientY;
-      vStartH.current = paperTraderH;
-      document.body.style.cursor = "row-resize";
+      cDragging.current = true;
+      cStartX.current = e.clientX;
+      cStartY.current = e.clientY;
+      cStartW.current = rightW;
+      cStartH.current = paperTraderH;
+      document.body.style.cursor = "nwse-resize";
     },
-    [paperTraderH, traderCollapsed],
+    [rightW, paperTraderH, traderCollapsed],
   );
 
   useEffect(() => {
@@ -551,15 +606,39 @@ export default function Home() {
           setRightW(next);
         }
       }
-      if (vDragging.current && rightColRef.current) {
-        const dy = vStartY.current - e.clientY;
+
+      if (sniperDragging.current) {
+        const dx = e.clientX - sniperDragStart.current.x;
+        const dy = e.clientY - sniperDragStart.current.y;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) sniperMoved.current = true;
+        const x = e.clientX - sniperDragOff.current.x;
+        const y = e.clientY - sniperDragOff.current.y;
+        setSniperPos({
+          x: Math.max(0, Math.min(x, window.innerWidth - 340)),
+          y: Math.max(0, Math.min(y, window.innerHeight - 40)),
+        });
+      }
+
+      if (cDragging.current && containerRef.current && rightColRef.current) {
+        const dx = cStartX.current - e.clientX;
+        const dy = cStartY.current - e.clientY;
+        const totalW = containerRef.current.offsetWidth;
         const colH = rightColRef.current.offsetHeight;
-        const next = Math.max(
-          MIN_TRADER_H,
-          Math.min(vStartH.current + dy, colH - MIN_WINS_H - HANDLE_H),
+
+        const nextW = Math.max(
+          MIN_WINS_W,
+          Math.min(
+            cStartW.current + dx,
+            totalW - leftW - MIN_PX - HANDLE_W * 2,
+          ),
         );
-        setPaperTraderH(next);
-        lastExpandedH.current = next;
+        const nextH = Math.max(
+          MIN_TRADER_H,
+          Math.min(cStartH.current + dy, colH - MIN_WINS_H - 6),
+        );
+        setRightW(nextW);
+        setPaperTraderH(nextH);
+        lastExpandedH.current = nextH;
       }
     };
 
@@ -572,14 +651,14 @@ export default function Home() {
 
     const onUp = () => {
       hDragging.current = null;
-      vDragging.current = false;
+      cDragging.current = false;
+      sniperDragging.current = false;
+
       document.body.style.cursor = "";
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
         rafId = null;
       }
-      // force a render so the height transition re-enables after drag ends
-      setPaperTraderH((h) => h);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -587,7 +666,7 @@ export default function Home() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [leftW, rightW]);
+  }, [leftW, rightW, sniperMinimized]);
 
   // ── MOBILE ──────────────────────────────────────────────────────
   if (isMobile) {
@@ -609,12 +688,10 @@ export default function Home() {
           html, body { overflow: hidden; height: 100%; width: 100%; margin: 0; padding: 0; }
         `}</style>
 
-        {/* Header */}
         <div style={{ flexShrink: 0 }}>
           <Header onSelectMeme={handleSelectMeme} />
         </div>
 
-        {/* Tab panels — each fills available height exactly */}
         <div
           style={{
             flex: 1,
@@ -664,6 +741,7 @@ export default function Home() {
                 selectedMeme={selectedMeme}
                 collapsed={traderCollapsed}
                 onCollapseChange={handleCollapseChange}
+                onSelectToken={handleSelectToken}
               />
             ) : (
               <LockedSniper />
@@ -671,7 +749,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Bottom nav — never leaves screen */}
         <nav
           style={{
             flexShrink: 0,
@@ -726,11 +803,11 @@ export default function Home() {
           })}
         </nav>
 
-        {/* Bottom sheet — portal over everything */}
         <TokenBottomSheet
           meme={sheetMeme}
           onClose={handleCloseSheet}
           canSnipe={canSnipe}
+          onSelectToken={handleSelectToken}
         />
       </div>
     );
@@ -744,61 +821,48 @@ export default function Home() {
         background: "#030303",
         color: "#e0e0e0",
         fontFamily: "'JetBrains Mono', 'Fira Mono', monospace",
-        userSelect: hDragging.current || vDragging.current ? "none" : "auto",
+        userSelect: hDragging.current ? "none" : "auto",
         display: "flex",
         flexDirection: "column",
       }}
     >
+      <style>{`
+        html, body { margin: 0; padding: 0; box-sizing: border-box; }
+        *, *::before, *::after { box-sizing: border-box; }
+      `}</style>
       <Header onSelectMeme={handleSelectMeme} />
+
+      {/* ── TICKER STRIP ── */}
+      <LiveSignalsBar onSelectMeme={setSelectedMeme} />
+
       <main
         style={{
-          flex: 1,
+          height: "calc(100vh - 92px)",
           display: "flex",
-          flexDirection: "row",
-          padding: "8px 16px 12px",
+          flexDirection: "column",
+          padding: 0,
           overflow: "hidden",
-          height: "calc(100vh - 52px)",
-          maxHeight: "calc(100vh - 52px)",
+          minHeight: 0,
           gap: 0,
         }}
       >
+        {/* ── TOP ROW: chart | scanner | sniper ── */}
         <div
+          ref={containerRef}
           style={{
             flex: 1,
-            minWidth: 0,
             display: "flex",
-            flexDirection: "column",
+            flexDirection: "row",
             overflow: "hidden",
+            minHeight: 0,
           }}
         >
-          <LiveSignalsBar onSelectMeme={setSelectedMeme} />
-          <div
-            ref={containerRef}
-            style={{
-              display: "flex",
-              flex: 1,
-              overflow: "hidden",
-              minHeight: 0,
-              gap: 0,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                width: leftW,
-                flexShrink: 0,
-                minWidth: MIN_PX,
-                overflow: "hidden",
-              }}
-            >
-              <div style={{ flex: 1, overflow: "hidden" }}>
-                <MemeScanner
-                  onSelectMeme={setSelectedMeme}
-                  selectedMeme={selectedMeme}
-                />
-              </div>
-            </div>
+          {/* LEFT — chart / token panel (leftmost, biggest area) */}
+          <div style={{ flex: 1, minWidth: MIN_PX, overflow: "hidden" }}>
+            <TokenPanel selectedMeme={selectedMeme} />
+          </div>
+
+          {!scannerCollapsed && (
             <div
               onMouseDown={onHMouseDown("left")}
               style={{
@@ -828,118 +892,169 @@ export default function Home() {
                 }
               />
             </div>
-            <div style={{ flex: 1, minWidth: MIN_PX, overflow: "hidden" }}>
-              <TokenPanel selectedMeme={selectedMeme} />
-            </div>
-          </div>
-        </div>
+          )}
 
-        <div
-          onMouseDown={onHMouseDown("right")}
-          style={{
-            width: HANDLE_W,
-            flexShrink: 0,
-            cursor: "col-resize",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 10,
-          }}
-        >
+          {/* MIDDLE — Scanner (collapsible, narrower "order book" slot) */}
           <div
             style={{
-              width: 2,
-              height: "100%",
-              background: "#141414",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={(e) =>
-              ((e.currentTarget as HTMLElement).style.background = "#e8490f66")
-            }
-            onMouseLeave={(e) =>
-              ((e.currentTarget as HTMLElement).style.background = "#141414")
-            }
-          />
-        </div>
-
-        <div
-          ref={rightColRef}
-          style={{
-            width: rightW,
-            flexShrink: 0,
-            minWidth: MIN_PX,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            gap: 0,
-          }}
-        >
-          <div style={{ flex: 1, minHeight: MIN_WINS_H, overflow: "hidden" }}>
-            <WinsPanel onSelectMeme={setSelectedMeme} />
-          </div>
-          <div
-            onMouseDown={onVMouseDown}
-            style={{
-              height: HANDLE_H,
+              width: scannerCollapsed ? COLLAPSED_W : leftW,
               flexShrink: 0,
-              cursor: traderCollapsed ? "default" : "row-resize",
+              minWidth: scannerCollapsed ? COLLAPSED_W : MIN_PX,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              transition: "width 0.18s ease",
+              borderLeft: "1px solid #141414",
+              borderRight: "1px solid #141414",
+            }}
+          >
+            {scannerCollapsed ? (
+              <button
+                onClick={() => setScannerCollapsed(false)}
+                title="Expand scanner"
+                style={{
+                  flex: 1,
+                  background: "#050505",
+                  border: "none",
+                  color: "#555",
+                  cursor: "pointer",
+                  writingMode: "vertical-rl" as const,
+                  fontSize: 10,
+                  letterSpacing: "0.2em",
+                  fontFamily: "inherit",
+                  fontWeight: 700,
+                }}
+              >
+                ◂ SCANNER
+              </button>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
+                    padding: "4px 8px 0",
+                    flexShrink: 0,
+                  }}
+                >
+                  <button
+                    onClick={() => setScannerCollapsed(true)}
+                    title="Collapse scanner"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#444",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      padding: "2px 6px",
+                    }}
+                  >
+                    ▸
+                  </button>
+                </div>
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <MemeScanner
+                    onSelectMeme={setSelectedMeme}
+                    selectedMeme={selectedMeme}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div
+            onMouseDown={onHMouseDown("right")}
+            style={{
+              width: HANDLE_W,
+              flexShrink: 0,
+              cursor: "col-resize",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               zIndex: 10,
-              position: "relative",
-              opacity: traderCollapsed ? 0.3 : 1,
-              transition: "opacity 0.2s",
             }}
           >
             <div
               style={{
-                width: "100%",
-                height: 2,
+                width: 2,
+                height: "100%",
                 background: "#141414",
                 transition: "background 0.15s",
               }}
-              onMouseEnter={(e) => {
-                if (!traderCollapsed)
-                  (e.currentTarget as HTMLElement).style.background =
-                    "#e8490f66";
-              }}
+              onMouseEnter={(e) =>
+                ((e.currentTarget as HTMLElement).style.background =
+                  "#e8490f66")
+              }
               onMouseLeave={(e) =>
                 ((e.currentTarget as HTMLElement).style.background = "#141414")
               }
             />
+          </div>
+
+          {/* RIGHT — Win Tracker, always docked */}
+          <div
+            ref={rightColRef}
+            style={{
+              width: rightW,
+              flexShrink: 0,
+              minWidth: MIN_RIGHT_PX,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
             <div
               style={{
-                position: "absolute",
-                left: "50%",
-                top: "50%",
-                transform: "translate(-50%, -50%)",
-                display: "flex",
-                gap: 3,
-                pointerEvents: "none",
+                height: "100%",
+                overflowY: "auto",
+                overflowX: "hidden",
+                scrollBehavior: "smooth",
+                overscrollBehavior: "contain",
               }}
             >
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 3,
-                    height: 3,
-                    borderRadius: "50%",
-                    background: "#333",
-                  }}
-                />
-              ))}
+              <WinsPanel onSelectMeme={setSelectedMeme} />
             </div>
           </div>
+        </div>
+      </main>
+
+      {/* ── BOTTOM BAR — Positions / History, full width, always visible ── */}
+      <div
+        ref={posBarRef}
+        style={{
+          flexShrink: 0,
+          height: 260,
+          borderTop: "1px solid #141414",
+          background: "#030303",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      />
+      {/* ── Floating SNIPER panel — handle is fixed at bottom, content overlays above it ── */}
+      {sniperPos && (
+        <>
+          {/* Always mounted when sniperPos exists — unmounting on minimize
+              was killing PaperTrader's createPortal into bottomBarNode,
+              which is why the bottom POSITIONS/HISTORY bar went completely
+              blank on close instead of just hiding the floating card. */}
           <div
             style={{
-              height: paperTraderH,
-              flexShrink: 0,
+              position: "fixed",
+              left: sniperPos.x,
+              bottom: 64,
+              width: 340,
+              height: "min(520px, 70vh)",
+              zIndex: 300,
+              background: "#050505",
+              border: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderBottom: "none",
+              borderRadius: "10px 10px 0 0",
+              boxShadow: "0 -4px 40px #000000cc",
+              display: sniperMinimized ? "none" : "flex",
+              flexDirection: "column",
               overflow: "hidden",
-              transition: vDragging.current
-                ? "none"
-                : "height 0.22s cubic-bezier(0.4, 0, 0.2, 1)",
             }}
           >
             {canSnipe ? (
@@ -947,13 +1062,71 @@ export default function Home() {
                 selectedMeme={selectedMeme}
                 collapsed={traderCollapsed}
                 onCollapseChange={handleCollapseChange}
+                bottomBarNode={posBarNode}
+                onSelectToken={handleSelectToken}
               />
             ) : (
               <LockedSniper />
             )}
           </div>
-        </div>
-      </main>
+
+          <div
+            onMouseDown={onSniperDragStart}
+            onClick={() => {
+              if (sniperMoved.current) return;
+              setSniperMinimized((m) => !m);
+            }}
+            style={{
+              position: "fixed",
+              left: sniperPos.x,
+              bottom: 20,
+              width: 340,
+              height: 44,
+              zIndex: 300,
+              background: "#0a0a0a",
+              border: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderTop: sniperMinimized
+                ? `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`
+                : "1px solid #1a1a1a",
+              borderRadius: sniperMinimized ? 10 : "0 0 10px 10px",
+              boxShadow: "0 8px 40px #000000cc",
+              cursor: "grab",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 16px",
+              userSelect: "none",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: canSnipe ? "#00c47a" : "#444",
+                  boxShadow: canSnipe ? "0 0 8px #00c47a" : "none",
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  color: canSnipe ? "#e8490f" : "#666",
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: "0.16em",
+                  fontFamily: "'JetBrains Mono', 'Fira Mono', monospace",
+                }}
+              >
+                SNIPER
+              </span>
+            </div>
+            <span style={{ color: "#777", fontSize: 12 }}>
+              {sniperMinimized ? "▴" : "▾"}
+            </span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useConnection } from "@solana/wallet-adapter-react";
 import {
   VersionedTransaction,
@@ -9,8 +10,10 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
 } from "@solana/web3.js";
+import { Lock } from "lucide-react";
 import { MemeTrend } from "@/app/app/page";
 import { useWraithTier } from "@/hooks/useWraithTier";
+import { getMcap } from "@/lib/getTokenPrice";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -19,6 +22,8 @@ interface Props {
   selectedMeme: MemeTrend | null;
   collapsed: boolean;
   onCollapseChange: (collapsed: boolean) => void;
+  bottomBarNode?: HTMLElement | null;
+  onSelectToken?: (mint: string, symbol: string, imageUrl?: string) => void;
 }
 
 interface Position {
@@ -97,6 +102,12 @@ const PAPER_POSITIONS_KEY = "wraith_paper_positions_v1";
 const PAPER_LOG_KEY = "wraith_paper_log_v1";
 const PAPER_STARTING_SOL = 10;
 
+interface PaperFill {
+  mcap: number;
+  amountSol: number;
+  ts: number;
+}
+
 interface PaperPosition {
   id: string;
   symbol: string;
@@ -118,6 +129,7 @@ interface PaperPosition {
   exitPnlPct?: number;
   imageUrl?: string;
   ts: number;
+  fills?: PaperFill[];
 }
 
 interface PaperLog {
@@ -680,20 +692,15 @@ async function fetchTokenData(
   }
 }
 
+// Delegates to the shared getTokenPrice() module (lib/getTokenPrice.ts) so
+// the mcap used to close a paper position is the exact same number
+// TokenPanel and WinsPanel are showing on screen at that moment — this is
+// what handlePaperManualSell uses for the exit price, so this directly ties
+// into the "money vanishes on close" fix (0 is never returned as if it were
+// a real price; the shared module falls all the way through to pump.fun
+// before giving up).
 async function fetchMcap(ca: string): Promise<number> {
-  try {
-    const supply = _supplyCache.get(ca);
-    if (supply && supply > 0) {
-      const res = await fetch(`https://api.jup.ag/price/v2?ids=${ca}`);
-      const data = await res.json();
-      const price = parseFloat(data?.data?.[ca]?.price ?? "0");
-      if (price > 0) return price * supply;
-    }
-    const d = await fetchTokenData(ca);
-    return d?.mcap ?? 0;
-  } catch {
-    return 0;
-  }
+  return getMcap(ca, { skipJupiter: true }); // TP/SL checks don't need swap-precision, only the actively viewed token does
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILS
@@ -1060,11 +1067,11 @@ function NoFillPasswordInput({
       />
       <div
         style={{
-          background: C.bgCard,
+          background: "#111",
           border: `1px solid ${focused ? C.orange + "88" : C.border}`,
-          borderRadius: 3,
-          padding: "0 8px",
-          height: 28,
+          borderRadius: 14,
+          padding: "0 16px",
+          height: 44,
           display: "flex",
           alignItems: "center",
           gap: 0,
@@ -1570,8 +1577,19 @@ function ShareModal({
         alignItems: "center",
         justifyContent: "center",
         backdropFilter: "blur(4px)",
+        animation: "shareOverlayIn 0.18s ease-out",
       }}
     >
+      <style>{`
+        @keyframes shareOverlayIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes shareCardIn {
+          from { opacity: 0; transform: translateY(-40px) scale(0.96); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
@@ -1579,6 +1597,7 @@ function ShareModal({
           flexDirection: "column",
           alignItems: "center",
           gap: 10,
+          animation: "shareCardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       >
         {/* ── PREVIEW CARD (display only — NOT captured) ── */}
@@ -2083,11 +2102,13 @@ function HotWalletSetup({
         color: primary ? "#fff" : danger ? C.red : C.muted,
         fontSize: primary ? 10 : 9,
         fontWeight: primary ? 700 : 400,
-        padding: "7px 10px",
-        borderRadius: 3,
+        padding: "9px 10px",
+        borderRadius: 4,
         cursor: "pointer",
         ...MONO,
         flex: 1,
+        width: "100%",
+        letterSpacing: "0.06em",
       }}
     >
       {busy && primary ? "···" : label}
@@ -2098,35 +2119,66 @@ function HotWalletSetup({
     return (
       <div
         style={{
-          padding: "10px 12px",
+          padding: "8px 4px",
           display: "flex",
           flexDirection: "column",
-          gap: 6,
+          alignItems: "center",
+          gap: 14,
+          textAlign: "center" as const,
         }}
       >
-        <div style={{ color: C.dim, fontSize: 8, ...MONO, lineHeight: 1.6 }}>
+        <div
+          style={{
+            width: 46,
+            height: 46,
+            borderRadius: "50%",
+            background: "#0d0d0d",
+            border: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <LockIcon size={18} color={C.dim} />
+        </div>
+
+        <div style={{ color: C.dim, fontSize: 9, ...MONO, lineHeight: 1.7 }}>
           One-click buys · auto-sell on TP/SL/trail · no wallet popups.
           <br />
           <span style={{ color: C.red + "99" }}>
             Only fund with amounts you can afford to lose.
           </span>
         </div>
-        {hasWallet ? (
-          <Btn
-            label="UNLOCK HOT WALLET"
-            onClick={() => reset("unlock")}
-            primary
-          />
-        ) : (
-          <>
+
+        <div
+          style={{
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          {hasWallet ? (
             <Btn
-              label="GENERATE NEW WALLET"
-              onClick={() => reset("create")}
+              label="UNLOCK HOT WALLET"
+              onClick={() => reset("unlock")}
               primary
             />
-            <Btn label="IMPORT EXISTING KEY" onClick={() => reset("import")} />
-          </>
-        )}
+          ) : (
+            <>
+              <Btn
+                label="GENERATE NEW WALLET"
+                onClick={() => reset("create")}
+                primary
+              />
+              <Btn
+                label="IMPORT EXISTING KEY"
+                onClick={() => reset("import")}
+              />
+            </>
+          )}
+        </div>
+
         {hasWallet && (
           <button
             onClick={() => reset("recover")}
@@ -2134,12 +2186,10 @@ function HotWalletSetup({
               background: "none",
               border: "none",
               color: C.dim + "88",
-              fontSize: 7,
+              fontSize: 8,
               cursor: "pointer",
               ...MONO,
               textDecoration: "underline",
-              textAlign: "left" as const,
-              paddingLeft: 0,
             }}
           >
             forgot password? recover with backup phrase
@@ -2415,10 +2465,11 @@ function HotWalletSetup({
   return (
     <div
       style={{
-        padding: "10px 12px",
+        padding: "28px 20px 16px",
         display: "flex",
         flexDirection: "column",
-        gap: 5,
+        alignItems: "center",
+        gap: 14,
       }}
     >
       <div
@@ -2435,78 +2486,158 @@ function HotWalletSetup({
         <input type="text" tabIndex={-1} />
         <input type="password" tabIndex={-1} />
       </div>
-      {mode === "import" && (
-        <textarea
-          placeholder="Private key — base58 string or JSON array [1,2,3…]"
-          value={importKey}
-          onChange={(e) => {
-            setImportKey(e.target.value);
-            setErr("");
-          }}
-          autoComplete="off"
-          spellCheck={false}
-          style={{
-            background: C.bgCard,
-            border: `1px solid ${C.border}`,
-            color: C.primary,
-            fontSize: 9,
-            padding: "8px",
-            borderRadius: 3,
-            outline: "none",
-            width: "100%",
-            boxSizing: "border-box" as const,
-            resize: "none" as const,
-            height: 52,
-            ...MONO,
-          }}
-        />
-      )}
-      <NoFillPasswordInput
-        inputId={mode === "unlock" ? "hw-unlock" : "hw-create"}
-        placeholder={mode === "unlock" ? "Password" : "Password (min 6 chars)"}
-        value={pw}
-        onChange={(v) => {
-          setPw(v);
-          setErr("");
+
+      <img
+        src="/wraith.png"
+        alt="Wraith"
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: "50%",
+          objectFit: "cover",
         }}
-        onKeyDown={(e) => e.key === "Enter" && mode === "unlock" && doUnlock()}
       />
-      {mode !== "unlock" && (
+
+      <div
+        style={{
+          color: C.primary,
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: "0.02em",
+          ...MONO,
+        }}
+      >
+        {mode === "unlock"
+          ? "Enter your password"
+          : mode === "create"
+            ? "Create a password"
+            : "Import wallet"}
+      </div>
+
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        {mode === "import" && (
+          <textarea
+            placeholder="Private key — base58 string or JSON array [1,2,3…]"
+            value={importKey}
+            onChange={(e) => {
+              setImportKey(e.target.value);
+              setErr("");
+            }}
+            autoComplete="off"
+            spellCheck={false}
+            style={{
+              background: "#111",
+              border: `1px solid ${C.border}`,
+              color: C.primary,
+              fontSize: 9,
+              padding: "10px",
+              borderRadius: 12,
+              outline: "none",
+              width: "100%",
+              boxSizing: "border-box" as const,
+              resize: "none" as const,
+              height: 52,
+              ...MONO,
+            }}
+          />
+        )}
         <NoFillPasswordInput
-          inputId="hw-confirm"
-          placeholder="Confirm password"
-          value={pw2}
+          inputId={mode === "unlock" ? "hw-unlock" : "hw-create"}
+          placeholder={
+            mode === "unlock" ? "Password" : "Password (min 6 chars)"
+          }
+          value={pw}
           onChange={(v) => {
-            setPw2(v);
+            setPw(v);
             setErr("");
           }}
           onKeyDown={(e) =>
-            e.key === "Enter" && (mode === "create" ? doGenerate() : doImport())
+            e.key === "Enter" && mode === "unlock" && doUnlock()
           }
         />
-      )}
-      {err && <div style={{ color: C.red, fontSize: 8, ...MONO }}>{err}</div>}
-      <div style={{ display: "flex", gap: 4 }}>
-        <Btn
-          label={
-            mode === "unlock"
-              ? "UNLOCK"
-              : mode === "create"
-                ? "GENERATE WALLET"
-                : "IMPORT & ENCRYPT"
-          }
-          onClick={
-            mode === "unlock"
-              ? doUnlock
-              : mode === "create"
-                ? doGenerate
-                : doImport
-          }
-          primary
-          disabled={busy}
-        />
-        <Btn label="←" onClick={() => reset("menu")} />
+        {mode !== "unlock" && (
+          <NoFillPasswordInput
+            inputId="hw-confirm"
+            placeholder="Confirm password"
+            value={pw2}
+            onChange={(v) => {
+              setPw2(v);
+              setErr("");
+            }}
+            onKeyDown={(e) =>
+              e.key === "Enter" &&
+              (mode === "create" ? doGenerate() : doImport())
+            }
+          />
+        )}
       </div>
+
+      {err && (
+        <div
+          style={{
+            color: C.red,
+            fontSize: 8,
+            ...MONO,
+            alignSelf: "flex-start",
+          }}
+        >
+          {err}
+        </div>
+      )}
+
+      <button
+        onClick={
+          mode === "unlock"
+            ? doUnlock
+            : mode === "create"
+              ? doGenerate
+              : doImport
+        }
+        disabled={busy}
+        style={{
+          width: "100%",
+          background: C.orange,
+          border: "none",
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 800,
+          padding: "11px 0",
+          borderRadius: 999,
+          cursor: busy ? "not-allowed" : "pointer",
+          letterSpacing: "0.04em",
+          ...MONO,
+        }}
+      >
+        {busy
+          ? "···"
+          : mode === "unlock"
+            ? "Unlock"
+            : mode === "create"
+              ? "Generate wallet"
+              : "Import & encrypt"}
+      </button>
+
+      <button
+        onClick={() => reset("menu")}
+        style={{
+          background: "none",
+          border: "none",
+          color: C.dim,
+          fontSize: 8,
+          cursor: "pointer",
+          ...MONO,
+        }}
+      >
+        ← back
+      </button>
+
       {mode === "unlock" && loadRawRecovery() && (
         <button
           onClick={async () => {
@@ -3016,6 +3147,8 @@ export default function PaperTrader({
   selectedMeme,
   collapsed,
   onCollapseChange,
+  bottomBarNode,
+  onSelectToken,
 }: Props) {
   const { connection } = useConnection();
   const { tier, canUse } = useWraithTier();
@@ -3042,6 +3175,7 @@ export default function PaperTrader({
   const [tab, setTab] = useState<"trade" | "positions" | "log" | "config">(
     "trade",
   );
+  const [subTab, setSubTab] = useState<"positions" | "log">("positions");
 
   const [amountSol, setAmountSol] = useState("0.1");
   const [slPct, setSlPct] = useState(DEFAULT_SL);
@@ -3108,6 +3242,56 @@ export default function PaperTrader({
 
   // ── SHARE STATE
   const [shareData, setShareData] = useState<ShareCardData | null>(null);
+
+  // ── PAPER POSITION INLINE EDIT (SL/TP/Trail) ──
+  const [editingPaperId, setEditingPaperId] = useState<string | null>(null);
+  const [editSlPct, setEditSlPct] = useState("");
+  const [editTpX, setEditTpX] = useState("");
+  const [editTrailPct, setEditTrailPct] = useState("");
+  const [expandedFillsId, setExpandedFillsId] = useState<string | null>(null);
+
+  const startEditPaperPos = useCallback((pos: PaperPosition) => {
+    setEditingPaperId(pos.id);
+    setEditSlPct(String(pos.slPct));
+    setEditTpX(String(pos.tpX));
+    setEditTrailPct(String(pos.trailPct));
+  }, []);
+
+  // Re-select a held/lost token so its chart shows in the main panel and
+  // it's loaded into the buy form again (so a rebuy averages into it).
+  const handleSelectPaperToken = useCallback(
+    (pos: PaperPosition) => {
+      onSelectToken?.(pos.mint, pos.symbol, pos.imageUrl);
+      setTab("trade");
+    },
+    [onSelectToken],
+  );
+
+  const saveEditPaperPos = useCallback(
+    (posId: string) => {
+      const newSl = parseFloat(editSlPct);
+      const newTp = parseFloat(editTpX);
+      const newTrail = parseFloat(editTrailPct);
+      setPaperPositions((prev) =>
+        prev.map((p) => {
+          if (p.id !== posId) return p;
+          const slPct = !isNaN(newSl) && newSl < 0 ? newSl : p.slPct;
+          const tpX = !isNaN(newTp) && newTp > 0 ? newTp : p.tpX;
+          const trailPct =
+            !isNaN(newTrail) && newTrail > 0 ? newTrail : p.trailPct;
+          return {
+            ...p,
+            slPct,
+            tpX,
+            trailPct,
+            trailStopMcap: p.peakMcap * (1 - trailPct / 100),
+          };
+        }),
+      );
+      setEditingPaperId(null);
+    },
+    [editSlPct, editTpX, editTrailPct],
+  );
 
   const handleShare = useCallback((pos: Position) => {
     setShareData({
@@ -3398,137 +3582,152 @@ export default function PaperTrader({
     [setPositionsSync, getConn],
   );
 
+  // ── MERGED MONITOR — real + paper positions share one poll cycle now.
+  // Previously these were two independent useEffects, each on its own
+  // 10s timer, each fetching mcap per-position. If a mint was open as
+  // both a real and paper position, it got fetched twice per tick for
+  // no reason. Now: collect every unique mint across both position
+  // lists once per tick, fetch each exactly once, then run the same
+  // TP/SL/trail logic for both lists off that shared result.
   useEffect(() => {
     const monitor = async () => {
-      const watching = positionsRef.current.filter(
+      const watchingReal = positionsRef.current.filter(
         (p) => p.status === "watching",
       );
-      if (!watching.length) return;
-      await Promise.all(
-        watching.map(async (pos) => {
-          if (sellingRef.current.has(pos.id)) return;
-          try {
-            const mcap = await fetchMcap(pos.mint);
-            if (!mcap || mcap <= 0) return;
-            const pnlPct = (mcap / pos.entryMcap - 1) * 100;
-            const newPeak = Math.max(pos.peakMcap, mcap);
-            const trailFrac = pos.trailPct / 100;
-            const trailStop = newPeak * (1 - trailFrac);
-            const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
-            const tpMcap = pos.entryMcap * pos.tpX;
-            const slValid = pos.slPct < 0;
+      const watchingPaper = paperPositionsRef.current.filter(
+        (p) => p.status === "watching",
+      );
+      if (!watchingReal.length && !watchingPaper.length) return;
 
-            const updated = {
-              ...pos,
-              currentMcap: mcap,
-              currentPnlPct: pnlPct,
-              peakMcap: newPeak,
-              trailStopMcap: trailStop,
-            };
-            if (mountedRef.current)
-              setPositionsSync((prev) =>
-                prev.map((p) => (p.id === pos.id ? updated : p)),
-              );
-            if (mcap >= tpMcap) triggerSell(pos.id, "TP");
-            else if (slValid && mcap <= slMcap) triggerSell(pos.id, "SL");
-            else if (newPeak > pos.entryMcap && mcap <= trailStop)
-              triggerSell(pos.id, "TRAIL");
-          } catch {}
+      const uniqueMints = Array.from(
+        new Set([
+          ...watchingReal.map((p) => p.mint),
+          ...watchingPaper.map((p) => p.mint),
+        ]),
+      );
+
+      const mcapEntries = await Promise.all(
+        uniqueMints.map(async (mint) => {
+          try {
+            const mcap = await fetchMcap(mint);
+            return [mint, mcap] as const;
+          } catch {
+            return [mint, 0] as const;
+          }
         }),
       );
+      const mcapByMint = new Map(mcapEntries);
+
+      // ── Real positions ──
+      watchingReal.forEach((pos) => {
+        if (sellingRef.current.has(pos.id)) return;
+        const mcap = mcapByMint.get(pos.mint);
+        if (!mcap || mcap <= 0) return;
+
+        const pnlPct = (mcap / pos.entryMcap - 1) * 100;
+        const newPeak = Math.max(pos.peakMcap, mcap);
+        const trailFrac = pos.trailPct / 100;
+        const trailStop = newPeak * (1 - trailFrac);
+        const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
+        const tpMcap = pos.entryMcap * pos.tpX;
+        const slValid = pos.slPct < 0;
+
+        const updated = {
+          ...pos,
+          currentMcap: mcap,
+          currentPnlPct: pnlPct,
+          peakMcap: newPeak,
+          trailStopMcap: trailStop,
+        };
+        if (mountedRef.current)
+          setPositionsSync((prev) =>
+            prev.map((p) => (p.id === pos.id ? updated : p)),
+          );
+        if (mcap >= tpMcap) triggerSell(pos.id, "TP");
+        else if (slValid && mcap <= slMcap) triggerSell(pos.id, "SL");
+        else if (newPeak > pos.entryMcap && mcap <= trailStop)
+          triggerSell(pos.id, "TRAIL");
+      });
+
+      // ── Paper positions ──
+      watchingPaper.forEach((pos) => {
+        const mcap = mcapByMint.get(pos.mint);
+        if (!mcap || mcap <= 0) return;
+
+        const pnlPct = (mcap / pos.entryMcap - 1) * 100;
+        const newPeak = Math.max(pos.peakMcap, mcap);
+        const trailFrac = pos.trailPct / 100;
+        const trailStop = newPeak * (1 - trailFrac);
+        const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
+        const tpMcap = pos.entryMcap * pos.tpX;
+        const slValid = pos.slPct < 0;
+
+        const updated: PaperPosition = {
+          ...pos,
+          currentMcap: mcap,
+          currentPnlPct: pnlPct,
+          peakMcap: newPeak,
+          trailStopMcap: trailStop,
+        };
+
+        let exitReason: "TP" | "SL" | "TRAIL" | undefined;
+        if (mcap >= tpMcap) exitReason = "TP";
+        else if (slValid && mcap <= slMcap) exitReason = "SL";
+        else if (newPeak > pos.entryMcap && mcap <= trailStop)
+          exitReason = "TRAIL";
+
+        if (exitReason) {
+          if (paperSellingRef.current.has(pos.id)) return;
+          paperSellingRef.current.add(pos.id);
+          const exitPnl = (mcap / pos.entryMcap - 1) * 100;
+          const solReturn = pos.amountSol * (1 + exitPnl / 100);
+          const closed: PaperPosition = {
+            ...updated,
+            status: "closed",
+            exitReason,
+            exitMcap: mcap,
+            exitPnlPct: exitPnl,
+          };
+          setPaperPositions((prev) =>
+            prev.map((p) => (p.id === pos.id ? closed : p)),
+          );
+          setPaperBal((b) => parseFloat((b + solReturn).toFixed(6)));
+          const logEntry: PaperLog = {
+            id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            symbol: pos.symbol,
+            mint: pos.mint,
+            entryMcap: pos.entryMcap,
+            exitMcap: mcap,
+            amountSol: pos.amountSol,
+            slPct: pos.slPct,
+            tpX: pos.tpX,
+            pnlPct: exitPnl,
+            exitReason,
+            imageUrl: pos.imageUrl,
+            ts: pos.ts,
+          };
+          setPaperLog((prev) => [logEntry, ...prev].slice(0, 200));
+          playAlert(
+            exitReason === "TP"
+              ? "sell_tp"
+              : exitReason === "SL"
+                ? "sell_sl"
+                : "sell_trail",
+          );
+        } else {
+          setPaperPositions((prev) =>
+            prev.map((p) => (p.id === pos.id ? updated : p)),
+          );
+        }
+      });
     };
+
     monitorTimer.current = setInterval(monitor, POLL_MS);
     monitor();
     return () => {
       if (monitorTimer.current) clearInterval(monitorTimer.current);
     };
   }, [triggerSell, setPositionsSync]);
-
-  // ── PAPER MONITOR (same TP/SL/Trail logic, no real txs)
-  useEffect(() => {
-    const paperMonitor = async () => {
-      const watching = paperPositionsRef.current.filter(
-        (p) => p.status === "watching",
-      );
-      if (!watching.length) return;
-      await Promise.all(
-        watching.map(async (pos) => {
-          try {
-            const mcap = await fetchMcap(pos.mint);
-            if (!mcap || mcap <= 0) return;
-            const pnlPct = (mcap / pos.entryMcap - 1) * 100;
-            const newPeak = Math.max(pos.peakMcap, mcap);
-            const trailFrac = pos.trailPct / 100;
-            const trailStop = newPeak * (1 - trailFrac);
-            const slMcap = pos.entryMcap * (1 + pos.slPct / 100);
-            const tpMcap = pos.entryMcap * pos.tpX;
-            const slValid = pos.slPct < 0;
-
-            const updated: PaperPosition = {
-              ...pos,
-              currentMcap: mcap,
-              currentPnlPct: pnlPct,
-              peakMcap: newPeak,
-              trailStopMcap: trailStop,
-            };
-
-            let exitReason: "TP" | "SL" | "TRAIL" | undefined;
-            if (mcap >= tpMcap) exitReason = "TP";
-            else if (slValid && mcap <= slMcap) exitReason = "SL";
-            else if (newPeak > pos.entryMcap && mcap <= trailStop)
-              exitReason = "TRAIL";
-
-            if (exitReason) {
-              if (paperSellingRef.current.has(pos.id)) return;
-              paperSellingRef.current.add(pos.id);
-              const exitPnl = (mcap / pos.entryMcap - 1) * 100;
-              const solReturn = pos.amountSol * (1 + exitPnl / 100);
-              const closed: PaperPosition = {
-                ...updated,
-                status: "closed",
-                exitReason,
-                exitMcap: mcap,
-                exitPnlPct: exitPnl,
-              };
-              setPaperPositions((prev) =>
-                prev.map((p) => (p.id === pos.id ? closed : p)),
-              );
-              setPaperBal((b) => parseFloat((b + solReturn).toFixed(6)));
-              const logEntry: PaperLog = {
-                id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                symbol: pos.symbol,
-                mint: pos.mint,
-                entryMcap: pos.entryMcap,
-                exitMcap: mcap,
-                amountSol: pos.amountSol,
-                slPct: pos.slPct,
-                tpX: pos.tpX,
-                pnlPct: exitPnl,
-                exitReason,
-                imageUrl: pos.imageUrl,
-                ts: pos.ts,
-              };
-              setPaperLog((prev) => [logEntry, ...prev].slice(0, 200));
-              playAlert(
-                exitReason === "TP"
-                  ? "sell_tp"
-                  : exitReason === "SL"
-                    ? "sell_sl"
-                    : "sell_trail",
-              );
-            } else {
-              setPaperPositions((prev) =>
-                prev.map((p) => (p.id === pos.id ? updated : p)),
-              );
-            }
-          } catch {}
-        }),
-      );
-    };
-    const iv = setInterval(paperMonitor, POLL_MS);
-    paperMonitor();
-    return () => clearInterval(iv);
-  }, []); // intentionally no deps — uses refs
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ca = (selectedMeme as any)?.contractAddress || null;
@@ -3581,33 +3780,72 @@ export default function PaperTrader({
       return;
     }
     const trailFrac = trailPct / 100;
-    const pos: PaperPosition = {
-      id: `paper-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      symbol: sym,
-      mint: ca,
-      entryMcap,
-      entryPrice: tokenData?.price || 0,
-      tokenAmount: 0, // paper — no real tokens
-      amountSol: amt,
-      slPct,
-      tpX,
-      trailPct,
-      peakMcap: entryMcap,
-      currentMcap: entryMcap,
-      currentPnlPct: 0,
-      trailStopMcap: entryMcap * (1 - trailFrac),
-      status: "watching",
-      imageUrl: tokenData?.imageUrl,
-      ts: Date.now(),
-    };
+    const existing = paperPositionsRef.current.find(
+      (p) => p.status === "watching" && p.mint === ca,
+    );
+    const fill: PaperFill = { mcap: entryMcap, amountSol: amt, ts: Date.now() };
     setPaperBal((b) => parseFloat((b - amt).toFixed(6)));
-    setPaperPositions((prev) => [pos, ...prev]);
+    if (existing) {
+      // Rebuy of an already-open position — average into it instead of
+      // duplicating, keep its existing SL/TP/Trail config, and log the fill.
+      const totalSol = existing.amountSol + amt;
+      const avgEntryMcap =
+        (existing.entryMcap * existing.amountSol + entryMcap * amt) / totalSol;
+      const newPeak = Math.max(existing.peakMcap, entryMcap);
+      const newPnlPct = (existing.currentMcap / avgEntryMcap - 1) * 100;
+      setPaperPositions((prev) =>
+        prev.map((p) =>
+          p.id === existing.id
+            ? {
+                ...p,
+                entryMcap: avgEntryMcap,
+                amountSol: totalSol,
+                peakMcap: newPeak,
+                currentPnlPct: newPnlPct,
+                trailStopMcap: newPeak * (1 - p.trailPct / 100),
+                fills: [
+                  ...(p.fills || [
+                    { mcap: p.entryMcap, amountSol: p.amountSol, ts: p.ts },
+                  ]),
+                  fill,
+                ],
+              }
+            : p,
+        ),
+      );
+      setStatus({
+        msg: `Added ${amt} SOL to $${sym} · avg entry now ${fmtMcap(avgEntryMcap)}`,
+        type: "ok",
+      });
+    } else {
+      const pos: PaperPosition = {
+        id: `paper-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        symbol: sym,
+        mint: ca,
+        entryMcap,
+        entryPrice: tokenData?.price || 0,
+        tokenAmount: 0, // paper — no real tokens
+        amountSol: amt,
+        slPct,
+        tpX,
+        trailPct,
+        peakMcap: entryMcap,
+        currentMcap: entryMcap,
+        currentPnlPct: 0,
+        trailStopMcap: entryMcap * (1 - trailFrac),
+        status: "watching",
+        imageUrl: tokenData?.imageUrl,
+        ts: Date.now(),
+        fills: [fill],
+      };
+      setPaperPositions((prev) => [pos, ...prev]);
+      setStatus({
+        msg: `Paper bought $${sym} @ ${fmtMcap(entryMcap)} · auto-sell armed`,
+        type: "ok",
+      });
+    }
     markBoughtInWinsPanel((sym || "").toLowerCase());
-    setStatus({
-      msg: `Paper bought $${sym} @ ${fmtMcap(entryMcap)} · auto-sell armed`,
-      type: "ok",
-    });
-    setTab("positions");
+    setTab("trade");
     setTimeout(() => {
       if (mountedRef.current) setStatus(null);
     }, 6000);
@@ -3630,7 +3868,11 @@ export default function PaperTrader({
     if (!pos || pos.status !== "watching") return;
     if (paperSellingRef.current.has(posId)) return;
     paperSellingRef.current.add(posId);
-    const exitMcap = await fetchMcap(pos.mint).catch(() => pos.currentMcap);
+    const rawExitMcap = await fetchMcap(pos.mint);
+    // A 0 here means the price lookup failed — never treat that as "token
+    // went to zero," fall back to the last known good mcap instead.
+    const exitMcap =
+      rawExitMcap > 0 ? rawExitMcap : pos.currentMcap || pos.entryMcap;
     const exitPnl = (exitMcap / pos.entryMcap - 1) * 100;
     const solReturn = pos.amountSol * (1 + exitPnl / 100);
     setPaperPositions((prev) =>
@@ -3731,7 +3973,7 @@ export default function PaperTrader({
           msg: `✓ Bought ~${displayAmt} $${sym} · auto-sell armed`,
           type: "ok",
         });
-        setTab("positions");
+        setTab("trade");
         setTimeout(() => {
           if (mountedRef.current) setStatus(null);
         }, 6000);
@@ -3808,8 +4050,8 @@ export default function PaperTrader({
     <div
       style={{
         background: C.bg,
-        border: `1px solid ${borderFlash ? C.orange + "88" : paperMode ? C.green + "44" : C.border}`,
-        borderRadius: 8,
+        borderTop: `1px solid ${borderFlash ? C.orange + "88" : paperMode ? C.green + "44" : "#141414"}`,
+        borderRadius: 0,
         overflow: "hidden",
         height: "100%",
         display: "flex",
@@ -3826,13 +4068,17 @@ export default function PaperTrader({
         input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;}
         input[type=number]{-moz-appearance:textfield;}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-        .cfg-inp{background:#0d0d0d;border:1px solid #1a1a1a;color:#f0f0f0;font-size:12px;padding:6px 9px;border-radius:3px;outline:none;width:84px;text-align:right;}
+       .cfg-inp{background:#0d0d0d;border:1px solid #1a1a1a;color:#f0f0f0;font-size:12px;padding:6px 9px;border-radius:3px;outline:none;width:84px;text-align:right;}
         .cfg-inp:focus{border-color:#e8490f55;}
+.pct-slider{-webkit-appearance:none;appearance:none;width:100%;height:14px;background:transparent;outline:none;margin:0;cursor:pointer;display:block;}
+        .pct-slider::-webkit-slider-runnable-track{height:14px;background:transparent;}
+        .pct-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:#0a0a0a;border:2px solid #fff;cursor:pointer;margin-top:1px;}
+        .pct-slider::-moz-range-track{height:14px;background:transparent;border:none;}
+        .pct-slider::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#0a0a0a;border:2px solid #fff;cursor:pointer;}
       `}</style>
 
       {/* HEADER */}
       <div
-        onClick={() => onCollapseChange(!collapsed)}
         style={{
           background: "#030303",
           borderBottom: collapsed ? "none" : `1px solid ${C.border}`,
@@ -3840,19 +4086,29 @@ export default function PaperTrader({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          cursor: "pointer",
           userSelect: "none" as const,
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            overflowX: "auto",
+            scrollbarWidth: "none" as const,
+            minWidth: 0,
+          }}
+        >
           <span
             style={{
               color: C.orange,
               fontSize: 10,
               fontWeight: 800,
+
               letterSpacing: "0.18em",
               ...MONO,
+              flexShrink: 0,
             }}
           >
             SNIPER
@@ -3864,14 +4120,16 @@ export default function PaperTrader({
                 color: C.green,
                 border: `1px solid ${C.green}55`,
                 background: "#001a08",
-                padding: "1px 6px",
+                padding: "2px 6px",
                 borderRadius: 2,
                 fontWeight: 700,
-                letterSpacing: "0.08em",
+                letterSpacing: "0.04em",
+                whiteSpace: "nowrap" as const,
+                flexShrink: 0,
                 ...MONO,
               }}
             >
-              DEMO · {paperBal.toFixed(3)} SOL
+              {paperBal.toFixed(2)} SOL
             </span>
           )}
           <span
@@ -3882,11 +4140,13 @@ export default function PaperTrader({
               ...MONO,
               color: hotKeypair ? C.green : C.muted,
               border: `1px solid ${hotKeypair ? C.green + "33" : C.border}`,
+              whiteSpace: "nowrap" as const,
+              flexShrink: 0,
             }}
           >
             {hotKeypair ? "HOT WALLET" : "LOCKED"}
           </span>
-          {hotBal !== null && (
+          {hotBal !== null && !paperMode && (
             <span
               style={{
                 fontSize: 7,
@@ -3895,6 +4155,8 @@ export default function PaperTrader({
                 padding: "1px 5px",
                 borderRadius: 2,
                 ...MONO,
+                whiteSpace: "nowrap" as const,
+                flexShrink: 0,
               }}
             >
               {hotBal.toFixed(3)} SOL
@@ -3934,21 +4196,28 @@ export default function PaperTrader({
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span
+          <button
+            onClick={() => onCollapseChange(!collapsed)}
             style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 4,
               fontSize: 9,
               color: C.dim,
               ...MONO,
               transform: collapsed ? "rotate(180deg)" : "rotate(0deg)",
               transition: "transform 0.2s",
-              display: "inline-block",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             ▾
-          </span>
+          </button>
           {!collapsed &&
             hotKeypair &&
-            (["trade", "positions", "log", "config"] as const).map((t) => (
+            (["trade", "config"] as const).map((t) => (
               <button
                 key={t}
                 onClick={(e) => {
@@ -3968,13 +4237,7 @@ export default function PaperTrader({
                   ...MONO,
                 }}
               >
-                {t === "positions"
-                  ? `POS${watchingPositions.length ? `(${watchingPositions.length})` : ""}`
-                  : t === "log" && filledLogs.length
-                    ? `LOG(${filledLogs.length})`
-                    : t === "config"
-                      ? "⚙"
-                      : t.toUpperCase()}
+                {t === "config" ? "⚙" : t.toUpperCase()}
               </button>
             ))}
         </div>
@@ -3989,7 +4252,20 @@ export default function PaperTrader({
         }}
       >
         {!collapsed && !hotKeypair && (
-          <HotWalletSetup onUnlocked={handleUnlocked} />
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px 24px",
+              overflowY: "auto",
+            }}
+          >
+            <div style={{ width: "100%", maxWidth: 320 }}>
+              <HotWalletSetup onUnlocked={handleUnlocked} />
+            </div>
+          </div>
         )}
 
         {/* ── TRADE TAB */}
@@ -3998,738 +4274,947 @@ export default function PaperTrader({
             style={{
               flex: 1,
               overflowY: "auto",
-              padding: "8px 10px",
+              padding: "6px 8px",
               display: "flex",
               flexDirection: "column",
-              gap: 6,
+              gap: 5,
+              justifyContent: "space-between",
             }}
           >
-            {/* ── MODE SWITCHER ── */}
-            <div
-              style={{
-                display: "flex",
-                gap: 3,
-                background: "#0a0a0a",
-                border: `1px solid ${C.border}`,
-                borderRadius: 5,
-                padding: 3,
-              }}
-            >
-              <button
-                onClick={() => setPaperMode(false)}
-                style={{
-                  flex: 1,
-                  padding: "6px 0",
-                  borderRadius: 3,
-                  border: "none",
-                  background: !paperMode ? C.orange : "transparent",
-                  color: !paperMode ? "#fff" : C.dim,
-                  fontSize: 9,
-                  fontWeight: !paperMode ? 800 : 500,
-                  letterSpacing: "0.12em",
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                  ...MONO,
-                }}
-              >
-                LIVE
-              </button>
-              <button
-                onClick={() => {
-                  if (!canUsePaper) return;
-                  setPaperMode(true);
-                }}
-                title={!canUsePaper ? "WRAITH tier required" : undefined}
-                style={{
-                  flex: 1,
-                  padding: "6px 0",
-                  borderRadius: 3,
-                  border: "none",
-                  background: paperMode ? "#001a08" : "transparent",
-                  color: paperMode ? C.green : canUsePaper ? C.dim : C.label,
-                  fontSize: 9,
-                  fontWeight: paperMode ? 800 : 500,
-                  letterSpacing: "0.12em",
-                  cursor: canUsePaper ? "pointer" : "not-allowed",
-                  opacity: canUsePaper ? 1 : 0.4,
-                  transition: "all 0.15s",
-                  ...MONO,
-                  boxShadow: paperMode
-                    ? `inset 0 0 0 1px ${C.green}44`
-                    : "none",
-                }}
-              >
-                {canUsePaper ? (
-                  "PAPER"
-                ) : (
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
-                    PAPER <LockIcon size={9} />
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {/* ── PAPER BALANCE BANNER (shown only in paper mode) ── */}
-            {paperMode && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {/* ── MODE SWITCHER ── */}
               <div
                 style={{
-                  background:
-                    "linear-gradient(135deg, #001a08 0%, #000d04 100%)",
-                  border: `1px solid ${C.green}33`,
-                  borderRadius: 5,
-                  padding: "8px 10px",
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
+                  gap: 3,
+                  background: "#0a0a0a",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 8,
+                  padding: 3,
                 }}
               >
-                <div>
-                  <div
-                    style={{
-                      fontSize: 6,
-                      color: C.green + "88",
-                      ...MONO,
-                      letterSpacing: "0.12em",
-                      marginBottom: 2,
-                    }}
-                  >
-                    DEMO BALANCE
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 15,
-                      fontWeight: 900,
-                      color: C.green,
-                      ...MONO,
-                    }}
-                  >
-                    {paperBal.toFixed(4)} SOL
-                  </div>
-                  <div style={{ fontSize: 6, color: C.dim, ...MONO }}>
-                    simulated · no real funds at risk
-                  </div>
-                </div>
-                {paperWatching.length > 0 && (
-                  <div style={{ textAlign: "right" as const }}>
-                    <div
+                <button
+                  onClick={() => setPaperMode(false)}
+                  style={{
+                    flex: 1,
+                    padding: "7px 0",
+                    borderRadius: 6,
+                    border: "none",
+                    background: !paperMode ? C.orange : "transparent",
+                    color: !paperMode ? "#fff" : C.dim,
+                    fontSize: 9,
+                    fontWeight: !paperMode ? 800 : 500,
+                    letterSpacing: "0.12em",
+                    cursor: "pointer",
+                    transition: "all 0.15s",
+                    ...MONO,
+                  }}
+                >
+                  LIVE
+                </button>
+                <button
+                  onClick={() => {
+                    if (!canUsePaper) return;
+                    setPaperMode(true);
+                  }}
+                  title={!canUsePaper ? "WRAITH tier required" : undefined}
+                  style={{
+                    flex: 1,
+                    padding: "7px 0",
+                    borderRadius: 6,
+                    border: "none",
+                    background: paperMode ? "#001a08" : "transparent",
+                    color: paperMode ? C.green : canUsePaper ? C.dim : C.label,
+                    fontSize: 9,
+                    fontWeight: paperMode ? 800 : 500,
+                    letterSpacing: "0.12em",
+                    cursor: canUsePaper ? "pointer" : "not-allowed",
+                    opacity: canUsePaper ? 1 : 0.4,
+                    transition: "all 0.15s",
+                    ...MONO,
+                    boxShadow: paperMode
+                      ? `inset 0 0 0 1px ${C.green}44`
+                      : "none",
+                  }}
+                >
+                  {canUsePaper ? (
+                    "PAPER"
+                  ) : (
+                    <span
                       style={{
-                        fontSize: 6,
-                        color: C.dim,
-                        ...MONO,
-                        marginBottom: 2,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
                       }}
                     >
-                      OPEN PnL
-                    </div>
-                    <div
+                      PAPER <LockIcon size={9} />
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* ── PAPER BALANCE BANNER (shown only in paper mode) ── */}
+              {paperMode && (
+                <div
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: 0,
+                    padding: "2px 1px 4px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <div
+                    style={{ display: "flex", alignItems: "baseline", gap: 6 }}
+                  >
+                    <span
                       style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color:
+                        fontSize: 8,
+                        color: C.dim,
+                        ...MONO,
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      Available
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: C.green,
+                        ...MONO,
+                      }}
+                    >
+                      {paperBal.toFixed(4)} SOL
+                    </span>
+                  </div>
+                  {paperWatching.length > 0 && (
+                    <div style={{ textAlign: "right" as const }}>
+                      <div
+                        style={{
+                          fontSize: 6,
+                          color: C.dim,
+                          ...MONO,
+                          marginBottom: 2,
+                        }}
+                      >
+                        OPEN PnL
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color:
+                            paperWatching.reduce(
+                              (s, p) => s + p.currentPnlPct,
+                              0,
+                            ) /
+                              paperWatching.length >=
+                            0
+                              ? C.green
+                              : C.red,
+                          ...MONO,
+                        }}
+                      >
+                        {paperWatching.reduce(
+                          (s, p) => s + p.currentPnlPct,
+                          0,
+                        ) /
+                          paperWatching.length >=
+                        0
+                          ? "+"
+                          : ""}
+                        {(
                           paperWatching.reduce(
                             (s, p) => s + p.currentPnlPct,
                             0,
-                          ) /
-                            paperWatching.length >=
-                          0
-                            ? C.green
-                            : C.red,
-                        ...MONO,
-                      }}
-                    >
-                      {paperWatching.reduce((s, p) => s + p.currentPnlPct, 0) /
-                        paperWatching.length >=
-                      0
-                        ? "+"
-                        : ""}
-                      {(
-                        paperWatching.reduce((s, p) => s + p.currentPnlPct, 0) /
-                        paperWatching.length
-                      ).toFixed(1)}
-                      %
+                          ) / paperWatching.length
+                        ).toFixed(1)}
+                        %
+                      </div>
+                      <div style={{ fontSize: 6, color: C.dim, ...MONO }}>
+                        {paperWatching.length} open
+                      </div>
                     </div>
-                    <div style={{ fontSize: 6, color: C.dim, ...MONO }}>
-                      {paperWatching.length} open
-                    </div>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (confirm("Reset demo account to 10 SOL?")) {
+                        setPaperBal(10);
+                        setPaperPositions([]);
+                        setPaperLog([]);
+                      }
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: `1px solid ${C.border}`,
+                      color: C.dim,
+                      fontSize: 6,
+                      padding: "3px 6px",
+                      borderRadius: 2,
+                      cursor: "pointer",
+                      ...MONO,
+                      alignSelf: "flex-start" as const,
+                    }}
+                  >
+                    RESET
+                  </button>
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  background: C.bgCard,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  padding: "5px 8px",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: C.label,
+                      fontSize: 6,
+                      ...MONO,
+                      letterSpacing: "0.1em",
+                      marginBottom: 1,
+                    }}
+                  >
+                    HOT WALLET
                   </div>
-                )}
+                  <div
+                    style={{
+                      color: C.dim,
+                      fontSize: 8,
+                      ...MONO,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap" as const,
+                    }}
+                  >
+                    {hotPub?.slice(0, 22)}…
+                  </div>
+                </div>
                 <button
-                  onClick={() => {
-                    if (confirm("Reset demo account to 10 SOL?")) {
-                      setPaperBal(10);
-                      setPaperPositions([]);
-                      setPaperLog([]);
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (hotPub) {
+                      navigator.clipboard.writeText(hotPub);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
                     }
                   }}
                   style={{
                     background: "transparent",
                     border: `1px solid ${C.border}`,
-                    color: C.dim,
-                    fontSize: 6,
-                    padding: "3px 6px",
+                    color: copied ? C.green : C.dim,
+                    fontSize: 7,
+                    padding: "2px 6px",
                     borderRadius: 2,
                     cursor: "pointer",
                     ...MONO,
-                    alignSelf: "flex-start" as const,
                   }}
                 >
-                  RESET
+                  {copied ? "✓" : "COPY"}
+                </button>
+                {hotBal !== null && hotBal < 0.05 && (
+                  <span
+                    style={{
+                      fontSize: 7,
+                      color: C.amber,
+                      border: `1px solid ${C.amber}33`,
+                      padding: "2px 5px",
+                      borderRadius: 2,
+                      ...MONO,
+                    }}
+                  >
+                    LOW SOL
+                  </span>
+                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setHotKeypair(null);
+                    setHotPub(null);
+                    setHotBal(null);
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${C.border}`,
+                    color: C.dim,
+                    fontSize: 7,
+                    padding: "2px 6px",
+                    borderRadius: 2,
+                    cursor: "pointer",
+                    ...MONO,
+                  }}
+                >
+                  LOCK
                 </button>
               </div>
-            )}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                background: C.bgCard,
-                border: `1px solid ${C.border}`,
-                borderRadius: 3,
-                padding: "5px 8px",
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
+
+              {isAvoid && ca && (
+                <div
+                  style={{
+                    background: "#1a0000",
+                    border: `1px solid ${C.red}44`,
+                    borderRadius: 3,
+                    padding: "5px 8px",
+                    color: C.red,
+                    fontSize: 8,
+                    ...MONO,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                    }}
+                  >
+                    <AlertIcon size={11} /> BLOCKED — Honeypot / AVOID flagged
+                    by scanner.
+                  </span>
+                </div>
+              )}
+
+              {/* Token info */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <TokenAvatar
+                  imageUrl={tokenData?.imageUrl}
+                  symbol={sym || "?"}
+                  size={34}
+                  links={
+                    ca
+                      ? {
+                          twitter: tokenData?.links?.twitter,
+                          telegram: tokenData?.links?.telegram,
+                          website: tokenData?.links?.website,
+                          dex: `https://dexscreener.com/solana/${ca}`,
+                          pump: `https://pump.fun/${ca}`,
+                        }
+                      : undefined
+                  }
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {sym ? (
+                    <>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: 6,
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: C.primary,
+                            fontSize: 13,
+                            fontWeight: 900,
+                            ...MONO,
+                          }}
+                        >
+                          ${sym}
+                        </span>
+                        <span
+                          style={{
+                            color: C.orange,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            ...MONO,
+                          }}
+                        >
+                          {fmtMcap(mcap)}
+                        </span>
+                      </div>
+                      {ca && (
+                        <div
+                          style={{
+                            color: C.dim,
+                            fontSize: 7,
+                            ...MONO,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap" as const,
+                          }}
+                        >
+                          {ca.slice(0, 22)}…
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span style={{ color: C.dim, fontSize: 9, ...MONO }}>
+                      ← select token from scanner
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Amount */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  flexWrap: "wrap" as const,
+                }}
+              >
                 <div
                   style={{
                     color: C.label,
-                    fontSize: 6,
+                    fontSize: 7,
+                    letterSpacing: "0.12em",
                     ...MONO,
-                    letterSpacing: "0.1em",
-                    marginBottom: 1,
+                    flexShrink: 0,
+                    width: 22,
                   }}
                 >
-                  HOT WALLET
+                  SOL
                 </div>
-                <div
+                <input
+                  type="number"
+                  value={amountSol}
+                  onChange={(e) => setAmountSol(e.target.value)}
+                  min="0.01"
+                  step="0.05"
                   style={{
-                    color: C.dim,
-                    fontSize: 8,
+                    flex: "1 1 90px",
+                    minWidth: 60,
+                    background: C.bgCard,
+                    border: `1px solid ${C.border}`,
+                    color: C.primary,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    padding: "5px 8px",
+                    borderRadius: 3,
+                    outline: "none",
                     ...MONO,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap" as const,
+                    textAlign: "right" as const,
                   }}
-                >
-                  {hotPub?.slice(0, 22)}…
+                />
+                {["0.05", "0.1", "0.25", "0.5"].map((v) => (
+                  <button
+                    key={v}
+                    className="samt"
+                    onClick={() => setAmountSol(v)}
+                    style={{
+                      background: amountSol === v ? "#111" : "transparent",
+                      border: `1px solid ${amountSol === v ? C.orange + "55" : C.border}`,
+                      color: amountSol === v ? C.orange : C.dim,
+                      fontSize: 8,
+                      padding: "5px 5px",
+                      borderRadius: 2,
+                      cursor: "pointer",
+                      ...MONO,
+                      flexShrink: 0,
+                      minWidth: 28,
+                    }}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+
+              {(() => {
+                const balForPct = paperMode ? paperBal : (hotBal ?? 0);
+                const pct =
+                  balForPct > 0
+                    ? Math.min(
+                        100,
+                        Math.round(
+                          (parseFloat(amountSol || "0") / balForPct) * 100,
+                        ),
+                      )
+                    : 0;
+                return (
+                  <div style={{ padding: "4px 2px 2px" }}>
+                    <div style={{ position: "relative", height: 14 }}>
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "50%",
+                          left: 0,
+                          right: 0,
+                          height: 4,
+                          borderRadius: 2,
+                          background: "#1a1a1a",
+                          transform: "translateY(-50%)",
+                          pointerEvents: "none",
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "50%",
+                          left: 0,
+                          width: `${pct}%`,
+                          height: 4,
+                          borderRadius: 2,
+                          background: C.orange,
+                          transform: "translateY(-50%)",
+                          pointerEvents: "none",
+                          transition: "width 0.08s linear",
+                        }}
+                      />
+                      {[0, 25, 50, 75, 100].map((mark) => (
+                        <div
+                          key={mark}
+                          style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: `${mark}%`,
+                            width: 4,
+                            height: 4,
+                            borderRadius: "50%",
+                            background: mark <= pct ? "#fff8" : "#3a3a3a",
+                            transform: "translate(-50%, -50%)",
+                            pointerEvents: "none",
+                            zIndex: 1,
+                          }}
+                        />
+                      ))}
+                      <input
+                        className="pct-slider"
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={pct}
+                        onChange={(e) => {
+                          const p = parseFloat(e.target.value);
+                          const next = ((balForPct * p) / 100).toFixed(3);
+                          setAmountSol(next);
+                        }}
+                        style={{
+                          position: "relative",
+                          zIndex: 2,
+                          width: "100%",
+                          height: 14,
+                          background: "transparent",
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 7,
+                        color: C.dim,
+                        ...MONO,
+                        marginTop: 4,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <span>0%</span>
+                      <span>25%</span>
+                      <span>50%</span>
+                      <span>75%</span>
+                      <span>100%</span>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 8,
+                        ...MONO,
+                      }}
+                    >
+                      <span style={{ color: C.dim }}>
+                        Buying{" "}
+                        <span style={{ color: C.primary, fontWeight: 700 }}>
+                          {amountSol || "0"} SOL
+                        </span>
+                      </span>
+                      <span style={{ color: C.dim }}>
+                        Max{" "}
+                        <span style={{ color: C.primary, fontWeight: 700 }}>
+                          {balForPct.toFixed(3)} SOL
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* SL / TP */}
+              <div
+                style={{ display: "flex", gap: 5, flexWrap: "wrap" as const }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      color: C.label,
+                      fontSize: 7,
+                      letterSpacing: "0.12em",
+                      ...MONO,
+                      marginBottom: 3,
+                    }}
+                  >
+                    STOP LOSS
+                    {![-10, -20, -30, -50].includes(slPct) && (
+                      <span
+                        style={{ color: C.red, marginLeft: 5, fontWeight: 700 }}
+                      >
+                        {slPct}%
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    {[-10, -20, -30, -50].map((v) => (
+                      <button
+                        key={v}
+                        className="ssl"
+                        onClick={() => setSlPct(v)}
+                        style={{
+                          flex: 1,
+                          background: slPct === v ? "#1a0000" : "transparent",
+                          border: `1px solid ${slPct === v ? C.red + "55" : C.border}`,
+                          color: slPct === v ? C.red : C.dim,
+                          fontSize: 8,
+                          fontWeight: slPct === v ? 700 : 400,
+                          padding: "4px 0",
+                          borderRadius: 2,
+                          cursor: "pointer",
+                          ...MONO,
+                        }}
+                      >
+                        {v}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      color: C.label,
+                      fontSize: 7,
+                      letterSpacing: "0.12em",
+                      ...MONO,
+                      marginBottom: 3,
+                    }}
+                  >
+                    TAKE PROFIT
+                    {![1.5, 2, 5].includes(tpX) && (
+                      <span
+                        style={{
+                          color: C.green,
+                          marginLeft: 5,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {tpX}×
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    {[1.5, 2, 5].map((v) => (
+                      <button
+                        key={v}
+                        className="stp"
+                        onClick={() => setTpX(v)}
+                        style={{
+                          flex: 1,
+                          background: tpX === v ? "#001a00" : "transparent",
+                          border: `1px solid ${tpX === v ? C.green + "55" : C.border}`,
+                          color: tpX === v ? C.green : C.dim,
+                          fontSize: 9,
+                          fontWeight: tpX === v ? 700 : 400,
+                          padding: "4px 0",
+                          borderRadius: 2,
+                          cursor: "pointer",
+                          ...MONO,
+                        }}
+                      >
+                        {v}×
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (hotPub) {
-                    navigator.clipboard.writeText(hotPub);
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  }
-                }}
+
+              {/* Trail pill */}
+              <div
                 style={{
-                  background: "transparent",
-                  border: `1px solid ${C.border}`,
-                  color: copied ? C.green : C.dim,
-                  fontSize: 7,
-                  padding: "2px 6px",
-                  borderRadius: 2,
+                  background: "#0d0a00",
+                  border: `1px solid ${C.amber}22`,
+                  borderRadius: 3,
+                  padding: "4px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
                   cursor: "pointer",
-                  ...MONO,
                 }}
+                onClick={() => setTab("config")}
               >
-                {copied ? "✓" : "COPY"}
-              </button>
-              {hotBal !== null && hotBal < 0.05 && (
                 <span
                   style={{
                     fontSize: 7,
                     color: C.amber,
-                    border: `1px solid ${C.amber}33`,
-                    padding: "2px 5px",
-                    borderRadius: 2,
+                    fontWeight: 700,
                     ...MONO,
                   }}
                 >
-                  LOW SOL
+                  TRAIL -{trailPct}%
                 </span>
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setHotKeypair(null);
-                  setHotPub(null);
-                  setHotBal(null);
-                }}
-                style={{
-                  background: "transparent",
-                  border: `1px solid ${C.border}`,
-                  color: C.dim,
-                  fontSize: 7,
-                  padding: "2px 6px",
-                  borderRadius: 2,
-                  cursor: "pointer",
-                  ...MONO,
-                }}
-              >
-                LOCK
-              </button>
-            </div>
-
-            {isAvoid && ca && (
-              <div
-                style={{
-                  background: "#1a0000",
-                  border: `1px solid ${C.red}44`,
-                  borderRadius: 3,
-                  padding: "5px 8px",
-                  color: C.red,
-                  fontSize: 8,
-                  ...MONO,
-                }}
-              >
+                <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
+                  Locks gains · sells {trailPct}% below peak
+                </span>
                 <span
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
+                    fontSize: 6,
+                    color: C.dim,
+                    ...MONO,
+                    marginLeft: "auto",
                   }}
                 >
-                  <AlertIcon size={11} /> BLOCKED — Honeypot / AVOID flagged by
-                  scanner.
+                  tap ⚙ to edit →
                 </span>
               </div>
-            )}
 
-            {/* Token info */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <TokenAvatar
-                imageUrl={tokenData?.imageUrl}
-                symbol={sym || "?"}
-                size={34}
-                links={
-                  ca
-                    ? {
-                        twitter: tokenData?.links?.twitter,
-                        telegram: tokenData?.links?.telegram,
-                        website: tokenData?.links?.website,
-                        dex: `https://dexscreener.com/solana/${ca}`,
-                        pump: `https://pump.fun/${ca}`,
-                      }
-                    : undefined
-                }
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {sym ? (
-                  <>
+              {/* Entry / SL / TP display */}
+              {mcap > 0 && (
+                <div style={{ display: "flex", gap: 3 }}>
+                  {[
+                    { label: "ENTRY", value: fmtMcap(mcap), color: C.muted },
+                    {
+                      label: `SL ${slPct}%`,
+                      value: fmtMcap(slMcap),
+                      color: C.red,
+                    },
+                    {
+                      label: `TP ${tpX}×`,
+                      value: fmtMcap(tpMcap),
+                      color: C.green,
+                    },
+                  ].map((item) => (
                     <div
+                      key={item.label}
                       style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 6,
+                        flex: 1,
+                        background: C.bgCard,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 3,
+                        padding: "4px 6px",
+                        textAlign: "center" as const,
                       }}
                     >
-                      <span
+                      <div
                         style={{
-                          color: C.primary,
-                          fontSize: 13,
-                          fontWeight: 900,
+                          color: C.label,
+                          fontSize: 6,
                           ...MONO,
+                          letterSpacing: "0.1em",
+                          marginBottom: 1,
                         }}
                       >
-                        ${sym}
-                      </span>
-                      <span
+                        {item.label}
+                      </div>
+                      <div
                         style={{
-                          color: C.orange,
+                          color: item.color,
                           fontSize: 10,
                           fontWeight: 700,
                           ...MONO,
                         }}
                       >
-                        {fmtMcap(mcap)}
-                      </span>
-                    </div>
-                    {ca && (
-                      <div
-                        style={{
-                          color: C.dim,
-                          fontSize: 7,
-                          ...MONO,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap" as const,
-                        }}
-                      >
-                        {ca.slice(0, 22)}…
+                        {item.value}
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <span style={{ color: C.dim, fontSize: 9, ...MONO }}>
-                    ← select token from scanner
-                  </span>
-                )}
-              </div>
-            </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            {/* Amount */}
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <div
-                style={{
-                  color: C.label,
-                  fontSize: 7,
-                  letterSpacing: "0.12em",
-                  ...MONO,
-                  flexShrink: 0,
-                  width: 22,
-                }}
-              >
-                SOL
-              </div>
-              <input
-                type="number"
-                value={amountSol}
-                onChange={(e) => setAmountSol(e.target.value)}
-                min="0.01"
-                step="0.05"
-                style={{
-                  flex: 1,
-                  background: C.bgCard,
-                  border: `1px solid ${C.border}`,
-                  color: C.primary,
-                  fontSize: 13,
-                  fontWeight: 700,
-                  padding: "5px 8px",
-                  borderRadius: 3,
-                  outline: "none",
-                  ...MONO,
-                  textAlign: "right" as const,
-                }}
-              />
-              {["0.05", "0.1", "0.25", "0.5"].map((v) => (
-                <button
-                  key={v}
-                  className="samt"
-                  onClick={() => setAmountSol(v)}
+              {status && (
+                <div
                   style={{
-                    background: amountSol === v ? "#111" : "transparent",
-                    border: `1px solid ${amountSol === v ? C.orange + "55" : C.border}`,
-                    color: amountSol === v ? C.orange : C.dim,
+                    background:
+                      status.type === "ok"
+                        ? "#001a0a"
+                        : status.type === "err"
+                          ? "#1a0000"
+                          : "#0d0d00",
+                    border: `1px solid ${status.type === "ok" ? C.green + "33" : status.type === "err" ? C.red + "33" : C.amber + "33"}`,
+                    borderRadius: 3,
+                    padding: "5px 8px",
+                    color:
+                      status.type === "ok"
+                        ? C.green
+                        : status.type === "err"
+                          ? C.red
+                          : C.amber,
                     fontSize: 8,
-                    padding: "5px 5px",
-                    borderRadius: 2,
-                    cursor: "pointer",
                     ...MONO,
-                    flexShrink: 0,
-                    minWidth: 28,
                   }}
                 >
-                  {v}
+                  {status.msg}
+                </div>
+              )}
+
+              {/* ── UNIFIED BUY BUTTON — changes based on mode ── */}
+              {!paperMode ? (
+                <button
+                  className="sb"
+                  onClick={handleBuy}
+                  disabled={!canBuy}
+                  style={{
+                    background: isAvoid
+                      ? "#1a0000"
+                      : !ca
+                        ? "#0d0d0d"
+                        : buying
+                          ? "#0d2200"
+                          : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                            ? "#111"
+                            : C.orange,
+                    border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : buying ? C.green + "44" : "transparent"}`,
+                    color: isAvoid
+                      ? C.red
+                      : !ca
+                        ? C.dim
+                        : buying
+                          ? C.green
+                          : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                            ? C.amber
+                            : "#fff",
+                    fontSize: 11,
+                    fontWeight: 900,
+                    letterSpacing: "0.14em",
+                    padding: "10px 10px",
+                    borderRadius: 8,
+                    cursor: canBuy ? "pointer" : "not-allowed",
+                    width: "100%",
+                    ...MONO,
+                    transition: "all 0.15s",
+                    boxShadow:
+                      canBuy && !buying ? `0 0 16px ${C.orange}33` : "none",
+                  }}
+                >
+                  {isAvoid
+                    ? "HONEYPOT — BUY BLOCKED"
+                    : !ca
+                      ? "SELECT A TOKEN"
+                      : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                        ? `LOW FUNDS — ${hotBal?.toFixed(3)} SOL`
+                        : buying
+                          ? "SNIPING…"
+                          : `BUY ${sym || ""} — ${amountSol} SOL`}
                 </button>
-              ))}
-            </div>
-
-            {/* SL / TP */}
-            <div style={{ display: "flex", gap: 5 }}>
-              <div style={{ flex: 1 }}>
-                <div
+              ) : (
+                <button
+                  className="sb"
+                  onClick={handlePaperBuy}
+                  disabled={!canPaperBuy}
                   style={{
-                    color: C.label,
-                    fontSize: 7,
-                    letterSpacing: "0.12em",
+                    background: isAvoid
+                      ? "#1a0000"
+                      : !ca
+                        ? "#0d0d0d"
+                        : canPaperBuy
+                          ? "#001a08"
+                          : "#111",
+                    border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : canPaperBuy ? C.green + "66" : C.border}`,
+                    color: isAvoid
+                      ? C.red
+                      : !ca
+                        ? C.dim
+                        : canPaperBuy
+                          ? C.green
+                          : C.dim,
+                    fontSize: 11,
+                    fontWeight: 900,
+                    letterSpacing: "0.14em",
+                    padding: "10px 10px",
+                    borderRadius: 8,
+                    cursor: canPaperBuy ? "pointer" : "not-allowed",
+                    width: "100%",
                     ...MONO,
-                    marginBottom: 3,
+                    transition: "all 0.15s",
+                    boxShadow: canPaperBuy ? `0 0 16px ${C.green}22` : "none",
                   }}
                 >
-                  STOP LOSS
-                  {![-10, -20, -30, -50].includes(slPct) && (
-                    <span
-                      style={{ color: C.red, marginLeft: 5, fontWeight: 700 }}
-                    >
-                      {slPct}%
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: 2 }}>
-                  {[-10, -20, -30, -50].map((v) => (
-                    <button
-                      key={v}
-                      className="ssl"
-                      onClick={() => setSlPct(v)}
-                      style={{
-                        flex: 1,
-                        background: slPct === v ? "#1a0000" : "transparent",
-                        border: `1px solid ${slPct === v ? C.red + "55" : C.border}`,
-                        color: slPct === v ? C.red : C.dim,
-                        fontSize: 8,
-                        fontWeight: slPct === v ? 700 : 400,
-                        padding: "4px 0",
-                        borderRadius: 2,
-                        cursor: "pointer",
-                        ...MONO,
-                      }}
-                    >
-                      {v}%
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div
-                  style={{
-                    color: C.label,
-                    fontSize: 7,
-                    letterSpacing: "0.12em",
-                    ...MONO,
-                    marginBottom: 3,
-                  }}
-                >
-                  TAKE PROFIT
-                  {![1.5, 2, 5].includes(tpX) && (
-                    <span
-                      style={{ color: C.green, marginLeft: 5, fontWeight: 700 }}
-                    >
-                      {tpX}×
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: 2 }}>
-                  {[1.5, 2, 5].map((v) => (
-                    <button
-                      key={v}
-                      className="stp"
-                      onClick={() => setTpX(v)}
-                      style={{
-                        flex: 1,
-                        background: tpX === v ? "#001a00" : "transparent",
-                        border: `1px solid ${tpX === v ? C.green + "55" : C.border}`,
-                        color: tpX === v ? C.green : C.dim,
-                        fontSize: 9,
-                        fontWeight: tpX === v ? 700 : 400,
-                        padding: "4px 0",
-                        borderRadius: 2,
-                        cursor: "pointer",
-                        ...MONO,
-                      }}
-                    >
-                      {v}×
-                    </button>
-                  ))}
-                </div>
-              </div>
+                  {isAvoid
+                    ? "HONEYPOT — BLOCKED"
+                    : !ca
+                      ? "SELECT A TOKEN"
+                      : paperBal < parseFloat(amountSol || "0")
+                        ? `LOW DEMO BAL — ${paperBal.toFixed(3)} SOL`
+                        : `PAPER TRADE ${sym || ""} — ${amountSol} SOL`}
+                </button>
+              )}
             </div>
 
-            {/* Trail pill */}
             <div
               style={{
-                background: "#0d0a00",
-                border: `1px solid ${C.amber}22`,
-                borderRadius: 3,
-                padding: "4px 8px",
+                background: C.bgCard,
+                border: `1px solid ${C.border}`,
+                borderRadius: 6,
                 display: "flex",
-                alignItems: "center",
-                gap: 6,
-                cursor: "pointer",
+                alignItems: "stretch",
+                overflow: "hidden",
               }}
-              onClick={() => setTab("config")}
             >
-              <span
-                style={{
-                  fontSize: 7,
-                  color: C.amber,
-                  fontWeight: 700,
-                  ...MONO,
-                }}
-              >
-                TRAIL -{trailPct}%
-              </span>
-              <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
-                Locks gains · sells {trailPct}% below peak
-              </span>
-              <span
-                style={{
-                  fontSize: 6,
-                  color: C.dim,
-                  ...MONO,
-                  marginLeft: "auto",
-                }}
-              >
-                tap ⚙ to edit →
-              </span>
-            </div>
-
-            {/* Entry / SL / TP display */}
-            {mcap > 0 && (
-              <div style={{ display: "flex", gap: 3 }}>
-                {[
-                  { label: "ENTRY", value: fmtMcap(mcap), color: C.muted },
-                  {
-                    label: `SL ${slPct}%`,
-                    value: fmtMcap(slMcap),
-                    color: C.red,
-                  },
-                  {
-                    label: `TP ${tpX}×`,
-                    value: fmtMcap(tpMcap),
-                    color: C.green,
-                  },
-                ].map((item) => (
+              {[
+                {
+                  label: `${paperMode ? "PAPER" : "LIVE"} WIN RATE`,
+                  value: paperMode
+                    ? paperFilledLogs.length
+                      ? `${((paperWins / paperFilledLogs.length) * 100).toFixed(0)}%`
+                      : "—"
+                    : filledLogs.length
+                      ? `${((wins / filledLogs.length) * 100).toFixed(0)}%`
+                      : "—",
+                  color: C.primary,
+                },
+                {
+                  label: "TRADES",
+                  value: String(
+                    paperMode ? paperFilledLogs.length : filledLogs.length,
+                  ),
+                  color: C.primary,
+                },
+                {
+                  label: "FEE",
+                  value: feeBadgeLabel ?? "—",
+                  color: tier?.feeBps === 0 ? C.green : C.amber,
+                },
+              ].map((stat, i) => (
+                <div
+                  key={stat.label}
+                  style={{
+                    flex: 1,
+                    padding: "9px 6px",
+                    textAlign: "center" as const,
+                    borderLeft: i > 0 ? `1px solid ${C.border}` : "none",
+                  }}
+                >
                   <div
-                    key={item.label}
                     style={{
-                      flex: 1,
-                      background: C.bgCard,
-                      border: `1px solid ${C.border}`,
-                      borderRadius: 3,
-                      padding: "4px 6px",
-                      textAlign: "center" as const,
+                      color: C.label,
+                      fontSize: 6,
+                      letterSpacing: "0.1em",
+                      marginBottom: 3,
+                      ...MONO,
                     }}
                   >
-                    <div
-                      style={{
-                        color: C.label,
-                        fontSize: 6,
-                        ...MONO,
-                        letterSpacing: "0.1em",
-                        marginBottom: 1,
-                      }}
-                    >
-                      {item.label}
-                    </div>
-                    <div
-                      style={{
-                        color: item.color,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        ...MONO,
-                      }}
-                    >
-                      {item.value}
-                    </div>
+                    {stat.label}
                   </div>
-                ))}
-              </div>
-            )}
-
-            {status && (
-              <div
-                style={{
-                  background:
-                    status.type === "ok"
-                      ? "#001a0a"
-                      : status.type === "err"
-                        ? "#1a0000"
-                        : "#0d0d00",
-                  border: `1px solid ${status.type === "ok" ? C.green + "33" : status.type === "err" ? C.red + "33" : C.amber + "33"}`,
-                  borderRadius: 3,
-                  padding: "5px 8px",
-                  color:
-                    status.type === "ok"
-                      ? C.green
-                      : status.type === "err"
-                        ? C.red
-                        : C.amber,
-                  fontSize: 8,
-                  ...MONO,
-                }}
-              >
-                {status.msg}
-              </div>
-            )}
-
-            {/* ── UNIFIED BUY BUTTON — changes based on mode ── */}
-            {!paperMode ? (
-              <button
-                className="sb"
-                onClick={handleBuy}
-                disabled={!canBuy}
-                style={{
-                  background: isAvoid
-                    ? "#1a0000"
-                    : !ca
-                      ? "#0d0d0d"
-                      : buying
-                        ? "#0d2200"
-                        : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                          ? "#111"
-                          : C.orange,
-                  border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : buying ? C.green + "44" : "transparent"}`,
-                  color: isAvoid
-                    ? C.red
-                    : !ca
-                      ? C.dim
-                      : buying
-                        ? C.green
-                        : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                          ? C.amber
-                          : "#fff",
-                  fontSize: 11,
-                  fontWeight: 900,
-                  letterSpacing: "0.14em",
-                  padding: "9px 10px",
-                  borderRadius: 4,
-                  cursor: canBuy ? "pointer" : "not-allowed",
-                  width: "100%",
-                  ...MONO,
-                  transition: "all 0.15s",
-                  boxShadow:
-                    canBuy && !buying ? `0 0 16px ${C.orange}33` : "none",
-                }}
-              >
-                {isAvoid
-                  ? "HONEYPOT — BUY BLOCKED"
-                  : !ca
-                    ? "SELECT A TOKEN"
-                    : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                      ? `LOW FUNDS — ${hotBal?.toFixed(3)} SOL`
-                      : buying
-                        ? "SNIPING…"
-                        : `BUY ${sym || ""} — ${amountSol} SOL`}
-              </button>
-            ) : (
-              <button
-                className="sb"
-                onClick={handlePaperBuy}
-                disabled={!canPaperBuy}
-                style={{
-                  background: isAvoid
-                    ? "#1a0000"
-                    : !ca
-                      ? "#0d0d0d"
-                      : canPaperBuy
-                        ? "#001a08"
-                        : "#111",
-                  border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : canPaperBuy ? C.green + "66" : C.border}`,
-                  color: isAvoid
-                    ? C.red
-                    : !ca
-                      ? C.dim
-                      : canPaperBuy
-                        ? C.green
-                        : C.dim,
-                  fontSize: 11,
-                  fontWeight: 900,
-                  letterSpacing: "0.14em",
-                  padding: "9px 10px",
-                  borderRadius: 4,
-                  cursor: canPaperBuy ? "pointer" : "not-allowed",
-                  width: "100%",
-                  ...MONO,
-                  transition: "all 0.15s",
-                  boxShadow: canPaperBuy ? `0 0 16px ${C.green}22` : "none",
-                }}
-              >
-                {isAvoid
-                  ? "HONEYPOT — BLOCKED"
-                  : !ca
-                    ? "SELECT A TOKEN"
-                    : paperBal < parseFloat(amountSol || "0")
-                      ? `LOW DEMO BAL — ${paperBal.toFixed(3)} SOL`
-                      : `PAPER TRADE ${sym || ""} — ${amountSol} SOL`}
-              </button>
-            )}
+                  <div
+                    style={{
+                      color: stat.color,
+                      fontSize: 12,
+                      fontWeight: 800,
+                      ...MONO,
+                    }}
+                  >
+                    {stat.value}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -5047,805 +5532,1178 @@ export default function PaperTrader({
           </div>
         )}
 
-        {/* ── POSITIONS TAB */}
-        {!collapsed && hotKeypair && tab === "positions" && (
-          <div style={{ flex: 1, overflowY: "auto" }}>
-            {/* Paper positions section */}
-            {paperWatching.length > 0 && (
-              <div>
+        {/* ── POSITIONS + HISTORY — rendered full-width via portal into page's bottom bar ──
+             Always renders now (not gated on hotKeypair) — paper positions don't
+             require a real wallet, so hiding them entirely while locked was wrong.
+             Locked state keeps the real content crisp underneath and frosts the
+             OVERLAY instead (backdropFilter), so trades stay legible through it —
+             blurring the content itself + a near-opaque scrim on top was stacking
+             two darkening layers and just reading as solid black. */}
+        {bottomBarNode &&
+          createPortal(
+            <div style={{ position: "relative", height: "100%" }}>
+              <div
+                style={{
+                  height: "100%",
+                  pointerEvents: hotKeypair ? "auto" : "none",
+                  userSelect: hotKeypair ? "auto" : "none",
+                }}
+              >
                 <div
                   style={{
-                    padding: "5px 10px 3px",
-                    borderBottom: `1px solid ${C.border}`,
                     display: "flex",
-                    alignItems: "center",
-                    gap: 5,
+                    flexDirection: "column",
+                    height: "100%",
                   }}
                 >
-                  <span
+                  <div
                     style={{
-                      fontSize: 7,
-                      color: C.green,
-                      fontWeight: 700,
-                      ...MONO,
-                      letterSpacing: "0.1em",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "0 10px",
+                      height: 34,
+                      flexShrink: 0,
+                      borderBottom: `1px solid ${C.border}`,
                     }}
                   >
-                    📄 PAPER POSITIONS
-                  </span>
-                  <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
-                    bal: {paperBal.toFixed(4)} SOL
-                  </span>
-                </div>
-                {paperWatching.map((pos) => {
-                  const pnlColor = pos.currentPnlPct >= 0 ? C.green : C.red;
-                  const progressToTP = Math.min(
-                    (pos.currentMcap / (pos.entryMcap * pos.tpX)) * 100,
-                    100,
-                  );
-                  const trailFromPeak =
-                    pos.peakMcap > pos.entryMcap
-                      ? (pos.currentMcap / pos.peakMcap - 1) * 100
-                      : null;
-                  return (
-                    <div
-                      key={pos.id}
-                      style={{
-                        padding: "10px 12px",
-                        borderBottom: `1px solid ${C.border}`,
-                        background: "#030a04",
-                      }}
-                    >
-                      {/* row 1 */}
-                      <div
+                    {(["positions", "log"] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setSubTab(t)}
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 7,
+                          background: "transparent",
+                          border: "none",
+                          borderBottom: `2px solid ${subTab === t ? C.orange : "transparent"}`,
+                          color: subTab === t ? C.primary : C.dim,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: "0.1em",
+                          padding: "9px 12px",
+                          cursor: "pointer",
+                          ...MONO,
                         }}
                       >
-                        <TokenAvatar
-                          imageUrl={pos.imageUrl}
-                          symbol={pos.symbol}
-                          size={30}
-                          links={{
-                            dex: `https://dexscreener.com/solana/${pos.mint}`,
-                            pump: `https://pump.fun/${pos.mint}`,
-                          }}
-                        />
-                        <div style={{ flex: 1, minWidth: 0 }}>
+                        {t === "positions"
+                          ? `POSITIONS${watchingPositions.length ? ` (${watchingPositions.length})` : ""}`
+                          : `HISTORY${filledLogs.length ? ` (${filledLogs.length})` : ""}`}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    style={{
+                      flex: 1,
+                      overflow: "hidden",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    {subTab === "positions" && (
+                      <div style={{ flex: 1, overflowY: "auto" }}>
+                        {/* Paper positions section */}
+                        {paperWatching.length > 0 && (
+                          <div>
+                            <div
+                              style={{
+                                padding: "5px 10px 3px",
+                                borderBottom: `1px solid ${C.border}`,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 5,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: 7,
+                                  color: C.green,
+                                  fontWeight: 700,
+                                  ...MONO,
+                                  letterSpacing: "0.1em",
+                                }}
+                              >
+                                📄 PAPER POSITIONS
+                              </span>
+                              <span
+                                style={{ fontSize: 7, color: C.dim, ...MONO }}
+                              >
+                                bal: {paperBal.toFixed(4)} SOL
+                              </span>
+                            </div>
+                            {paperWatching.map((pos) => {
+                              const pnlColor =
+                                pos.currentPnlPct >= 0 ? C.green : C.red;
+                              const progressToTP = Math.min(
+                                (pos.currentMcap / (pos.entryMcap * pos.tpX)) *
+                                  100,
+                                100,
+                              );
+                              const trailFromPeak =
+                                pos.peakMcap > pos.entryMcap
+                                  ? (pos.currentMcap / pos.peakMcap - 1) * 100
+                                  : null;
+                              return (
+                                <div
+                                  key={pos.id}
+                                  style={{
+                                    position: "relative",
+                                    padding: "10px 12px",
+                                    borderBottom: `1px solid ${C.border}`,
+                                    borderLeft: `2px solid ${pnlColor}`,
+                                    background: "#060606",
+                                  }}
+                                >
+                                  {/* header row */}
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <div
+                                      onClick={() =>
+                                        handleSelectPaperToken(pos)
+                                      }
+                                      title="View chart / rebuy this token"
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        flex: 1,
+                                        minWidth: 0,
+                                        cursor: onSelectToken
+                                          ? "pointer"
+                                          : "default",
+                                      }}
+                                    >
+                                      <TokenAvatar
+                                        imageUrl={pos.imageUrl}
+                                        symbol={pos.symbol}
+                                        size={28}
+                                        links={{
+                                          dex: `https://dexscreener.com/solana/${pos.mint}`,
+                                          pump: `https://pump.fun/${pos.mint}`,
+                                        }}
+                                      />
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 5,
+                                          }}
+                                        >
+                                          <span
+                                            style={{
+                                              color: C.primary,
+                                              fontSize: 12,
+                                              fontWeight: 900,
+                                              ...MONO,
+                                            }}
+                                          >
+                                            ${pos.symbol}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 6,
+                                              fontWeight: 800,
+                                              letterSpacing: "0.06em",
+                                              color: "#000",
+                                              background: C.green,
+                                              padding: "1.5px 5px",
+                                              borderRadius: 2,
+                                              ...MONO,
+                                            }}
+                                          >
+                                            LONG
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 6,
+                                              fontWeight: 700,
+                                              letterSpacing: "0.06em",
+                                              color: C.dim,
+                                              background: "#111",
+                                              border: `1px solid ${C.border}`,
+                                              padding: "1.5px 5px",
+                                              borderRadius: 2,
+                                              ...MONO,
+                                            }}
+                                          >
+                                            PAPER
+                                          </span>
+                                        </div>
+                                        <div
+                                          onClick={() =>
+                                            pos.fills && pos.fills.length > 1
+                                              ? setExpandedFillsId((id) =>
+                                                  id === pos.id ? null : pos.id,
+                                                )
+                                              : undefined
+                                          }
+                                          style={{
+                                            fontSize: 7,
+                                            color: C.label,
+                                            ...MONO,
+                                            marginTop: 2,
+                                            cursor:
+                                              pos.fills && pos.fills.length > 1
+                                                ? "pointer"
+                                                : "default",
+                                          }}
+                                        >
+                                          {fmtMcap(pos.entryMcap)}
+                                          {pos.fills && pos.fills.length > 1
+                                            ? " avg"
+                                            : ""}{" "}
+                                          → {fmtMcap(pos.currentMcap)}
+                                          {trailFromPeak !== null &&
+                                            pos.peakMcap > pos.entryMcap && (
+                                              <span style={{ color: C.amber }}>
+                                                {" "}
+                                                · peak {fmtMcap(pos.peakMcap)}
+                                              </span>
+                                            )}{" "}
+                                          · {pos.amountSol.toFixed(3)} SOL
+                                          {pos.fills &&
+                                            pos.fills.length > 1 && (
+                                              <span
+                                                style={{
+                                                  color: C.orange,
+                                                  marginLeft: 4,
+                                                }}
+                                              >
+                                                · {pos.fills.length} buys{" "}
+                                                {expandedFillsId === pos.id
+                                                  ? "▲"
+                                                  : "▼"}
+                                              </span>
+                                            )}
+                                        </div>
+                                        {expandedFillsId === pos.id &&
+                                          pos.fills &&
+                                          pos.fills.length > 1 && (
+                                            <div
+                                              style={{
+                                                marginTop: 4,
+                                                padding: "5px 7px",
+                                                background: "#0a0a0a",
+                                                border: `1px solid ${C.border}`,
+                                                borderRadius: 3,
+                                              }}
+                                            >
+                                              {pos.fills.map((f, i) => (
+                                                <div
+                                                  key={i}
+                                                  style={{
+                                                    display: "flex",
+                                                    justifyContent:
+                                                      "space-between",
+                                                    fontSize: 6.5,
+                                                    color: C.dim,
+                                                    ...MONO,
+                                                    padding: "1.5px 0",
+                                                  }}
+                                                >
+                                                  <span>
+                                                    buy {i + 1} ·{" "}
+                                                    {fmtMcap(f.mcap)}
+                                                  </span>
+                                                  <span>{f.amountSol} SOL</span>
+                                                  <span>
+                                                    {new Date(
+                                                      f.ts,
+                                                    ).toLocaleTimeString([], {
+                                                      hour: "2-digit",
+                                                      minute: "2-digit",
+                                                    })}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                      </div>
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: 15,
+                                        fontWeight: 900,
+                                        color: pnlColor,
+                                        ...MONO,
+                                        lineHeight: 1,
+                                      }}
+                                    >
+                                      {fmtPnl(pos.currentPnlPct)}
+                                    </div>
+                                    <button
+                                      title="Edit SL/TP/Trail"
+                                      onClick={() =>
+                                        editingPaperId === pos.id
+                                          ? setEditingPaperId(null)
+                                          : startEditPaperPos(pos)
+                                      }
+                                      style={{
+                                        width: 22,
+                                        height: 22,
+                                        flexShrink: 0,
+                                        borderRadius: "50%",
+                                        background:
+                                          editingPaperId === pos.id
+                                            ? `${C.primary}22`
+                                            : "transparent",
+                                        border: `1px solid ${C.border}`,
+                                        color:
+                                          editingPaperId === pos.id
+                                            ? C.primary
+                                            : C.dim,
+                                        cursor: "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: 11,
+                                      }}
+                                    >
+                                      ⚙
+                                    </button>
+                                    <button
+                                      title="Share"
+                                      onClick={() =>
+                                        setShareData({
+                                          symbol: pos.symbol,
+                                          mint: pos.mint,
+                                          entryMcap: pos.entryMcap,
+                                          currentMcap: pos.currentMcap,
+                                          exitMcap: undefined,
+                                          amountSol: pos.amountSol,
+                                          currentPnlPct: pos.currentPnlPct,
+                                          exitPnlPct: undefined,
+                                          tpX: pos.tpX,
+                                          slPct: pos.slPct,
+                                          trailPct: pos.trailPct,
+                                          exitReason: undefined,
+                                          imageUrl: pos.imageUrl,
+                                          buyTxSig: undefined,
+                                          exitTxSig: undefined,
+                                          status: "watching",
+                                          ts: pos.ts,
+                                        })
+                                      }
+                                      style={{
+                                        width: 22,
+                                        height: 22,
+                                        flexShrink: 0,
+                                        borderRadius: "50%",
+                                        background: "transparent",
+                                        border: `1px solid ${C.orange}44`,
+                                        color: C.orange,
+                                        cursor: "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                    >
+                                      <ShareIcon size={11} color={C.orange} />
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        handlePaperManualSell(pos.id)
+                                      }
+                                      style={{
+                                        height: 22,
+                                        flexShrink: 0,
+                                        paddingInline: 7,
+                                        borderRadius: 3,
+                                        background: `${C.red}11`,
+                                        border: `1px solid ${C.red}44`,
+                                        color: C.red,
+                                        fontSize: 7,
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                        ...MONO,
+                                      }}
+                                    >
+                                      CLOSE
+                                    </button>
+                                  </div>
+
+                                  {editingPaperId === pos.id ? (
+                                    /* ── inline SL/TP/Trail edit form ── */
+                                    <div
+                                      style={{
+                                        marginTop: 8,
+                                        padding: "7px 8px",
+                                        background: "#0a0a0a",
+                                        border: `1px solid ${C.primary}33`,
+                                        borderRadius: 4,
+                                        display: "flex",
+                                        alignItems: "flex-end",
+                                        gap: 6,
+                                      }}
+                                    >
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div
+                                          style={{
+                                            fontSize: 6,
+                                            color: C.red,
+                                            ...MONO,
+                                            marginBottom: 2,
+                                          }}
+                                        >
+                                          SL %
+                                        </div>
+                                        <input
+                                          type="number"
+                                          value={editSlPct}
+                                          onChange={(e) =>
+                                            setEditSlPct(e.target.value)
+                                          }
+                                          style={{
+                                            width: "100%",
+                                            background: "#111",
+                                            border: `1px solid ${C.border}`,
+                                            borderRadius: 3,
+                                            color: C.primary,
+                                            fontSize: 9,
+                                            padding: "3px 5px",
+                                            ...MONO,
+                                          }}
+                                        />
+                                      </div>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div
+                                          style={{
+                                            fontSize: 6,
+                                            color: C.amber,
+                                            ...MONO,
+                                            marginBottom: 2,
+                                          }}
+                                        >
+                                          TRAIL %
+                                        </div>
+                                        <input
+                                          type="number"
+                                          value={editTrailPct}
+                                          onChange={(e) =>
+                                            setEditTrailPct(e.target.value)
+                                          }
+                                          style={{
+                                            width: "100%",
+                                            background: "#111",
+                                            border: `1px solid ${C.border}`,
+                                            borderRadius: 3,
+                                            color: C.primary,
+                                            fontSize: 9,
+                                            padding: "3px 5px",
+                                            ...MONO,
+                                          }}
+                                        />
+                                      </div>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div
+                                          style={{
+                                            fontSize: 6,
+                                            color: C.green,
+                                            ...MONO,
+                                            marginBottom: 2,
+                                          }}
+                                        >
+                                          TP ×
+                                        </div>
+                                        <input
+                                          type="number"
+                                          value={editTpX}
+                                          onChange={(e) =>
+                                            setEditTpX(e.target.value)
+                                          }
+                                          style={{
+                                            width: "100%",
+                                            background: "#111",
+                                            border: `1px solid ${C.border}`,
+                                            borderRadius: 3,
+                                            color: C.primary,
+                                            fontSize: 9,
+                                            padding: "3px 5px",
+                                            ...MONO,
+                                          }}
+                                        />
+                                      </div>
+                                      <button
+                                        onClick={() => saveEditPaperPos(pos.id)}
+                                        style={{
+                                          height: 24,
+                                          flexShrink: 0,
+                                          paddingInline: 8,
+                                          borderRadius: 3,
+                                          background: `${C.green}18`,
+                                          border: `1px solid ${C.green}55`,
+                                          color: C.green,
+                                          fontSize: 7,
+                                          fontWeight: 700,
+                                          cursor: "pointer",
+                                          ...MONO,
+                                        }}
+                                      >
+                                        SAVE
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingPaperId(null)}
+                                        style={{
+                                          height: 24,
+                                          flexShrink: 0,
+                                          paddingInline: 6,
+                                          borderRadius: 3,
+                                          background: "transparent",
+                                          border: `1px solid ${C.border}`,
+                                          color: C.dim,
+                                          fontSize: 7,
+                                          fontWeight: 700,
+                                          cursor: "pointer",
+                                          ...MONO,
+                                        }}
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    /* SL — progress — TP single strip */
+                                    <div
+                                      style={{
+                                        marginTop: 8,
+                                        position: "relative",
+                                      }}
+                                    >
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          justifyContent: "space-between",
+                                          marginBottom: 3,
+                                        }}
+                                      >
+                                        <span
+                                          style={{
+                                            fontSize: 6,
+                                            color: C.red,
+                                            ...MONO,
+                                            letterSpacing: "0.08em",
+                                          }}
+                                        >
+                                          SL{" "}
+                                          {fmtMcap(
+                                            pos.entryMcap *
+                                              (1 + pos.slPct / 100),
+                                          )}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 6,
+                                            color: C.amber,
+                                            ...MONO,
+                                            letterSpacing: "0.08em",
+                                          }}
+                                        >
+                                          TRAIL {fmtMcap(pos.trailStopMcap)}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 6,
+                                            color:
+                                              progressToTP >= 100
+                                                ? C.green
+                                                : C.dim,
+                                            ...MONO,
+                                            letterSpacing: "0.08em",
+                                          }}
+                                        >
+                                          TO {pos.tpX}× ·{" "}
+                                          {progressToTP.toFixed(0)}%
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 6,
+                                            color: C.green,
+                                            ...MONO,
+                                            letterSpacing: "0.08em",
+                                          }}
+                                        >
+                                          TP {fmtMcap(pos.entryMcap * pos.tpX)}
+                                        </span>
+                                      </div>
+                                      <div
+                                        style={{
+                                          height: 4,
+                                          background: "#1a1a1a",
+                                          borderRadius: 99,
+                                          overflow: "hidden",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            height: "100%",
+                                            width: `${progressToTP}%`,
+                                            background:
+                                              pos.currentPnlPct > 0
+                                                ? `linear-gradient(90deg, ${C.green}88, ${C.green})`
+                                                : `linear-gradient(90deg, ${C.red}88, ${C.red})`,
+                                            borderRadius: 99,
+                                            transition: "width 0.6s ease",
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {watchingPositions.length === 0 &&
+                        paperWatching.length === 0 ? (
                           <div
                             style={{
+                              padding: "16px",
+                              textAlign: "center" as const,
+                              color: C.dim,
+                              fontSize: 9,
+                              ...MONO,
+                              lineHeight: 1.8,
+                            }}
+                          >
+                            NO OPEN POSITIONS
+                            <br />
+                            <span style={{ fontSize: 7, color: C.label }}>
+                              Buy a token → it appears here with live auto-sell
+                              monitoring
+                            </span>
+                          </div>
+                        ) : (
+                          watchingPositions.map((pos) => (
+                            <PositionCard
+                              key={pos.id}
+                              pos={pos}
+                              flash={flashPos === pos.id}
+                              onManualSell={(id) => triggerSell(id, "MANUAL")}
+                              onShare={handleShare}
+                            />
+                          ))
+                        )}
+                        {watchingPositions.length > 0 && (
+                          <div
+                            style={{
+                              padding: "5px 10px",
+                              borderTop: `1px solid ${C.border}`,
                               display: "flex",
                               alignItems: "center",
-                              gap: 5,
-                              marginBottom: 2,
+                              gap: 6,
                             }}
                           >
                             <span
                               style={{
-                                color: C.primary,
-                                fontSize: 12,
-                                fontWeight: 900,
-                                ...MONO,
+                                width: 5,
+                                height: 5,
+                                borderRadius: "50%",
+                                background: C.green,
+                                display: "inline-block",
+                                animation: "pulse 1.5s infinite",
                               }}
-                            >
-                              ${pos.symbol}
-                            </span>
+                            />
                             <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 800,
-                                color: pnlColor,
-                                ...MONO,
-                              }}
+                              style={{ fontSize: 7, color: C.dim, ...MONO }}
                             >
-                              {fmtPnl(pos.currentPnlPct)}
+                              AUTO-SELL ARMED · polls every 10s · SL + TP +
+                              Trail
                             </span>
+                          </div>
+                        )}
+                        {status && (
+                          <div
+                            style={{
+                              margin: "6px 10px",
+                              background:
+                                status.type === "ok"
+                                  ? "#001a0a"
+                                  : status.type === "err"
+                                    ? "#1a0000"
+                                    : "#0d0d00",
+                              border: `1px solid ${status.type === "ok" ? C.green + "33" : status.type === "err" ? C.red + "33" : C.amber + "33"}`,
+                              borderRadius: 3,
+                              padding: "5px 8px",
+                              color:
+                                status.type === "ok"
+                                  ? C.green
+                                  : status.type === "err"
+                                    ? C.red
+                                    : C.amber,
+                              fontSize: 8,
+                              ...MONO,
+                            }}
+                          >
+                            {status.msg}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {subTab === "log" && (
+                      <div style={{ flex: 1, overflowY: "auto" }}>
+                        {/* Paper log summary */}
+                        {paperFilledLogs.length > 0 && (
+                          <div
+                            style={{
+                              padding: "6px 10px",
+                              borderBottom: `1px solid ${C.border}`,
+                              background: "#040a04",
+                              display: "flex",
+                              gap: 10,
+                              alignItems: "center",
+                            }}
+                          >
                             <span
                               style={{
                                 fontSize: 7,
                                 color: C.green,
-                                background: `${C.green}11`,
-                                border: `1px solid ${C.green}33`,
-                                padding: "1px 5px",
-                                borderRadius: 2,
+                                fontWeight: 700,
                                 ...MONO,
                               }}
                             >
                               📄 PAPER
                             </span>
-                          </div>
-                          <div style={{ color: C.muted, fontSize: 7, ...MONO }}>
-                            {pos.amountSol} SOL · {fmtMcap(pos.entryMcap)} →{" "}
-                            {fmtMcap(pos.currentMcap)}
-                          </div>
-                          {trailFromPeak !== null &&
-                            pos.peakMcap > pos.entryMcap && (
-                              <div
-                                style={{
-                                  color: C.amber,
-                                  fontSize: 6,
-                                  ...MONO,
-                                  marginTop: 1,
-                                }}
-                              >
-                                ▲ peak {fmtMcap(pos.peakMcap)} ·{" "}
-                                {trailFromPeak.toFixed(1)}% from peak
-                              </div>
-                            )}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 4,
-                            flexShrink: 0,
-                          }}
-                        >
-                          <button
-                            title="Share"
-                            onClick={() =>
-                              setShareData({
-                                symbol: pos.symbol,
-                                mint: pos.mint,
-                                entryMcap: pos.entryMcap,
-                                currentMcap: pos.currentMcap,
-                                exitMcap: undefined,
-                                amountSol: pos.amountSol,
-                                currentPnlPct: pos.currentPnlPct,
-                                exitPnlPct: undefined,
-                                tpX: pos.tpX,
-                                slPct: pos.slPct,
-                                trailPct: pos.trailPct,
-                                exitReason: undefined,
-                                imageUrl: pos.imageUrl,
-                                buyTxSig: undefined,
-                                exitTxSig: undefined,
-                                status: "watching",
-                                ts: pos.ts,
-                              })
-                            }
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: "50%",
-                              background: "transparent",
-                              border: `1px solid ${C.orange}44`,
-                              color: C.orange,
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <ShareIcon size={12} color={C.orange} />
-                          </button>
-                          <button
-                            onClick={() => handlePaperManualSell(pos.id)}
-                            style={{
-                              height: 26,
-                              paddingInline: 8,
-                              borderRadius: 3,
-                              background: `${C.red}11`,
-                              border: `1px solid ${C.red}44`,
-                              color: C.red,
-                              fontSize: 8,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              ...MONO,
-                            }}
-                          >
-                            CLOSE
-                          </button>
-                        </div>
-                      </div>
-                      {/* progress */}
-                      <div style={{ marginBottom: 7 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            marginBottom: 3,
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 6,
-                              color: C.label,
-                              ...MONO,
-                              letterSpacing: "0.1em",
-                            }}
-                          >
-                            TO {pos.tpX}× TP
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 6,
-                              color: progressToTP >= 100 ? C.green : C.dim,
-                              ...MONO,
-                            }}
-                          >
-                            {progressToTP.toFixed(0)}%
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            height: 3,
-                            background: "#1a1a1a",
-                            borderRadius: 99,
-                          }}
-                        >
-                          <div
-                            style={{
-                              height: "100%",
-                              width: `${progressToTP}%`,
-                              background:
-                                pos.currentPnlPct > 0
-                                  ? `linear-gradient(90deg, ${C.green}88, ${C.green})`
-                                  : `linear-gradient(90deg, ${C.red}88, ${C.red})`,
-                              borderRadius: 99,
-                              transition: "width 0.6s ease",
-                            }}
-                          />
-                        </div>
-                      </div>
-                      {/* SL/TRAIL/TP tiles */}
-                      <div style={{ display: "flex", gap: 4 }}>
-                        {[
-                          {
-                            label: "STOP LOSS",
-                            sub: `${pos.slPct}%`,
-                            value: fmtMcap(
-                              pos.entryMcap * (1 + pos.slPct / 100),
-                            ),
-                            color: C.red,
-                            bg: `${C.red}08`,
-                          },
-                          {
-                            label: "TRAIL STOP",
-                            sub: `-${pos.trailPct}%`,
-                            value: fmtMcap(pos.trailStopMcap),
-                            color: C.amber,
-                            bg: `${C.amber}08`,
-                          },
-                          {
-                            label: "TAKE PROFIT",
-                            sub: `${pos.tpX}×`,
-                            value: fmtMcap(pos.entryMcap * pos.tpX),
-                            color: C.green,
-                            bg: `${C.green}08`,
-                          },
-                        ].map((item) => (
-                          <div
-                            key={item.label}
-                            style={{
-                              flex: 1,
-                              background: item.bg,
-                              border: `1px solid ${item.color}22`,
-                              borderRadius: 4,
-                              padding: "5px 6px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "baseline",
-                                marginBottom: 2,
-                              }}
+                            <span
+                              style={{ fontSize: 7, color: C.muted, ...MONO }}
                             >
-                              <span
-                                style={{
-                                  color: item.color,
-                                  fontSize: 6,
-                                  fontWeight: 700,
-                                  ...MONO,
-                                  letterSpacing: "0.08em",
-                                  opacity: 0.7,
-                                }}
-                              >
-                                {item.label}
-                              </span>
-                              <span
-                                style={{
-                                  color: item.color,
-                                  fontSize: 7,
-                                  fontWeight: 800,
-                                  ...MONO,
-                                }}
-                              >
-                                {item.sub}
-                              </span>
-                            </div>
-                            <div
+                              TOTAL {paperFilledLogs.length}
+                            </span>
+                            <span
+                              style={{ fontSize: 7, color: C.green, ...MONO }}
+                            >
+                              WIN {paperWins}
+                            </span>
+                            <span
+                              style={{ fontSize: 7, color: C.red, ...MONO }}
+                            >
+                              LOSS {paperFilledLogs.length - paperWins}
+                            </span>
+                            <span
+                              style={{ fontSize: 7, color: C.amber, ...MONO }}
+                            >
+                              RATE{" "}
+                              {paperFilledLogs.length
+                                ? (
+                                    (paperWins / paperFilledLogs.length) *
+                                    100
+                                  ).toFixed(0)
+                                : 0}
+                              %
+                            </span>
+                            <span
+                              style={{ fontSize: 7, color: C.dim, ...MONO }}
+                            >
+                              BAL {paperBal.toFixed(4)} SOL
+                            </span>
+                            <button
+                              onClick={() => {
+                                if (confirm("Reset paper account to 10 SOL?")) {
+                                  setPaperBal(PAPER_STARTING_SOL);
+                                  setPaperPositions([]);
+                                  setPaperLog([]);
+                                }
+                              }}
                               style={{
-                                color: item.color,
-                                fontSize: 10,
-                                fontWeight: 900,
+                                marginLeft: "auto",
+                                background: "transparent",
+                                border: `1px solid ${C.border}`,
+                                color: C.dim,
+                                fontSize: 6,
+                                padding: "2px 5px",
+                                borderRadius: 2,
+                                cursor: "pointer",
                                 ...MONO,
                               }}
                             >
-                              {item.value}
-                            </div>
+                              RESET
+                            </button>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {watchingPositions.length === 0 && paperWatching.length === 0 ? (
-              <div
-                style={{
-                  padding: "16px",
-                  textAlign: "center" as const,
-                  color: C.dim,
-                  fontSize: 9,
-                  ...MONO,
-                  lineHeight: 1.8,
-                }}
-              >
-                NO OPEN POSITIONS
-                <br />
-                <span style={{ fontSize: 7, color: C.label }}>
-                  Buy a token → it appears here with live auto-sell monitoring
-                </span>
-              </div>
-            ) : (
-              watchingPositions.map((pos) => (
-                <PositionCard
-                  key={pos.id}
-                  pos={pos}
-                  flash={flashPos === pos.id}
-                  onManualSell={(id) => triggerSell(id, "MANUAL")}
-                  onShare={handleShare}
-                />
-              ))
-            )}
-            {watchingPositions.length > 0 && (
-              <div
-                style={{
-                  padding: "5px 10px",
-                  borderTop: `1px solid ${C.border}`,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <span
-                  style={{
-                    width: 5,
-                    height: 5,
-                    borderRadius: "50%",
-                    background: C.green,
-                    display: "inline-block",
-                    animation: "pulse 1.5s infinite",
-                  }}
-                />
-                <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
-                  AUTO-SELL ARMED · polls every 10s · SL + TP + Trail
-                </span>
-              </div>
-            )}
-            {status && (
-              <div
-                style={{
-                  margin: "6px 10px",
-                  background:
-                    status.type === "ok"
-                      ? "#001a0a"
-                      : status.type === "err"
-                        ? "#1a0000"
-                        : "#0d0d00",
-                  border: `1px solid ${status.type === "ok" ? C.green + "33" : status.type === "err" ? C.red + "33" : C.amber + "33"}`,
-                  borderRadius: 3,
-                  padding: "5px 8px",
-                  color:
-                    status.type === "ok"
-                      ? C.green
-                      : status.type === "err"
-                        ? C.red
-                        : C.amber,
-                  fontSize: 8,
-                  ...MONO,
-                }}
-              >
-                {status.msg}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── LOG TAB */}
-        {!collapsed && hotKeypair && tab === "log" && (
-          <div style={{ flex: 1, overflowY: "auto" }}>
-            {/* Paper log summary */}
-            {paperFilledLogs.length > 0 && (
-              <div
-                style={{
-                  padding: "6px 10px",
-                  borderBottom: `1px solid ${C.border}`,
-                  background: "#040a04",
-                  display: "flex",
-                  gap: 10,
-                  alignItems: "center",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 7,
-                    color: C.green,
-                    fontWeight: 700,
-                    ...MONO,
-                  }}
-                >
-                  📄 PAPER
-                </span>
-                <span style={{ fontSize: 7, color: C.muted, ...MONO }}>
-                  TOTAL {paperFilledLogs.length}
-                </span>
-                <span style={{ fontSize: 7, color: C.green, ...MONO }}>
-                  WIN {paperWins}
-                </span>
-                <span style={{ fontSize: 7, color: C.red, ...MONO }}>
-                  LOSS {paperFilledLogs.length - paperWins}
-                </span>
-                <span style={{ fontSize: 7, color: C.amber, ...MONO }}>
-                  RATE{" "}
-                  {paperFilledLogs.length
-                    ? ((paperWins / paperFilledLogs.length) * 100).toFixed(0)
-                    : 0}
-                  %
-                </span>
-                <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
-                  BAL {paperBal.toFixed(4)} SOL
-                </span>
-                <button
-                  onClick={() => {
-                    if (confirm("Reset paper account to 10 SOL?")) {
-                      setPaperBal(PAPER_STARTING_SOL);
-                      setPaperPositions([]);
-                      setPaperLog([]);
-                    }
-                  }}
-                  style={{
-                    marginLeft: "auto",
-                    background: "transparent",
-                    border: `1px solid ${C.border}`,
-                    color: C.dim,
-                    fontSize: 6,
-                    padding: "2px 5px",
-                    borderRadius: 2,
-                    cursor: "pointer",
-                    ...MONO,
-                  }}
-                >
-                  RESET
-                </button>
-              </div>
-            )}
-            {paperFilledLogs.map((t) => {
-              const pnl = t.pnlPct ?? 0;
-              return (
-                <div
-                  key={`paper-${t.id}`}
-                  style={{
-                    padding: "8px 12px",
-                    borderBottom: `1px solid ${C.border}`,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    background: "#030a04",
-                  }}
-                >
-                  <TokenAvatar
-                    imageUrl={t.imageUrl}
-                    symbol={t.symbol}
-                    size={28}
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 5,
-                        marginBottom: 2,
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: C.primary,
-                          fontSize: 11,
-                          fontWeight: 800,
-                          ...MONO,
-                        }}
-                      >
-                        ${t.symbol}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 800,
-                          color: pnl >= 0 ? C.green : C.red,
-                          ...MONO,
-                        }}
-                      >
-                        {fmtPnl(pnl)}
-                      </span>
-                      {t.exitReason && (
-                        <span
-                          style={{
-                            fontSize: 7,
-                            padding: "1px 5px",
-                            borderRadius: 2,
-                            fontWeight: 700,
-                            ...MONO,
-                            color:
-                              t.exitReason === "TP"
-                                ? C.green
-                                : t.exitReason === "SL"
-                                  ? C.red
-                                  : C.amber,
-                            background:
-                              t.exitReason === "TP"
-                                ? `${C.green}11`
-                                : t.exitReason === "SL"
-                                  ? `${C.red}11`
-                                  : `${C.amber}11`,
-                            border: `1px solid ${t.exitReason === "TP" ? C.green + "33" : t.exitReason === "SL" ? C.red + "33" : C.amber + "33"}`,
-                          }}
-                        >
-                          {t.exitReason}
-                        </span>
-                      )}
-                      <span
-                        style={{
-                          fontSize: 7,
-                          color: C.green,
-                          background: `${C.green}11`,
-                          border: `1px solid ${C.green}33`,
-                          padding: "1px 5px",
-                          borderRadius: 2,
-                          ...MONO,
-                        }}
-                      >
-                        📄 PAPER
-                      </span>
-                    </div>
-                    <div style={{ color: C.muted, fontSize: 7, ...MONO }}>
-                      {t.amountSol} SOL · {fmtMcap(t.entryMcap)} →{" "}
-                      {fmtMcap(t.exitMcap ?? 0)}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      flexShrink: 0,
-                    }}
-                  >
-                    <span style={{ color: C.dim, fontSize: 7, ...MONO }}>
-                      {fmtAgo(t.ts)}
-                    </span>
-                    <button
-                      title="Share"
-                      onClick={() =>
-                        setShareData({
-                          symbol: t.symbol,
-                          mint: t.mint,
-                          entryMcap: t.entryMcap,
-                          currentMcap: t.exitMcap ?? t.entryMcap,
-                          exitMcap: t.exitMcap,
-                          amountSol: t.amountSol,
-                          currentPnlPct: t.pnlPct ?? 0,
-                          exitPnlPct: t.pnlPct,
-                          tpX: t.tpX,
-                          slPct: t.slPct,
-                          trailPct: 15,
-                          exitReason:
-                            t.exitReason as ShareCardData["exitReason"],
-                          imageUrl: t.imageUrl,
-                          buyTxSig: undefined,
-                          exitTxSig: undefined,
-                          status: "sold",
-                          ts: t.ts,
-                        })
-                      }
-                      style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: "50%",
-                        background: "transparent",
-                        border: `1px solid ${C.orange}44`,
-                        color: C.orange,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <ShareIcon size={11} color={C.orange} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            {filledLogs.length > 0 && (
-              <div
-                style={{
-                  padding: "6px 10px",
-                  borderBottom: `1px solid ${C.border}`,
-                  display: "flex",
-                  gap: 12,
-                }}
-              >
-                <span style={{ fontSize: 7, color: C.muted, ...MONO }}>
-                  TOTAL {filledLogs.length}
-                </span>
-                <span style={{ fontSize: 7, color: C.green, ...MONO }}>
-                  WIN {wins}
-                </span>
-                <span style={{ fontSize: 7, color: C.red, ...MONO }}>
-                  LOSS {filledLogs.length - wins}
-                </span>
-                <span style={{ fontSize: 7, color: C.amber, ...MONO }}>
-                  RATE{" "}
-                  {filledLogs.length
-                    ? ((wins / filledLogs.length) * 100).toFixed(0)
-                    : 0}
-                  %
-                </span>
-              </div>
-            )}
-            {filledLogs.length === 0 ? (
-              <div
-                style={{
-                  padding: "14px",
-                  textAlign: "center" as const,
-                  color: C.dim,
-                  fontSize: 9,
-                  ...MONO,
-                }}
-              >
-                NO TRADES YET
-              </div>
-            ) : (
-              filledLogs.map((t) => {
-                const pnl = t.pnlPct ?? 0;
-                return (
-                  <div
-                    key={t.id}
-                    style={{
-                      padding: "8px 12px",
-                      borderBottom: `1px solid ${C.border}`,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <TokenAvatar
-                      imageUrl={t.imageUrl}
-                      symbol={t.symbol}
-                      size={28}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 5,
-                          marginBottom: 2,
-                        }}
-                      >
-                        <span
-                          style={{
-                            color: C.primary,
-                            fontSize: 11,
-                            fontWeight: 800,
-                            ...MONO,
-                          }}
-                        >
-                          ${t.symbol}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 800,
-                            color: pnl >= 0 ? C.green : C.red,
-                            ...MONO,
-                          }}
-                        >
-                          {fmtPnl(pnl)}
-                        </span>
-                        {t.exitReason && (
-                          <span
+                        )}
+                        {paperFilledLogs.map((t) => {
+                          const pnl = t.pnlPct ?? 0;
+                          return (
+                            <div
+                              key={`paper-${t.id}`}
+                              style={{
+                                padding: "8px 12px",
+                                borderBottom: `1px solid ${C.border}`,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                background: "#030a04",
+                              }}
+                            >
+                              <TokenAvatar
+                                imageUrl={t.imageUrl}
+                                symbol={t.symbol}
+                                size={28}
+                              />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 5,
+                                    marginBottom: 2,
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      color: C.primary,
+                                      fontSize: 11,
+                                      fontWeight: 800,
+                                      ...MONO,
+                                    }}
+                                  >
+                                    ${t.symbol}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 800,
+                                      color: pnl >= 0 ? C.green : C.red,
+                                      ...MONO,
+                                    }}
+                                  >
+                                    {fmtPnl(pnl)}
+                                  </span>
+                                  {t.exitReason && (
+                                    <span
+                                      style={{
+                                        fontSize: 7,
+                                        padding: "1px 5px",
+                                        borderRadius: 2,
+                                        fontWeight: 700,
+                                        ...MONO,
+                                        color:
+                                          t.exitReason === "TP"
+                                            ? C.green
+                                            : t.exitReason === "SL"
+                                              ? C.red
+                                              : C.amber,
+                                        background:
+                                          t.exitReason === "TP"
+                                            ? `${C.green}11`
+                                            : t.exitReason === "SL"
+                                              ? `${C.red}11`
+                                              : `${C.amber}11`,
+                                        border: `1px solid ${t.exitReason === "TP" ? C.green + "33" : t.exitReason === "SL" ? C.red + "33" : C.amber + "33"}`,
+                                      }}
+                                    >
+                                      {t.exitReason}
+                                    </span>
+                                  )}
+                                  <span
+                                    style={{
+                                      fontSize: 7,
+                                      color: C.green,
+                                      background: `${C.green}11`,
+                                      border: `1px solid ${C.green}33`,
+                                      padding: "1px 5px",
+                                      borderRadius: 2,
+                                      ...MONO,
+                                    }}
+                                  >
+                                    📄 PAPER
+                                  </span>
+                                </div>
+                                <div
+                                  style={{
+                                    color: C.muted,
+                                    fontSize: 7,
+                                    ...MONO,
+                                  }}
+                                >
+                                  {t.amountSol} SOL · {fmtMcap(t.entryMcap)} →{" "}
+                                  {fmtMcap(t.exitMcap ?? 0)}
+                                </div>
+                              </div>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 6,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <span
+                                  style={{ color: C.dim, fontSize: 7, ...MONO }}
+                                >
+                                  {fmtAgo(t.ts)}
+                                </span>
+                                <button
+                                  title="Share"
+                                  onClick={() =>
+                                    setShareData({
+                                      symbol: t.symbol,
+                                      mint: t.mint,
+                                      entryMcap: t.entryMcap,
+                                      currentMcap: t.exitMcap ?? t.entryMcap,
+                                      exitMcap: t.exitMcap,
+                                      amountSol: t.amountSol,
+                                      currentPnlPct: t.pnlPct ?? 0,
+                                      exitPnlPct: t.pnlPct,
+                                      tpX: t.tpX,
+                                      slPct: t.slPct,
+                                      trailPct: 15,
+                                      exitReason:
+                                        t.exitReason as ShareCardData["exitReason"],
+                                      imageUrl: t.imageUrl,
+                                      buyTxSig: undefined,
+                                      exitTxSig: undefined,
+                                      status: "sold",
+                                      ts: t.ts,
+                                    })
+                                  }
+                                  style={{
+                                    width: 24,
+                                    height: 24,
+                                    borderRadius: "50%",
+                                    background: "transparent",
+                                    border: `1px solid ${C.orange}44`,
+                                    color: C.orange,
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <ShareIcon size={11} color={C.orange} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {filledLogs.length > 0 && (
+                          <div
                             style={{
-                              fontSize: 7,
-                              padding: "1px 5px",
-                              borderRadius: 2,
-                              fontWeight: 700,
-                              ...MONO,
-                              color:
-                                t.exitReason === "TP"
-                                  ? C.green
-                                  : t.exitReason === "SL"
-                                    ? C.red
-                                    : C.amber,
-                              background:
-                                t.exitReason === "TP"
-                                  ? `${C.green}11`
-                                  : t.exitReason === "SL"
-                                    ? `${C.red}11`
-                                    : `${C.amber}11`,
-                              border: `1px solid ${t.exitReason === "TP" ? C.green + "33" : t.exitReason === "SL" ? C.red + "33" : C.amber + "33"}`,
+                              padding: "6px 10px",
+                              borderBottom: `1px solid ${C.border}`,
+                              display: "flex",
+                              gap: 12,
                             }}
                           >
-                            {t.exitReason}
-                          </span>
+                            <span
+                              style={{ fontSize: 7, color: C.muted, ...MONO }}
+                            >
+                              TOTAL {filledLogs.length}
+                            </span>
+                            <span
+                              style={{ fontSize: 7, color: C.green, ...MONO }}
+                            >
+                              WIN {wins}
+                            </span>
+                            <span
+                              style={{ fontSize: 7, color: C.red, ...MONO }}
+                            >
+                              LOSS {filledLogs.length - wins}
+                            </span>
+                            <span
+                              style={{ fontSize: 7, color: C.amber, ...MONO }}
+                            >
+                              RATE{" "}
+                              {filledLogs.length
+                                ? ((wins / filledLogs.length) * 100).toFixed(0)
+                                : 0}
+                              %
+                            </span>
+                          </div>
+                        )}
+                        {filledLogs.length === 0 ? (
+                          <div
+                            style={{
+                              padding: "14px",
+                              textAlign: "center" as const,
+                              color: C.dim,
+                              fontSize: 9,
+                              ...MONO,
+                            }}
+                          >
+                            NO TRADES YET
+                          </div>
+                        ) : (
+                          filledLogs.map((t) => {
+                            const pnl = t.pnlPct ?? 0;
+                            return (
+                              <div
+                                key={t.id}
+                                style={{
+                                  padding: "8px 12px",
+                                  borderBottom: `1px solid ${C.border}`,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                }}
+                              >
+                                <TokenAvatar
+                                  imageUrl={t.imageUrl}
+                                  symbol={t.symbol}
+                                  size={28}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 5,
+                                      marginBottom: 2,
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        color: C.primary,
+                                        fontSize: 11,
+                                        fontWeight: 800,
+                                        ...MONO,
+                                      }}
+                                    >
+                                      ${t.symbol}
+                                    </span>
+                                    <span
+                                      style={{
+                                        fontSize: 10,
+                                        fontWeight: 800,
+                                        color: pnl >= 0 ? C.green : C.red,
+                                        ...MONO,
+                                      }}
+                                    >
+                                      {fmtPnl(pnl)}
+                                    </span>
+                                    {t.exitReason && (
+                                      <span
+                                        style={{
+                                          fontSize: 7,
+                                          padding: "1px 5px",
+                                          borderRadius: 2,
+                                          fontWeight: 700,
+                                          ...MONO,
+                                          color:
+                                            t.exitReason === "TP"
+                                              ? C.green
+                                              : t.exitReason === "SL"
+                                                ? C.red
+                                                : C.amber,
+                                          background:
+                                            t.exitReason === "TP"
+                                              ? `${C.green}11`
+                                              : t.exitReason === "SL"
+                                                ? `${C.red}11`
+                                                : `${C.amber}11`,
+                                          border: `1px solid ${t.exitReason === "TP" ? C.green + "33" : t.exitReason === "SL" ? C.red + "33" : C.amber + "33"}`,
+                                        }}
+                                      >
+                                        {t.exitReason}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div
+                                    style={{
+                                      color: C.muted,
+                                      fontSize: 7,
+                                      ...MONO,
+                                    }}
+                                  >
+                                    {t.amountSol} SOL · {fmtMcap(t.entryMcap)} →{" "}
+                                    {fmtMcap(t.exitMcap ?? 0)}
+                                  </div>
+                                </div>
+                                <div
+                                  style={{
+                                    flexShrink: 0,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                  }}
+                                >
+                                  {t.exitTxSig && (
+                                    <a
+                                      href={`https://solscan.io/tx/${t.exitTxSig}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      style={{
+                                        fontSize: 7,
+                                        color: C.blue,
+                                        ...MONO,
+                                        textDecoration: "none",
+                                      }}
+                                    >
+                                      {t.exitTxSig.slice(0, 8)}↗
+                                    </a>
+                                  )}
+                                  <span
+                                    style={{
+                                      color: C.dim,
+                                      fontSize: 7,
+                                      ...MONO,
+                                    }}
+                                  >
+                                    {fmtAgo(t.ts)}
+                                  </span>
+                                  {/* share button in log */}
+                                  <button
+                                    title="Share"
+                                    onClick={() => handleShareFromLog(t)}
+                                    style={{
+                                      width: 24,
+                                      height: 24,
+                                      borderRadius: "50%",
+                                      background: "transparent",
+                                      border: `1px solid ${C.orange}44`,
+                                      color: C.orange,
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                    }}
+                                  >
+                                    <ShareIcon size={11} color={C.orange} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
                         )}
                       </div>
-                      <div style={{ color: C.muted, fontSize: 7, ...MONO }}>
-                        {t.amountSol} SOL · {fmtMcap(t.entryMcap)} →{" "}
-                        {fmtMcap(t.exitMcap ?? 0)}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        flexShrink: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      {t.exitTxSig && (
-                        <a
-                          href={`https://solscan.io/tx/${t.exitTxSig}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            fontSize: 7,
-                            color: C.blue,
-                            ...MONO,
-                            textDecoration: "none",
-                          }}
-                        >
-                          {t.exitTxSig.slice(0, 8)}↗
-                        </a>
-                      )}
-                      <span style={{ color: C.dim, fontSize: 7, ...MONO }}>
-                        {fmtAgo(t.ts)}
-                      </span>
-                      {/* share button in log */}
-                      <button
-                        title="Share"
-                        onClick={() => handleShareFromLog(t)}
-                        style={{
-                          width: 24,
-                          height: 24,
-                          borderRadius: "50%",
-                          background: "transparent",
-                          border: `1px solid ${C.orange}44`,
-                          color: C.orange,
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <ShareIcon size={11} color={C.orange} />
-                      </button>
-                    </div>
+                    )}
                   </div>
-                );
-              })
-            )}
-          </div>
-        )}
+                </div>
+              </div>
+              {!hotKeypair && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    background: "#00000055",
+                    backdropFilter: "blur(4px)",
+                    WebkitBackdropFilter: "blur(4px)",
+                  }}
+                >
+                  <Lock size={16} color={C.dim} strokeWidth={2} />
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: "#ccc",
+                      fontWeight: 700,
+                      ...MONO,
+                    }}
+                  >
+                    IMPORT OR UNLOCK YOUR HOT WALLET TO TRADE
+                  </span>
+                </div>
+              )}
+            </div>,
+            bottomBarNode,
+          )}
       </div>
 
       {/* SHARE TEST — remove after */}
@@ -5886,10 +6744,20 @@ export default function PaperTrader({
         TEST SHARE
       </button> */}
 
-      {/* ── SHARE MODAL */}
-      {shareData && (
-        <ShareModal data={shareData} onClose={() => setShareData(null)} />
-      )}
+      {/* ── SHARE MODAL — portaled straight to <body>, not left inline.
+           Inline, this sat under the sniper panel's own wrapper div in
+           page.tsx, which gets `display: none` when the panel is minimized/
+           closed. A hidden ancestor hides everything under it regardless of
+           the modal's own z-index/position:fixed, so clicking share from
+           the bottom bar (which IS portaled and stays visible) did nothing
+           until the sniper panel was reopened. Portaling to document.body
+           makes it independent of that mount state. */}
+      {shareData &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <ShareModal data={shareData} onClose={() => setShareData(null)} />,
+          document.body,
+        )}
     </div>
   );
 }

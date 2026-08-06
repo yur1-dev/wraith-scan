@@ -3,7 +3,20 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
+import {
+  createChart,
+  ColorType,
+  CrosshairMode,
+  IChartApi,
+  ISeriesApi,
+  CandlestickData,
+  LineData,
+  Time,
+  CandlestickSeries,
+  LineSeries,
+} from "lightweight-charts";
 import { MemeTrend } from "@/app/app/page";
+import { getTokenPrice } from "@/lib/getTokenPrice";
 
 interface ScanResult extends MemeTrend {
   platforms?: string[];
@@ -127,6 +140,13 @@ function fmtPct(n?: number): string | null {
   if (n === undefined || n === null) return null;
   return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 }
+function fmtSpan(sec: number): string {
+  const s = Math.abs(sec);
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${(s / 3600).toFixed(1)}h`;
+  return `${(s / 86400).toFixed(1)}d`;
+}
 function fmtPrice(n?: number): string {
   if (!n) return "—";
   if (n < 0.000001) return `$${n.toExponential(2)}`;
@@ -135,79 +155,31 @@ function fmtPrice(n?: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-// Supply cache shared across fetches — derived once from DexScreener, used by Jupiter
-const _tokenSupplyCache = new Map<string, number>();
-
+// Now delegates to the shared getTokenPrice() module (lib/getTokenPrice.ts)
+// so TokenPanel, WinsPanel, and PaperTrader all read the exact same number
+// for the exact same token — instead of each running its own independent
+// fetch with its own fallback order and cache.
 async function fetchLiveTokenData(ca: string): Promise<LiveTokenData> {
   try {
-    // ── Step 1: DexScreener for metadata + supply baseline ──
-    const res = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${ca}`,
-      { signal: AbortSignal.timeout(8000) },
-    );
-    if (!res.ok) return {};
-    const data = await res.json();
-    const pairs = (data?.pairs || [])
-      .filter((p: { chainId: string }) => p.chainId === "solana")
-      .sort(
-        (
-          a: { liquidity?: { usd?: number } },
-          b: { liquidity?: { usd?: number } },
-        ) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0),
-      );
-    if (!pairs.length) return {};
-    const pair = pairs[0];
+    const d = await getTokenPrice(ca);
+    if (d.source === "none") return {};
 
-    const ageMin = pair.pairCreatedAt
-      ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
-      : undefined;
     const age =
-      ageMin !== undefined
-        ? ageMin < 60
-          ? `${ageMin}m old`
-          : ageMin < 1440
-            ? `${Math.floor(ageMin / 60)}h old`
-            : `${Math.floor(ageMin / 1440)}d old`
+      d.ageMinutes !== undefined
+        ? d.ageMinutes < 60
+          ? `${d.ageMinutes}m old`
+          : d.ageMinutes < 1440
+            ? `${Math.floor(d.ageMinutes / 60)}h old`
+            : `${Math.floor(d.ageMinutes / 1440)}d old`
         : undefined;
 
-    // Use marketCap (circulating) not fdv (total supply, inflated for memecoins)
-    const dexMcap = pair.marketCap || pair.fdv || 0;
-    const dexPrice = parseFloat(pair.priceUsd || "0") || 0;
-
-    // Cache circulating supply for Jupiter price calculation
-    if (dexPrice > 0 && dexMcap > 0 && !_tokenSupplyCache.has(ca)) {
-      _tokenSupplyCache.set(ca, dexMcap / dexPrice);
-    }
-
-    // ── Step 2: Jupiter Price v2 — real-time, matches what swaps execute at ──
-    let liveMcap = dexMcap;
-    let livePrice = dexPrice;
-    try {
-      const jupRes = await fetch(`https://api.jup.ag/price/v2?ids=${ca}`, {
-        signal: AbortSignal.timeout(4000),
-      });
-      const jupData = await jupRes.json();
-      const jupPrice = parseFloat(jupData?.data?.[ca]?.price ?? "0");
-      if (jupPrice > 0) {
-        livePrice = jupPrice;
-        const supply = _tokenSupplyCache.get(ca);
-        if (supply && supply > 0) {
-          liveMcap = jupPrice * supply;
-        } else if (dexMcap > 0 && dexPrice > 0) {
-          liveMcap = (jupPrice / dexPrice) * dexMcap;
-        }
-      }
-    } catch {
-      // Jupiter unavailable — DexScreener values are still better than nothing
-    }
-
     return {
-      mcap: liveMcap,
-      liquidity: pair.liquidity?.usd,
-      priceChange1h: pair.priceChange?.h1,
-      priceChange24h: pair.priceChange?.h24,
-      volume24h: pair.volume?.h24,
-      price: livePrice || undefined,
+      mcap: d.mcap,
+      liquidity: d.liquidity,
+      priceChange1h: d.priceChange1h,
+      priceChange24h: d.priceChange24h,
+      volume24h: d.volume24h,
+      price: d.price,
       age,
     };
   } catch {
@@ -320,7 +292,9 @@ function StatCard({
 //    switchable, with timeframe pills. Renders as SVG so we fully control
 //    color/fill/hover — no iframe branding to fight with.
 // ═════════════════════════════════════════════════════════════════════════
+
 const TIMEFRAMES = [
+  { key: "1m", label: "1M" },
   { key: "5m", label: "5M" },
   { key: "15m", label: "15M" },
   { key: "1h", label: "1H" },
@@ -332,31 +306,70 @@ function TokenChart({
   contractAddress,
   onOpenFull,
   height = 280,
+  liveMcap,
+  livePrice,
 }: {
   contractAddress: string;
   onOpenFull: () => void;
   height?: number;
+  liveMcap?: number; // current mcap from liveData, used to derive implied supply
+  livePrice?: number; // current price from liveData, paired with liveMcap
 }) {
   const [mode, setMode] = useState<"line" | "candles">("line");
+  const [valueMode, setValueMode] = useState<"price" | "mcap">("price");
   const [tf, setTf] = useState<(typeof TIMEFRAMES)[number]["key"]>("15m");
+
+  // candles only ever carry price — mcap = price * supply, and we don't
+  // have supply directly, so back it out from the live price/mcap pair
+  // you're already fetching elsewhere (liveData). Ratio holds roughly
+  // constant since supply doesn't change, so it's safe to apply across
+  // every historical candle even though liveMcap/livePrice are "now" values.
+  const mcapMultiplier =
+    liveMcap && livePrice && livePrice > 0 ? liveMcap / livePrice : null;
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [lastPrice, setLastPrice] = useState<number | null>(null);
+  const [loadingMs, setLoadingMs] = useState(0);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
-  // Pan/zoom over already-loaded candle history — drag to scroll back,
-  // wheel to zoom, like DexScreener/TradingView. zoom=1 shows everything
-  // that's loaded; panOffset is measured in candle-index units.
-  const [zoom, setZoom] = useState(1);
-  const [panOffset, setPanOffset] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startPan: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<
+    ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null
+  >(null);
+  const hasFitRef = useRef(false); // only auto-fit once per token/tf, not on every poll tick
+  const candlesRef = useRef<Candle[]>([]); // mirror of `candles` state, read inside native mouse handlers so they're never stale
+  const [measureBox, setMeasureBox] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    price1: number;
+    price2: number;
+    t1: number;
+    t2: number;
+  } | null>(null);
+  const measuringRef = useRef(false);
+  const measureStartRef = useRef<{ x: number; y: number } | null>(null);
+  const measurePhaseRef = useRef<"idle" | "placing">("idle"); // click-to-start, move freely, click again to lock
 
+  // Fetch + poll candle data
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    setZoom(1);
-    setPanOffset(0);
+    setLoadingMs(0);
+    setCandles([]); // clear stale chart from previous token immediately
+    setLastPrice(null);
+
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      if (alive) setLoadingMs(Date.now() - startedAt);
+    }, 500);
+
+    hasFitRef.current = false; // new token/timeframe — allow one fresh auto-fit
+    measurePhaseRef.current = "idle";
+    measureStartRef.current = null;
+    setMeasureBox(null); // stale box from the previous token was staying on screen
     fetchCandles(contractAddress, tf).then((c) => {
       if (!alive) return;
       setCandles(c);
@@ -370,150 +383,397 @@ function TokenChart({
     return () => {
       alive = false;
       clearInterval(t);
+      clearInterval(tick);
     };
   }, [contractAddress, tf]);
 
-  const W = 100; // viewBox units — scales with container
-  const H = 100;
-  const padTop = 8;
-  const padBottom = 6;
+  useEffect(() => {
+    candlesRef.current = candles;
+  }, [candles]);
 
-  const visibleCandles = useMemo(() => {
-    if (!candles.length) return candles;
-    const visibleCount = Math.max(
-      5,
-      Math.min(candles.length, Math.round(candles.length / zoom)),
-    );
-    const maxPan = Math.max(0, candles.length - visibleCount);
-    const clampedPan = Math.max(0, Math.min(panOffset, maxPan));
-    return candles.slice(clampedPan, clampedPan + visibleCount);
-  }, [candles, zoom, panOffset]);
+  // Create chart once per mount
+  useEffect(() => {
+    if (!containerRef.current) return;
 
-  const { path, fillPath, points, min, max, up, maPath } = useMemo(() => {
-    if (!visibleCandles.length) {
-      return {
-        path: "",
-        fillPath: "",
-        points: [] as { x: number; y: number; c: Candle }[],
-        min: 0,
-        max: 0,
-        up: true,
-        maPath: "",
-      };
-    }
-    const closes = visibleCandles.map((c) => c.c);
-    const highs = visibleCandles.map((c) => c.h);
-    const lows = visibleCandles.map((c) => c.l);
-    const min = Math.min(...lows);
-    const max = Math.max(...highs);
-    const range = max - min || 1;
-    const usableH = H - padTop - padBottom;
-    const stepX =
-      visibleCandles.length > 1 ? W / (visibleCandles.length - 1) : W;
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: C.bgDark },
+        textColor: C.dim,
+        fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace",
+        fontSize: 10,
+      },
+      grid: {
+        vertLines: { color: "#161616" },
+        horzLines: { color: "#161616" },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: "#555",
+          width: 1,
+          style: 2,
+          labelBackgroundColor: "#0a0a0a",
+          visible: true,
+          labelVisible: true,
+        },
+        horzLine: {
+          color: "#555",
+          width: 1,
+          style: 2,
+          labelBackgroundColor: "#0a0a0a",
+          visible: true,
+          labelVisible: true,
+        },
+      },
+      rightPriceScale: {
+        borderColor: "#1a1a1a",
+        scaleMargins: { top: 0.1, bottom: 0.15 },
+      },
+      timeScale: {
+        borderColor: "#1a1a1a",
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 4,
+        barSpacing: 8,
+      },
+      handleScroll: true,
+      handleScale: true,
+    });
 
-    const pts = visibleCandles.map((c, i) => ({
-      x: i * stepX,
-      y: padTop + usableH - ((c.c - min) / range) * usableH,
-      c,
-    }));
+    chartRef.current = chart;
 
-    const linePath = pts
-      .map(
-        (p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`,
-      )
-      .join(" ");
-    const fill =
-      linePath + ` L ${pts[pts.length - 1].x.toFixed(2)} ${H} L 0 ${H} Z`;
-
-    // Simple moving average overlay — smooths noise, shows trend direction
-    // at a glance. Period auto-shrinks on short candle sets so it still
-    // draws something even with only a handful of candles loaded.
-    const maPeriod = Math.min(7, Math.max(2, Math.floor(closes.length / 3)));
-    let maPath = "";
-    if (closes.length >= maPeriod) {
-      const maSegs: string[] = [];
-      for (let i = maPeriod - 1; i < closes.length; i++) {
-        const slice = closes.slice(i - maPeriod + 1, i + 1);
-        const avg = slice.reduce((s, v) => s + v, 0) / maPeriod;
-        const y = padTop + usableH - ((avg - min) / range) * usableH;
-        maSegs.push(
-          `${maSegs.length === 0 ? "M" : "L"} ${pts[i].x.toFixed(2)} ${y.toFixed(2)}`,
-        );
+    const handleResize = () => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth });
       }
-      maPath = maSegs.join(" ");
+    };
+    window.addEventListener("resize", handleResize);
+    handleResize();
+
+    // ── Shift+drag measure tool ──────────────────────────────────────────
+    // lightweight-charts has NO built-in measure tool (that's TradingView's
+    // paid charting_library, a different product). Building it manually:
+    // shift+mousedown starts a drag, mousemove tracks it converting pixel
+    // coords to price/time via the chart's own coordinate APIs, mouseup
+    // ends the drag but leaves the box on screen until dismissed.
+    const el = containerRef.current;
+
+    const handleClick = (e: MouseEvent) => {
+      if (!el || !seriesRef.current) return;
+
+      // idle → shift+click drops the first point and starts placing
+      if (measurePhaseRef.current === "idle") {
+        if (!e.shiftKey) {
+          setMeasureBox(null); // plain click with nothing active — clears any leftover box
+          return;
+        }
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        measureStartRef.current = { x, y };
+        measurePhaseRef.current = "placing";
+        chart.applyOptions({ handleScroll: false, handleScale: false });
+        setMeasureBox({
+          x1: x,
+          y1: y,
+          x2: x,
+          y2: y,
+          price1: 0,
+          price2: 0,
+          t1: 0,
+          t2: 0,
+        });
+        return;
+      }
+
+      // placing → any click locks the second point wherever it currently is
+      if (measurePhaseRef.current === "placing") {
+        measurePhaseRef.current = "idle";
+        measureStartRef.current = null;
+        chart.applyOptions({ handleScroll: true, handleScale: true });
+        // measureBox already holds the latest position from the last mousemove
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (
+        measurePhaseRef.current !== "placing" ||
+        !measureStartRef.current ||
+        !el ||
+        !seriesRef.current
+      )
+        return;
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const { x: x1, y: y1 } = measureStartRef.current;
+
+      const price1 = seriesRef.current.coordinateToPrice(y1);
+      const price2 = seriesRef.current.coordinateToPrice(y);
+      const t1 = chart.timeScale().coordinateToTime(x1);
+      const t2 = chart.timeScale().coordinateToTime(x);
+
+      setMeasureBox({
+        x1,
+        y1,
+        x2: x,
+        y2: y,
+        price1: price1 ?? 0,
+        price2: price2 ?? 0,
+        t1: (t1 as number) ?? 0,
+        t2: (t2 as number) ?? 0,
+      });
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        measurePhaseRef.current = "idle";
+        measureStartRef.current = null;
+        chart.applyOptions({ handleScroll: true, handleScale: true });
+        setMeasureBox(null);
+      }
+    };
+
+    el?.addEventListener("click", handleClick);
+    // Capture phase, and on the element itself — lightweight-charts' own
+    // crosshair handler sits on the internal canvas and stops mousemove
+    // from bubbling to window, so a window-level listener never fires
+    // while the cursor is actually over the chart. Capture-phase on `el`
+    // runs before that internal handler gets a chance to stop it.
+    el?.addEventListener("mousemove", handleMouseMove, { capture: true });
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      el?.removeEventListener("click", handleClick);
+      el?.removeEventListener("mousemove", handleMouseMove, { capture: true });
+      window.removeEventListener("keydown", handleKeyDown);
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    };
+  }, []);
+
+  // Rebuild series when mode changes
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    if (seriesRef.current) {
+      chart.removeSeries(seriesRef.current);
+      seriesRef.current = null;
     }
 
-    return {
-      path: linePath,
-      fillPath: fill,
-      points: pts,
-      min,
-      max,
-      up: closes[closes.length - 1] >= closes[0],
-      maPath,
+    const priceFormat = {
+      type: "custom" as const,
+      // minMove has to scale with the actual magnitude of the values being
+      // plotted. 0.00000001 works for sub-cent token prices but is 19
+      // orders of magnitude too fine for mcap values (~$10K-$1M+), which
+      // was making the autoscale/tick generator produce garbage padded
+      // ranges (e.g. axis running down to $-100000) on sparse data.
+      minMove: valueMode === "mcap" ? 1 : 0.00000001,
+      formatter: (p: number) =>
+        valueMode === "mcap" ? fmtMcap(p) : fmtPrice(p),
     };
-  }, [visibleCandles]);
 
-  const hovered = hoverIdx !== null ? points[hoverIdx] : null;
-  const lineColor = C.accent; // orange, per request — stays fixed regardless of up/down
-  const candleUpColor = C.green;
-  const candleDownColor = C.red;
+    if (mode === "candles") {
+      seriesRef.current = chart.addSeries(CandlestickSeries, {
+        upColor: C.green,
+        downColor: C.red,
+        borderVisible: false,
+        wickUpColor: C.green,
+        wickDownColor: C.red,
+        priceFormat,
+      });
+    } else {
+      seriesRef.current = chart.addSeries(LineSeries, {
+        color: C.accent,
+        lineWidth: 2,
+        priceFormat,
+      });
+    }
+  }, [mode, valueMode]);
 
-  const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (!svgRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
+  // Push data into the active series
+  useEffect(() => {
+    if (!seriesRef.current) return;
 
-    if (isDragging && dragRef.current) {
-      const visibleCount = Math.max(
-        5,
-        Math.min(candles.length, Math.round(candles.length / zoom)),
-      );
-      const pxPerCandle = rect.width / Math.max(1, visibleCount - 1);
-      const deltaCandles = (e.clientX - dragRef.current.startX) / pxPerCandle;
-      const maxPan = Math.max(0, candles.length - visibleCount);
-      const nextPan = Math.round(dragRef.current.startPan - deltaCandles);
-      setPanOffset(Math.max(0, Math.min(maxPan, nextPan)));
+    if (!candles.length) {
+      seriesRef.current.setData([]); // clear stale series when switching tokens
+      chartRef.current?.applyOptions({
+        rightPriceScale: { visible: false }, // hide axis instead of rendering garbage ticks on empty data
+      });
       return;
     }
 
-    if (!points.length) return;
-    const relX = ((e.clientX - rect.left) / rect.width) * W;
-    let closest = 0;
-    let closestDist = Infinity;
-    points.forEach((p, i) => {
-      const d = Math.abs(p.x - relX);
-      if (d < closestDist) {
-        closestDist = d;
-        closest = i;
-      }
-    });
-    setHoverIdx(closest);
-  };
+    chartRef.current?.applyOptions({ rightPriceScale: { visible: true } });
 
-  const handleDown = (e: React.MouseEvent<SVGSVGElement>) => {
-    dragRef.current = { startX: e.clientX, startPan: panOffset };
-    setIsDragging(true);
-  };
-  const handleUp = () => setIsDragging(false);
-
-  const handleWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    e.preventDefault();
-    setZoom((z) =>
-      Math.max(1, Math.min(20, e.deltaY < 0 ? z * 1.15 : z / 1.15)),
+    const sortedRaw = [...candles].sort((a, b) => a.t - b.t);
+    // Dedupe by timestamp — lightweight-charts throws a hard, uncatchable
+    // assertion error if two candles share the same time value.
+    const deduped = Array.from(
+      new Map(sortedRaw.map((c) => [c.t, c])).values(),
     );
-  };
 
-  const resetView = () => {
-    setZoom(1);
-    setPanOffset(0);
-  };
+    // Sanitize: lightweight-charts also throws hard on NaN/Infinity/zero
+    // values or on low > min(open,close) / high < max(open,close). A single
+    // bad candle from an upstream source (pump.fun forward-fill, a $0 tick,
+    // a negative price during a bad extraction) crashes setData() for the
+    // WHOLE array with no visible error — that's the "just goes black"
+    // symptom. Drop only the bad candle(s), keep the rest.
+    // Reject candles where any OHLC value is more than 1000x smaller than
+    // this candle's own high — that's a forward-fill/rounding artifact
+    // (e.g. 3.39e-21 next to a real $0.00003 price), not a real trade.
+    // A plain `n <= 0` check lets these through since they're still
+    // technically positive, which blows up lightweight-charts' autoscale.
+    const perCandleValid = deduped.filter((c) => {
+      const nums = [c.o, c.h, c.l, c.c];
+      if (
+        nums.some((n) => typeof n !== "number" || !Number.isFinite(n) || n <= 0)
+      )
+        return false;
+      if (c.l > Math.min(c.o, c.c) || c.h < Math.max(c.o, c.c)) return false;
+      const maxVal = Math.max(...nums);
+      const minVal = Math.min(...nums);
+      if (maxVal / minVal > 1000) return false; // degenerate spread within one candle
+      return true;
+    });
 
-  // Catches mouseup that happens outside the chart (e.g. dragged past
-  // the edge and released elsewhere), so the drag doesn't get stuck on.
-  useEffect(() => {
-    window.addEventListener("mouseup", handleUp);
-    return () => window.removeEventListener("mouseup", handleUp);
-  }, []);
+    // Cross-candle check — a candle can be internally consistent (passes
+    // the check above) but still be a forward-fill artifact sitting orders
+    // of magnitude away from every other candle. That single outlier drags
+    // the whole autoscale down toward zero (and even negative, via chart
+    // padding), which is the "jumps back to near-zero" symptom. Compare
+    // each candle's close against the MEDIAN close of the whole set —
+    // median instead of mean so one existing outlier can't skew the
+    // baseline it's being checked against.
+    const closes = [...perCandleValid.map((c) => c.c)].sort((a, b) => a - b);
+    const medianClose = closes.length
+      ? closes[Math.floor(closes.length / 2)]
+      : 0;
+    const sorted =
+      medianClose > 0
+        ? perCandleValid.filter(
+            (c) => c.c / medianClose > 0.02 && c.c / medianClose < 50,
+          )
+        : perCandleValid;
+
+    if (!sorted.length) {
+      setRenderError(
+        `all ${deduped.length} candles failed validation — check console`,
+      );
+      console.error(
+        "[TokenChart] every candle was invalid, raw sample:",
+        deduped.slice(0, 3),
+      );
+      return;
+    }
+    if (sorted.length < deduped.length) {
+      console.warn(
+        `[TokenChart] dropped ${deduped.length - sorted.length} invalid candle(s)`,
+        deduped.filter((c) => !sorted.includes(c)),
+      );
+    }
+
+    setLastPrice(sorted[sorted.length - 1].c);
+
+    const mult = valueMode === "mcap" && mcapMultiplier ? mcapMultiplier : 1;
+
+    try {
+      let plottedValues: number[] = [];
+
+      if (mode === "candles") {
+        const data: CandlestickData<Time>[] = sorted.map((c) => ({
+          time: (c.t / 1000) as Time,
+          open: c.o * mult,
+          high: c.h * mult,
+          low: c.l * mult,
+          close: c.c * mult,
+        }));
+        (seriesRef.current as ISeriesApi<"Candlestick">).setData(data);
+        plottedValues = data.flatMap((d) => [d.open, d.high, d.low, d.close]);
+      } else {
+        const data: LineData<Time>[] = sorted.map((c) => ({
+          time: (c.t / 1000) as Time,
+          value: c.c * mult,
+        }));
+        (seriesRef.current as ISeriesApi<"Line">).setData(data);
+        plottedValues = data.map((d) => d.value);
+      }
+
+      // MCAP mode: don't trust lightweight-charts' autoscale. It's fine on
+      // clean price data, but MCAP values are price candles multiplied by
+      // a large static ratio, so any single upstream artifact (which the
+      // filters above don't catch 100% of, since the source data itself
+      // is inconsistent poll-to-poll) gets amplified into a huge outlier
+      // that drags the whole axis toward zero/negative. Clamp the visible
+      // range manually off the ACTUAL plotted min/max instead, so one bad
+      // point can only ever push the range to its own value, never beyond.
+      const priceScale = chartRef.current?.priceScale("right");
+      if (valueMode === "mcap" && plottedValues.length && priceScale) {
+        const lo = Math.min(...plottedValues);
+        const hi = Math.max(...plottedValues);
+        const pad = (hi - lo) * 0.1 || hi * 0.1 || 1;
+        priceScale.applyOptions({
+          autoScale: false,
+        });
+        chartRef.current?.applyOptions({
+          rightPriceScale: {
+            autoScale: false,
+          },
+        });
+        seriesRef.current.applyOptions({
+          autoscaleInfoProvider: () => ({
+            priceRange: {
+              minValue: Math.max(0, lo - pad),
+              maxValue: hi + pad,
+            },
+          }),
+        });
+      } else if (priceScale) {
+        priceScale.applyOptions({ autoScale: true });
+        chartRef.current?.applyOptions({
+          rightPriceScale: { autoScale: true },
+        });
+        seriesRef.current.applyOptions({ autoscaleInfoProvider: undefined });
+      }
+
+      if (!hasFitRef.current) {
+        chartRef.current?.timeScale().fitContent();
+        hasFitRef.current = true;
+      }
+      setRenderError(null);
+    } catch (e) {
+      console.error(
+        "[TokenChart] setData threw",
+        e,
+        "sample:",
+        sorted.slice(0, 5),
+      );
+      setRenderError(e instanceof Error ? e.message : "chart render failed");
+    }
+  }, [candles, mode, valueMode, mcapMultiplier]);
+
+  const up =
+    candles.length > 1 ? candles[candles.length - 1].c >= candles[0].c : true;
+
+  const measureStats = measureBox
+    ? (() => {
+        const pctChange =
+          measureBox.price1 !== 0
+            ? ((measureBox.price2 - measureBox.price1) / measureBox.price1) *
+              100
+            : 0;
+        const priceDelta = measureBox.price2 - measureBox.price1;
+        const tLo = Math.min(measureBox.t1, measureBox.t2);
+        const tHi = Math.max(measureBox.t1, measureBox.t2);
+        const barsCount = candlesRef.current.filter(
+          (c) => c.t / 1000 >= tLo && c.t / 1000 <= tHi,
+        ).length;
+        return { pctChange, priceDelta, barsCount, span: fmtSpan(tHi - tLo) };
+      })()
+    : null;
 
   return (
     <Card style={{ overflow: "hidden", marginBottom: 12 }}>
@@ -528,7 +788,6 @@ function TokenChart({
           flexWrap: "wrap" as const,
         }}
       >
-        {/* Mode toggle */}
         <div
           style={{
             display: "flex",
@@ -567,7 +826,58 @@ function TokenChart({
           ))}
         </div>
 
-        {/* Timeframe pills */}
+        <div
+          style={{
+            display: "flex",
+            background: "#050505",
+            border: `1px solid ${C.border}`,
+            borderRadius: 6,
+            padding: 2,
+            gap: 2,
+          }}
+        >
+          {(
+            [
+              { key: "price", label: "PRICE" },
+              { key: "mcap", label: "MCAP" },
+            ] as const
+          ).map((v) => (
+            <button
+              key={v.key}
+              onClick={() => setValueMode(v.key)}
+              disabled={v.key === "mcap" && !mcapMultiplier}
+              title={
+                v.key === "mcap" && !mcapMultiplier
+                  ? "mcap unavailable — no live supply data yet"
+                  : undefined
+              }
+              style={{
+                background: valueMode === v.key ? "#e8490f14" : "transparent",
+                color:
+                  v.key === "mcap" && !mcapMultiplier
+                    ? "#333"
+                    : valueMode === v.key
+                      ? C.accent
+                      : C.dim,
+                border: `1px solid ${valueMode === v.key ? "#e8490f33" : "transparent"}`,
+                borderRadius: 4,
+                fontSize: 8,
+                fontWeight: 800,
+                ...MONO,
+                letterSpacing: "0.08em",
+                padding: "4px 9px",
+                cursor:
+                  v.key === "mcap" && !mcapMultiplier
+                    ? "not-allowed"
+                    : "pointer",
+                transition: TRANSITION_FAST,
+              }}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
         <div style={{ display: "flex", gap: 3 }}>
           {TIMEFRAMES.map((t) => (
             <button
@@ -647,24 +957,6 @@ function TokenChart({
               PUMP ↗
             </span>
           </a>
-          {zoom !== 1 && (
-            <button
-              onClick={resetView}
-              style={{
-                background: "transparent",
-                border: `1px solid ${C.dim}33`,
-                color: C.dim,
-                fontSize: 7,
-                ...MONO,
-                padding: "3px 7px",
-                borderRadius: 3,
-                cursor: "pointer",
-                transition: TRANSITION_FAST,
-              }}
-            >
-              RESET
-            </button>
-          )}
           <button
             onClick={onOpenFull}
             style={{
@@ -686,328 +978,250 @@ function TokenChart({
 
       {/* Chart body */}
       <div style={{ position: "relative", height, background: C.bgDark }}>
-        {loading && !candles.length ? (
+        {loading && !candles.length && (
           <div
             style={{
               position: "absolute",
               inset: 0,
               display: "flex",
+              flexDirection: "column" as const,
               alignItems: "center",
               justifyContent: "center",
-              color: C.dim,
-              fontSize: 9,
-              ...MONO,
-              letterSpacing: "0.1em",
+              gap: 10,
+              zIndex: 1,
+              background: C.bgDark,
             }}
           >
-            LOADING CHART…
-          </div>
-        ) : !candles.length ? (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: C.dim,
-              fontSize: 9,
-              ...MONO,
-            }}
-          >
-            NO CHART DATA YET
-          </div>
-        ) : mode === "line" ? (
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="none"
-            style={{
-              width: "100%",
-              height: "100%",
-              display: "block",
-              cursor: isDragging ? "grabbing" : "grab",
-            }}
-            onMouseMove={handleMove}
-            onMouseDown={handleDown}
-            onMouseUp={handleUp}
-            onMouseLeave={() => {
-              setHoverIdx(null);
-              handleUp();
-            }}
-            onWheel={handleWheel}
-          >
-            <defs>
-              <linearGradient id="wraith-line-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={lineColor} stopOpacity="0.28" />
-                <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            {/* horizontal gridlines */}
-            {[0.2, 0.4, 0.6, 0.8].map((f) => (
-              <line
-                key={f}
-                x1={0}
-                x2={W}
-                y1={H * f}
-                y2={H * f}
-                stroke="#161616"
-                strokeWidth={0.3}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
-            <path d={fillPath} fill="url(#wraith-line-fill)" stroke="none" />
-            <path
-              d={path}
-              fill="none"
-              stroke={lineColor}
-              strokeWidth={1.4}
-              vectorEffect="non-scaling-stroke"
-              strokeLinejoin="round"
-              strokeLinecap="round"
+            <div
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: "50%",
+                border: `2px solid #222`,
+                borderTopColor: C.accent,
+                animation: "tp-spin 0.7s linear infinite",
+              }}
             />
-            {hovered && (
-              <line
-                x1={hovered.x}
-                x2={hovered.x}
-                y1={0}
-                y2={H}
-                stroke="#333"
-                strokeWidth={0.4}
-                vectorEffect="non-scaling-stroke"
-                strokeDasharray="2 2"
-              />
-            )}
-          </svg>
-        ) : (
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="none"
-            style={{
-              width: "100%",
-              height: "100%",
-              display: "block",
-              cursor: isDragging ? "grabbing" : "grab",
-            }}
-            onMouseMove={handleMove}
-            onMouseDown={handleDown}
-            onMouseUp={handleUp}
-            onMouseLeave={() => {
-              setHoverIdx(null);
-              handleUp();
-            }}
-            onWheel={handleWheel}
-          >
-            {[0.2, 0.4, 0.6, 0.8].map((f) => (
-              <line
-                key={f}
-                x1={0}
-                x2={W}
-                y1={H * f}
-                y2={H * f}
-                stroke="#161616"
-                strokeWidth={0.3}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
-            {points.map((p, i) => {
-              const cUp = p.c.c >= p.c.o;
-              const range = max - min || 1;
-              const usableH = H - padTop - padBottom;
-              const yOpen =
-                padTop + usableH - ((p.c.o - min) / range) * usableH;
-              const yClose =
-                padTop + usableH - ((p.c.c - min) / range) * usableH;
-              const yHigh =
-                padTop + usableH - ((p.c.h - min) / range) * usableH;
-              const yLow = padTop + usableH - ((p.c.l - min) / range) * usableH;
-              const bodyW = Math.max((W / points.length) * 0.6, 0.4);
-              return (
-                <g key={i}>
-                  <line
-                    x1={p.x}
-                    x2={p.x}
-                    y1={yHigh}
-                    y2={yLow}
-                    stroke={cUp ? candleUpColor : candleDownColor}
-                    strokeWidth={0.3}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <rect
-                    x={p.x - bodyW / 2}
-                    y={Math.min(yOpen, yClose)}
-                    width={bodyW}
-                    height={Math.max(Math.abs(yClose - yOpen), 0.4)}
-                    fill={cUp ? candleUpColor : candleDownColor}
-                  />
-                </g>
-              );
-            })}
-            {maPath && (
-              <path
-                d={maPath}
-                fill="none"
-                stroke={C.gold}
-                strokeWidth={0.5}
-                vectorEffect="non-scaling-stroke"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                opacity={0.85}
-              />
-            )}
-            {hovered && (
-              <line
-                x1={hovered.x}
-                x2={hovered.x}
-                y1={0}
-                y2={H}
-                stroke="#333"
-                strokeWidth={0.4}
-                vectorEffect="non-scaling-stroke"
-                strokeDasharray="2 2"
-              />
-            )}
-          </svg>
+            <div
+              style={{
+                color: "#ccc",
+                fontSize: 10,
+                ...MONO,
+                letterSpacing: "0.1em",
+                fontWeight: 700,
+              }}
+            >
+              LOADING CHART…
+            </div>
+            <div
+              style={{
+                color: C.sub,
+                fontSize: 8,
+                ...MONO,
+              }}
+            >
+              {loadingMs < 4000
+                ? "fetching candles"
+                : loadingMs < 9000
+                  ? "still fetching — on-chain fallback can be slow"
+                  : "taking longer than usual, hang tight"}
+            </div>
+            <style>{`
+              @keyframes tp-spin { to { transform: rotate(360deg); } }
+            `}</style>
+          </div>
         )}
-
-        {/* Circular hover marker — plain HTML div, not SVG. The chart's
-            SVG viewBox is stretched non-uniformly to fill a wide
-            rectangle, which turns any SVG circle into an oval. A div
-            positioned by percentage stays perfectly round regardless,
-            and works the same way in both line and candle mode. */}
-        {hovered && (
+        {!loading && candles.length > 0 && candles.length < 3 && (
           <div
             style={{
               position: "absolute",
-              left: `${(hovered.x / W) * 100}%`,
-              top: `${(hovered.y / H) * 100}%`,
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: mode === "line" ? lineColor : C.gold,
-              border: "1.5px solid #0a0a0a",
-              transform: "translate(-50%, -50%)",
-              pointerEvents: "none",
-              boxShadow: `0 0 6px ${mode === "line" ? lineColor : C.gold}88`,
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              color: C.dim,
+              fontSize: 9,
+              ...MONO,
+              zIndex: 1,
+              background: C.bgDark,
+              textAlign: "center",
+              padding: 16,
             }}
-          />
+          >
+            <span>TOO NEW — NOT ENOUGH TRADE HISTORY YET</span>
+            <span style={{ fontSize: 8, opacity: 0.6 }}>
+              chart fills in as trades come through
+            </span>
+          </div>
         )}
-
-        {/* Hover tooltip — DexScreener-style: OHLC + %change + full date/time */}
-        {hovered && (
+        {!loading && !candles.length && (
           <div
             style={{
               position: "absolute",
-              top: 8,
-              left: 10,
-              background: "#0a0a0ae6",
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-              padding: "8px 11px",
-              backdropFilter: "blur(4px)",
-              pointerEvents: "none",
-              minWidth: 128,
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              color: C.dim,
+              fontSize: 9,
+              ...MONO,
+              zIndex: 1,
+              background: C.bgDark,
+              textAlign: "center",
+              padding: 16,
             }}
           >
+            <span>NO CHART DATA YET</span>
+            <span style={{ fontSize: 8, opacity: 0.6 }}>
+              coin may be too fresh — no pool or trade history recorded yet
+            </span>
+          </div>
+        )}
+        <div
+          ref={containerRef}
+          style={{ width: "100%", height: "100%", cursor: "crosshair" }}
+        />
+        {measureBox && measureStats && (
+          <>
             {(() => {
-              const c = hovered.c;
-              const candleUp = c.c >= c.o;
-              const pctChange = c.o !== 0 ? ((c.c - c.o) / c.o) * 100 : 0;
-              const tone =
-                mode === "candles" ? (candleUp ? C.green : C.red) : lineColor;
+              const bx1 = Math.min(measureBox.x1, measureBox.x2);
+              const by1 = Math.min(measureBox.y1, measureBox.y2);
+              const bw = Math.abs(measureBox.x2 - measureBox.x1);
+              const bh = Math.abs(measureBox.y2 - measureBox.y1);
+              const cx = bx1 + bw / 2;
+              const cy = by1 + bh / 2;
+              const up = measureStats.pctChange >= 0;
+              const boxColor = C.accent;
               return (
                 <>
                   <div
                     style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      gap: 7,
-                      marginBottom: 5,
+                      position: "absolute",
+                      left: bx1,
+                      top: by1,
+                      width: bw,
+                      height: bh,
+                      background: `${boxColor}4d`,
+                      border: `1px solid ${boxColor}`,
+                      pointerEvents: "none" as const,
+                      zIndex: 3,
                     }}
-                  >
-                    <span
-                      style={{
-                        color: tone,
-                        fontSize: 12,
-                        fontWeight: 800,
-                        ...MONO,
-                      }}
-                    >
-                      {fmtPrice(c.c)}
-                    </span>
-                    <span
-                      style={{
-                        color: candleUp ? C.green : C.red,
-                        fontSize: 9,
-                        fontWeight: 700,
-                        ...MONO,
-                      }}
-                    >
-                      {candleUp ? "+" : ""}
-                      {pctChange.toFixed(2)}%
-                    </span>
-                  </div>
-                  {mode === "candles" && (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "auto auto",
-                        gap: "2px 10px",
-                        marginBottom: 5,
-                      }}
-                    >
-                      <span style={{ color: C.dim, fontSize: 8, ...MONO }}>
-                        O
-                      </span>
-                      <span style={{ color: C.body, fontSize: 8, ...MONO }}>
-                        {fmtPrice(c.o)}
-                      </span>
-                      <span style={{ color: C.dim, fontSize: 8, ...MONO }}>
-                        H
-                      </span>
-                      <span style={{ color: C.green, fontSize: 8, ...MONO }}>
-                        {fmtPrice(c.h)}
-                      </span>
-                      <span style={{ color: C.dim, fontSize: 8, ...MONO }}>
-                        L
-                      </span>
-                      <span style={{ color: C.red, fontSize: 8, ...MONO }}>
-                        {fmtPrice(c.l)}
-                      </span>
-                      <span style={{ color: C.dim, fontSize: 8, ...MONO }}>
-                        C
-                      </span>
-                      <span style={{ color: C.body, fontSize: 8, ...MONO }}>
-                        {fmtPrice(c.c)}
-                      </span>
-                    </div>
-                  )}
+                  />
                   <div
                     style={{
-                      color: C.dim,
-                      fontSize: 7,
+                      position: "absolute",
+                      left: bx1,
+                      top: cy - 0.5,
+                      width: bw,
+                      height: 1,
+                      background: "#fff",
+                      opacity: 0.8,
+                      pointerEvents: "none" as const,
+                      zIndex: 4,
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: cx - 0.5,
+                      top: by1,
+                      width: 1,
+                      height: bh,
+                      background: "#fff",
+                      opacity: 0.8,
+                      pointerEvents: "none" as const,
+                      zIndex: 4,
+                    }}
+                  />
+                  {[
+                    { l: bx1 - 5, t: cy - 4, rot: 270 },
+                    { l: bx1 + bw - 3, t: cy - 4, rot: 90 },
+                    { l: cx - 4, t: by1 - 5, rot: 0 },
+                    { l: cx - 4, t: by1 + bh - 3, rot: 180 },
+                  ].map((a, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        position: "absolute",
+                        left: a.l,
+                        top: a.t,
+                        width: 0,
+                        height: 0,
+                        borderLeft: "4px solid transparent",
+                        borderRight: "4px solid transparent",
+                        borderBottom: "6px solid #fff",
+                        opacity: 0.8,
+                        transform: `rotate(${a.rot}deg)`,
+                        pointerEvents: "none" as const,
+                        zIndex: 4,
+                      }}
+                    />
+                  ))}
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: cx,
+                      top: by1 - 6,
+                      transform: "translate(-50%, -100%)",
+                      background: boxColor,
+                      color: "#fff",
+                      fontSize: 10,
                       ...MONO,
-                      borderTop: `1px solid ${C.border}`,
-                      paddingTop: 4,
+                      fontWeight: 700,
+                      padding: "6px 10px",
+                      borderRadius: 4,
+                      pointerEvents: "none" as const,
+                      zIndex: 5,
+                      whiteSpace: "nowrap" as const,
+                      lineHeight: 1.6,
+                      textAlign: "center" as const,
                     }}
                   >
-                    {new Date(c.t).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    <div>
+                      {fmtPrice(Math.abs(measureStats.priceDelta))} (
+                      {up ? "+" : ""}
+                      {measureStats.pctChange.toFixed(2)}%)
+                    </div>
+                    <div style={{ opacity: 0.9, fontWeight: 500 }}>
+                      {measureStats.barsCount} bars, {measureStats.span}
+                    </div>
                   </div>
                 </>
               );
             })()}
+          </>
+        )}
+        {renderError && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              flexDirection: "column" as const,
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              color: C.red,
+              fontSize: 9,
+              ...MONO,
+              zIndex: 2,
+              background: C.bgDark,
+              textAlign: "center" as const,
+              padding: 16,
+            }}
+          >
+            <span>CHART RENDER ERROR</span>
+            <span style={{ fontSize: 8, color: C.sub, opacity: 0.8 }}>
+              {renderError}
+            </span>
           </div>
         )}
 
-        {/* Live price badge, top-right */}
-        {!hovered && points.length > 0 && (
+        {lastPrice !== null && candles.length > 0 && (
           <div
             style={{
               position: "absolute",
@@ -1019,13 +1233,15 @@ function TokenChart({
           >
             <div
               style={{
-                color: lineColor,
+                color: up ? C.green : C.red,
                 fontSize: 11,
                 fontWeight: 800,
                 ...MONO,
               }}
             >
-              {fmtPrice(points[points.length - 1].c.c)}
+              {valueMode === "mcap" && mcapMultiplier
+                ? fmtMcap(lastPrice * mcapMultiplier)
+                : fmtPrice(lastPrice)}
             </div>
           </div>
         )}
@@ -1038,9 +1254,13 @@ function TokenChart({
 function FullChart({
   contractAddress,
   onBack,
+  liveMcap,
+  livePrice,
 }: {
   contractAddress: string;
   onBack: () => void;
+  liveMcap?: number;
+  livePrice?: number;
 }) {
   return (
     <div
@@ -1100,6 +1320,8 @@ function FullChart({
           height={
             typeof window !== "undefined" ? window.innerHeight - 140 : 500
           }
+          liveMcap={liveMcap}
+          livePrice={livePrice}
         />
       </div>
     </div>
@@ -1133,6 +1355,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
       return;
     }
     setLiveLoading(true);
+    setLiveData({}); // clear stale stats from previous token immediately
     fetchLiveTokenData(selectedMeme.contractAddress).then((d) => {
       setLiveData(d);
       setLiveLoading(false);
@@ -1241,6 +1464,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
       <FullChart
         contractAddress={selectedMeme.contractAddress}
         onBack={() => setFullChart(false)}
+        liveMcap={liveData.mcap}
+        livePrice={liveData.price}
       />
     );
   }
@@ -1294,8 +1519,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
     <div
       style={{
         background: C.bgDark,
-        border: "1px solid #111",
-        borderRadius: 10,
+        border: "none",
+        borderRadius: 0,
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -1569,6 +1794,8 @@ export default function TokenPanel({ selectedMeme }: Props) {
               <TokenChart
                 contractAddress={selectedMeme.contractAddress}
                 onOpenFull={() => setFullChart(true)}
+                liveMcap={displayMcap}
+                livePrice={displayPrice}
               />
             ) : (
               <div

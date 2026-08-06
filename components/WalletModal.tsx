@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 
 const MONO = {
@@ -13,12 +13,43 @@ interface Props {
 }
 
 export default function WalletModal({ open, onClose }: Props) {
-  const { wallets, select, connecting, connected } = useWallet();
+  const { wallet, wallets, select, connect, connecting, connected } =
+    useWallet();
   const [hovered, setHovered] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const pendingWalletName = useRef<string | null>(null);
 
   useEffect(() => {
     if (connected && open) onClose();
   }, [connected, open, onClose]);
+
+  // select() only switches which adapter is "current" in context — it does NOT
+  // connect. Wait for `wallet` in context to actually become the one the user
+  // clicked, then call the context's own connect(). Calling connect() directly
+  // on the raw adapter (old code) raced against the provider's internal
+  // autoConnect effect and any errors were silently swallowed.
+  useEffect(() => {
+    if (
+      pendingWalletName.current &&
+      wallet?.adapter.name === pendingWalletName.current &&
+      !connecting &&
+      !connected
+    ) {
+      const name = pendingWalletName.current;
+      pendingWalletName.current = null;
+      connect().catch((err) => {
+        setConnectError(
+          err?.message || `Failed to connect to ${name}. Please try again.`,
+        );
+      });
+    }
+  }, [wallet, connecting, connected, connect, pendingWalletName]);
+
+  const handleWalletClick = (adapterWallet: (typeof wallets)[number]) => {
+    setConnectError(null);
+    pendingWalletName.current = adapterWallet.adapter.name;
+    select(adapterWallet.adapter.name);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -203,6 +234,23 @@ export default function WalletModal({ open, onClose }: Props) {
             </div>
           )}
 
+          {!connecting && connectError && (
+            <div
+              style={{
+                background: "#1a0800",
+                border: "1px solid #e8490f44",
+                borderRadius: 5,
+                padding: "8px 12px",
+                marginBottom: 12,
+                color: "#e8490f",
+                fontSize: 10,
+                ...MONO,
+              }}
+            >
+              {connectError}
+            </div>
+          )}
+
           {!connecting && (
             <>
               {/* Installed wallets */}
@@ -254,10 +302,7 @@ export default function WalletModal({ open, onClose }: Props) {
                       return (
                         <button
                           key={wallet.adapter.name}
-                          onClick={() => {
-                            select(wallet.adapter.name);
-                            wallet.adapter.connect().catch(() => {});
-                          }}
+                          onClick={() => handleWalletClick(wallet)}
                           onMouseEnter={() => setHovered(wallet.adapter.name)}
                           onMouseLeave={() => setHovered(null)}
                           style={{

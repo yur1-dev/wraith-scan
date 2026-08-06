@@ -50,6 +50,7 @@ interface HistoryEntry {
 }
 interface Props {
   onSelectMeme?: (meme: MemeTrend) => void;
+  onCountChange?: (count: number) => void;
 }
 
 const MONO = {
@@ -616,7 +617,7 @@ function XBadge({
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
-export default function WinsPanel({ onSelectMeme }: Props) {
+export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
   const [history, setHistory] = useState<Record<string, HistoryEntry>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [nextIn, setNextIn] = useState(AUTO_REFRESH_MS / 1000);
@@ -866,40 +867,52 @@ export default function WinsPanel({ onSelectMeme }: Props) {
       setRefreshing(true);
       setUpdating(new Set(entries.map((e) => e.keyword)));
       const updates: Record<string, HistoryEntry> = {};
-      await Promise.all(
-        entries.map(async (entry) => {
-          try {
-            const mcap = await fetchCurrentMcap(entry.contractAddress!);
-            if (!mcap || mcap <= 0) return;
-            const nowMs = Date.now();
-            const e: HistoryEntry = {
-              ...entry,
-              snapshots: safeSnapshots(entry.snapshots),
-            };
-            e.currentMcap = mcap;
-            e.lastChecked = nowMs;
-            if (mcap > e.peakMcap) {
-              e.peakMcap = mcap;
-              e.peakMcapTs = nowMs;
+      // Batch instead of firing all N requests at once — with 80+ tracked
+      // tokens this was flooding DexScreener/Jupiter concurrently and
+      // starving out the chart fetch and scanner requests entirely.
+      const BATCH_SIZE = 16; // DexScreener held up fine at 8x — trying more headroom
+      for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+        const batch = entries.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (entry) => {
+            try {
+              const mcap = await fetchCurrentMcap(entry.contractAddress!, true); // bulk=true skips Jupiter overlay for background refresh
+              if (!mcap || mcap <= 0) return;
+              const nowMs = Date.now();
+              const e: HistoryEntry = {
+                ...entry,
+                snapshots: safeSnapshots(entry.snapshots),
+              };
+              e.currentMcap = mcap;
+              e.lastChecked = nowMs;
+              const lastSnap = e.snapshots[e.snapshots.length - 1];
+              const isPlausiblePeak =
+                !lastSnap ||
+                mcap <= lastSnap.mcap * 3 ||
+                nowMs - lastSnap.ts > 300_000;
+              if (mcap > e.peakMcap && isPlausiblePeak) {
+                e.peakMcap = mcap;
+                e.peakMcapTs = nowMs;
+              }
+              const snaps = e.snapshots;
+              const last = snaps[snaps.length - 1];
+              if (!last) {
+                if (e.initialMcap === 0) e.initialMcap = mcap;
+                e.snapshots = [{ ts: nowMs, mcap }];
+              } else if (
+                nowMs - last.ts > 1_800_000 ||
+                Math.abs(mcap - last.mcap) / (last.mcap || 1) > 0.05
+              ) {
+                e.snapshots = [...snaps, { ts: nowMs, mcap }];
+                if (e.snapshots.length > 48) e.snapshots.shift();
+              }
+              updates[entry.keyword] = e;
+            } catch {
+              /* skip */
             }
-            const snaps = e.snapshots;
-            const last = snaps[snaps.length - 1];
-            if (!last) {
-              if (e.initialMcap === 0) e.initialMcap = mcap;
-              e.snapshots = [{ ts: nowMs, mcap }];
-            } else if (
-              nowMs - last.ts > 1_800_000 ||
-              Math.abs(mcap - last.mcap) / (last.mcap || 1) > 0.05
-            ) {
-              e.snapshots = [...snaps, { ts: nowMs, mcap }];
-              if (e.snapshots.length > 48) e.snapshots.shift();
-            }
-            updates[entry.keyword] = e;
-          } catch {
-            /* skip */
-          }
-        }),
-      );
+          }),
+        );
+      }
 
       setHistory((prev) => {
         const merged = { ...prev, ...updates };
@@ -994,6 +1007,10 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     [history],
   );
 
+  useEffect(() => {
+    onCountChange?.(list.length);
+  }, [list.length, onCountChange]);
+
   const { bestX, bestTok } = useMemo(() => {
     const bx = list.reduce((acc, e) => {
       const x = isPeakEarned(e)
@@ -1033,8 +1050,8 @@ export default function WinsPanel({ onSelectMeme }: Props) {
     <div
       style={{
         background: C.bg,
-        border: `1px solid ${C.border}`,
-        borderRadius: 8,
+        border: "none",
+        borderRadius: 0,
         overflow: "hidden",
         height: "100%",
         display: "flex",
@@ -1052,7 +1069,9 @@ export default function WinsPanel({ onSelectMeme }: Props) {
         .wc:hover .wdel{opacity:1}
         .tpb{animation:aglow 2s ease-in-out infinite}
         .tgsending{animation:tgsend .8s ease-in-out infinite}
-        .hotcard{animation:hotpulse 3s ease-in-out infinite}
+       .hotcard{animation:hotpulse 3s ease-in-out infinite}
+        .wc-strip{scrollbar-width:none}
+        .wc-strip::-webkit-scrollbar{display:none}
       `}</style>
 
       {/* HEADER */}

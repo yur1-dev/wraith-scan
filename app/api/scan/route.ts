@@ -1300,29 +1300,47 @@ async function scanTwitter(
     let totalTweets = 0;
     let successCount = 0;
 
-    for (const query of TWITTER_QUERIES.slice(0, 6)) {
-      try {
+    // Fired in parallel instead of one-after-another — each request already
+    // has its own 10s timeout via safeFetch, so the worst-case wait for all
+    // 6 queries drops from ~60s (sequential) to ~10s (parallel).
+    const twitterSettled = await Promise.allSettled(
+      TWITTER_QUERIES.slice(0, 6).map(async (query) => {
         const url = `https://api.twitter.com/2/tweets/search/recent?query=${encodeURIComponent(query)}&max_results=100&tweet.fields=public_metrics,created_at&expansions=author_id`;
-
-        // ← FIXED: now goes through safeFetch with host allowlist
         const r = await safeFetch(url, twitterHeaders, 10000);
         if (!r) {
-          logs.push(`[Twitter] ✗ "${query.slice(0, 30)}" — blocked or failed`);
-          continue;
+          return { query, ok: false as const, status: 0 };
         }
         if (!r.ok) {
-          logs.push(`[Twitter] ✗ "${query.slice(0, 30)}" HTTP ${r.status}`);
-          if (r.status === 401 || r.status === 403) {
-            logs.push(
-              `[Twitter] Bearer token rejected (${r.status}) — switching to Nitter fallback`,
-            );
-            break;
-          }
-          continue;
+          return { query, ok: false as const, status: r.status };
         }
-        twitterApiWorked = true;
         const data = await r.json();
-        const tweets = data?.data || [];
+        return { query, ok: true as const, tweets: data?.data || [] };
+      }),
+    );
+
+    for (const settled of twitterSettled) {
+      if (settled.status !== "fulfilled") {
+        logs.push(
+          `[Twitter] ✗ query failed: ${String(settled.reason).slice(0, 60)}`,
+        );
+        continue;
+      }
+      const outcome = settled.value;
+      if (!outcome.ok) {
+        if ("status" in outcome && outcome.status === 0) {
+          logs.push(
+            `[Twitter] ✗ "${outcome.query.slice(0, 30)}" — blocked or failed`,
+          );
+        } else {
+          logs.push(
+            `[Twitter] ✗ "${outcome.query.slice(0, 30)}" HTTP ${outcome.status}`,
+          );
+        }
+        continue;
+      }
+      try {
+        twitterApiWorked = true;
+        const tweets = outcome.tweets;
         totalTweets += tweets.length;
         successCount++;
         for (const tweet of tweets) {
@@ -1411,70 +1429,74 @@ async function scanTwitter(
   if (!twitterApiWorked) {
     logs.push("[Nitter] Attempting RSS fallback...");
     let nitterWorked = false;
-    for (const instance of NITTER_INSTANCES) {
-      let instanceSuccess = 0;
-      for (const query of NITTER_SEARCHES) {
-        try {
-          const url = `${instance}/search/rss?q=${encodeURIComponent(query)}&f=tweets`;
-          const r = await safeFetch(
-            url,
-            { Accept: "application/rss+xml, text/xml" },
-            8000,
-          );
-          if (!r) continue;
-          const xml = await r.text();
-          if (!xml.includes("<item>")) continue;
-          nitterWorked = true;
-          instanceSuccess++;
-          const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
-          for (const item of items.slice(0, 30)) {
-            const titleMatch = item.match(/<title>([\s\S]*?)<\/title>/);
-            const descMatch = item.match(
-              /<description>([\s\S]*?)<\/description>/,
+    // All instance×query combos (12 total) fired in parallel instead of
+    // nested sequential loops. Each request already carries its own 8s
+    // timeout via safeFetch, so the worst-case wait drops from ~96s
+    // (3 instances x 4 queries, sequential) to ~8s (all at once).
+    const nitterCombos = NITTER_INSTANCES.flatMap((instance) =>
+      NITTER_SEARCHES.map((query) => ({ instance, query })),
+    );
+    const nitterSettled = await Promise.allSettled(
+      nitterCombos.map(async ({ instance, query }) => {
+        const url = `${instance}/search/rss?q=${encodeURIComponent(query)}&f=tweets`;
+        const r = await safeFetch(
+          url,
+          { Accept: "application/rss+xml, text/xml" },
+          8000,
+        );
+        if (!r) return { instance, ok: false as const };
+        const xml = await r.text();
+        if (!xml.includes("<item>")) return { instance, ok: false as const };
+        return { instance, ok: true as const, xml };
+      }),
+    );
+
+    const instanceSuccessCount = new Map<string, number>();
+    for (const settled of nitterSettled) {
+      if (settled.status !== "fulfilled" || !settled.value.ok) continue;
+      const { instance, xml } = settled.value;
+      nitterWorked = true;
+      instanceSuccessCount.set(
+        instance,
+        (instanceSuccessCount.get(instance) || 0) + 1,
+      );
+      const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+      for (const item of items.slice(0, 30)) {
+        const titleMatch = item.match(/<title>([\s\S]*?)<\/title>/);
+        const descMatch = item.match(/<description>([\s\S]*?)<\/description>/);
+        const pubDateMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+        const text = ((titleMatch?.[1] || "") + " " + (descMatch?.[1] || ""))
+          .replace(/<!\[CDATA\[|\]\]>/g, "")
+          .replace(/<[^>]+>/g, "")
+          .toLowerCase()
+          .trim();
+        if (!text || text.length < 10) continue;
+        let recencyMult = 1.0;
+        if (pubDateMatch?.[1]) {
+          const ageH =
+            (Date.now() - new Date(pubDateMatch[1]).getTime()) / 3600000;
+          recencyMult = ageH < 1 ? 4.0 : ageH < 3 ? 3.0 : ageH < 6 ? 2.0 : 1.5;
+        }
+        rawTexts.push(text.slice(0, 200));
+        for (const m of text.matchAll(/\$([a-z][a-z0-9]{1,11})\b/g)) {
+          const ticker = cleanTicker(m[1]);
+          if (isValidKeyword(ticker)) {
+            const ex = wordMap.get(ticker);
+            wordMap.set(ticker, {
+              score: (ex?.score || 0) + 3000 * recencyMult,
+              context: ex?.context || text.slice(0, 100),
+            });
+            registerViralWord(
+              ticker,
+              `Nitter: "${text.slice(0, 80)}"`,
+              "twitter",
             );
-            const pubDateMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
-            const text = (
-              (titleMatch?.[1] || "") +
-              " " +
-              (descMatch?.[1] || "")
-            )
-              .replace(/<!\[CDATA\[|\]\]>/g, "")
-              .replace(/<[^>]+>/g, "")
-              .toLowerCase()
-              .trim();
-            if (!text || text.length < 10) continue;
-            let recencyMult = 1.0;
-            if (pubDateMatch?.[1]) {
-              const ageH =
-                (Date.now() - new Date(pubDateMatch[1]).getTime()) / 3600000;
-              recencyMult =
-                ageH < 1 ? 4.0 : ageH < 3 ? 3.0 : ageH < 6 ? 2.0 : 1.5;
-            }
-            rawTexts.push(text.slice(0, 200));
-            for (const m of text.matchAll(/\$([a-z][a-z0-9]{1,11})\b/g)) {
-              const ticker = cleanTicker(m[1]);
-              if (isValidKeyword(ticker)) {
-                const ex = wordMap.get(ticker);
-                wordMap.set(ticker, {
-                  score: (ex?.score || 0) + 3000 * recencyMult,
-                  context: ex?.context || text.slice(0, 100),
-                });
-                registerViralWord(
-                  ticker,
-                  `Nitter: "${text.slice(0, 80)}"`,
-                  "twitter",
-                );
-              }
-            }
           }
-        } catch {
-          continue;
         }
       }
-      if (instanceSuccess > 0) {
-        logs.push(`[Nitter] ✓ ${instance} — ${instanceSuccess} queries worked`);
-        break;
-      }
+    }
+    for (const [instance, count] of instanceSuccessCount) {
+      logs.push(`[Nitter] ✓ ${instance} — ${count} queries worked`);
     }
     if (!nitterWorked) {
       logs.push("[Nitter] All instances failed — no Twitter data");

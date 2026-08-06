@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import axios from "axios";
 import { MemeTrend } from "@/app/app/page";
+import { getTokenPrice } from "@/lib/getTokenPrice";
 
 interface ScanResult extends MemeTrend {
   platforms?: string[];
@@ -49,6 +50,7 @@ interface HistoryEntry {
   celebMention?: string;
   aiContext?: string;
   platforms: string[];
+  preMigration?: boolean;
   initialMcap: number;
   peakMcap: number;
   currentMcap: number;
@@ -192,28 +194,17 @@ export async function fetchTokenMeta(ca: string): Promise<TokenMeta | null> {
   }
 }
 
-export async function fetchCurrentMcap(ca: string): Promise<number | null> {
-  try {
-    const res = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${ca}`,
-      { signal: AbortSignal.timeout(6000) },
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    const pairs = (data?.pairs || [])
-      .filter((p: { chainId: string }) => p.chainId === "solana")
-      .sort(
-        (
-          a: { liquidity?: { usd?: number } },
-          b: { liquidity?: { usd?: number } },
-        ) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0),
-      );
-    if (!pairs.length) return null;
-    const best = pairs[0];
-    return best.marketCap || best.fdv || null;
-  } catch {
-    return null;
-  }
+// Delegates to the shared getTokenPrice() module (lib/getTokenPrice.ts) so
+// WinsPanel reads the exact same mcap TokenPanel and PaperTrader read for the
+// same token — previously this was DexScreener-only with no Jupiter overlay
+// and no pump.fun fallback, which is why WinsPanel's "NOW" could disagree
+// with TokenPanel's market cap for the same token at the same moment.
+export async function fetchCurrentMcap(
+  ca: string,
+  bulk = false,
+): Promise<number | null> {
+  const d = await getTokenPrice(ca, { skipJupiter: bulk });
+  return d.mcap && d.mcap > 0 ? d.mcap : null;
 }
 
 function isGarbageKeyword(kw: string): boolean {
@@ -291,6 +282,11 @@ export function recordTokenSighting(result: ScanResult) {
       twoXTier: tier,
       twoXScore: result.twoXScore,
       crossPlatforms,
+      preMigration:
+        (result.platforms || []).includes("pumpfun") &&
+        !(result.platforms || []).some((p) =>
+          ["dexscreener", "birdeye"].includes(p),
+        ), // spotted only on bonding curve, before any real DEX pair existed
     };
   } else {
     if (mcap > 0) {
@@ -1178,8 +1174,8 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     <div
       style={{
         background: "#060606",
-        border: "1px solid #1a1a1a",
-        borderRadius: 8,
+        borderRight: "1px solid #141414",
+        borderRadius: 0,
         overflow: "hidden",
         height: "100%",
         display: "flex",
@@ -1860,7 +1856,9 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                     {sig.label}
                   </span>
                   <span style={{ color: "#555", fontSize: 9, ...MONO }}>
-                    {t.score.toLocaleString()}
+                    {t.mcap
+                      ? `$${t.mcap >= 1000 ? (t.mcap / 1000).toFixed(0) + "K" : t.mcap}`
+                      : "—"}
                   </span>
                   <span
                     style={{

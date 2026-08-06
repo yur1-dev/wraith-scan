@@ -858,7 +858,11 @@ export default function Header({ onSelectMeme }: HeaderProps) {
 
   useEffect(() => {
     if (!walletMenuOpen) return;
-    const handler = () => setWalletMenuOpen(false);
+    const handler = (e: MouseEvent) => {
+      const menu = document.getElementById("wraith-wallet-menu");
+      if (menu && menu.contains(e.target as Node)) return;
+      setWalletMenuOpen(false);
+    };
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
   }, [walletMenuOpen]);
@@ -1306,6 +1310,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                 </button>
                 {walletMenuOpen && (
                   <div
+                    id="wraith-wallet-menu"
                     style={{
                       position: "absolute",
                       top: "calc(100% + 8px)",

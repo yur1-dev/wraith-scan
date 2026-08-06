@@ -7,7 +7,6 @@ import { useWraithTier } from "@/hooks/useWraithTier";
 const SCAN_CLUSTER_GAP_MS = 10 * 60 * 1000;
 const LOOKBACK_MS = 40 * 60 * 1000;
 const HISTORY_KEY = "wraith_token_history_v2";
-const PAGE_SIZE = 6;
 const MIN_MCAP = 2_000;
 const MAX_MCAP = 100_000;
 
@@ -173,7 +172,6 @@ export default function LiveSignalsBar({
 
   const [sigs, setSigs] = useState<Sig[]>([]);
   const [batchTs, setBatchTs] = useState(0);
-  const [page, setPage] = useState(0);
   const [now, setNow] = useState(Date.now());
   const prevTs = useRef(0);
 
@@ -186,7 +184,6 @@ export default function LiveSignalsBar({
         prevTs.current = res.batchTs;
         setBatchTs(res.batchTs);
         setSigs(res.sigs);
-        if (isNew) setPage(0);
       }
     }
     read();
@@ -200,8 +197,6 @@ export default function LiveSignalsBar({
     return () => clearInterval(t);
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(sigs.length / PAGE_SIZE));
-  const visible = sigs.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
   const batchAgeMin = batchTs ? Math.floor((now - batchTs) / 60_000) : null;
 
   const click = (s: Sig) =>
@@ -282,18 +277,24 @@ export default function LiveSignalsBar({
       style={{
         background: "#030303",
         borderBottom: "1px solid #141414",
-        padding: "5px 0 7px",
+        padding: "6px 14px",
         flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        height: 40,
+        overflow: "hidden",
       }}
     >
       <style>{`
         @keyframes sigpulse { 0%,100%{opacity:1} 50%{opacity:.25} }
-        .sig-card { cursor:pointer; transition:background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
-        .sig-card:hover { background:#0d0d0d !important; transform:translateY(-2px); box-shadow: 0 8px 20px -8px rgba(0,0,0,0.6); border-color: #242424 !important; }
-        .sig-nav { background:#0d0d0d; border:1px solid #1c1c1c; border-radius:6px; cursor:pointer; padding:4px 9px; transition:color .15s, border-color .15s, background .15s; }
-        .sig-nav:disabled { opacity:.25; cursor:default; }
-        .sig-nav:not(:disabled):hover { color:#e8490f !important; border-color:#e8490f44 !important; background:#0f0a06 !important; }
-        .sig-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
+        .sig-card { cursor:pointer; transition:background .15s ease, border-color .15s ease; }
+        .sig-card:hover { background:#0f0f0f !important; border-color: #262626 !important; }
+        .sig-nav { background:transparent; border:none; cursor:pointer; padding:2px 4px; transition:color .15s; }
+        .sig-nav:disabled { opacity:.2; cursor:default; }
+        .sig-nav:not(:disabled):hover { color:#e8490f !important; }
+        .sig-strip { display:flex; align-items:center; gap:6px; overflow-x:auto; scrollbar-width:none; flex:1; min-width:0; }
+        .sig-strip::-webkit-scrollbar { display:none; }
       `}</style>
 
       {/* Header */}
@@ -302,7 +303,7 @@ export default function LiveSignalsBar({
           display: "flex",
           alignItems: "center",
           gap: 8,
-          marginBottom: sigs.length ? 6 : 0,
+          flexShrink: 0,
         }}
       >
         <span
@@ -348,46 +349,6 @@ export default function LiveSignalsBar({
             · {batchAgeMin < 1 ? "just scanned" : `${batchAgeMin}m ago`}
           </span>
         )}
-        <div style={{ flex: 1 }} />
-        {totalPages > 1 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <button
-              className="sig-nav"
-              disabled={page === 0}
-              onClick={() => setPage((p) => p - 1)}
-              style={{ color: "#333", fontSize: 11, ...MONO }}
-            >
-              ◀
-            </button>
-            <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-              {Array.from({ length: totalPages }).map((_, i) => (
-                <div
-                  key={i}
-                  onClick={() => setPage(i)}
-                  style={{
-                    width: i === page ? 14 : 5,
-                    height: 3,
-                    borderRadius: 3,
-                    background: i === page ? "#e8490f" : "#1e1e1e",
-                    cursor: "pointer",
-                    transition: "width .2s, background .2s",
-                  }}
-                />
-              ))}
-            </div>
-            <button
-              className="sig-nav"
-              disabled={page === totalPages - 1}
-              onClick={() => setPage((p) => p + 1)}
-              style={{ color: "#333", fontSize: 11, ...MONO }}
-            >
-              ▶
-            </button>
-            <span style={{ color: "#222", fontSize: 8, ...MONO }}>
-              {page + 1}/{totalPages}
-            </span>
-          </div>
-        )}
       </div>
 
       {sigs.length === 0 && (
@@ -397,6 +358,7 @@ export default function LiveSignalsBar({
             fontSize: 9,
             letterSpacing: "0.1em",
             ...MONO,
+            whiteSpace: "nowrap",
           }}
         >
           HIGH / ULTRA signals appear here after each scan
@@ -404,8 +366,8 @@ export default function LiveSignalsBar({
       )}
 
       {sigs.length > 0 && (
-        <div className="sig-grid">
-          {visible.map((sig) => {
+        <div className="sig-strip">
+          {sigs.map((sig) => {
             const sym = (sig.tokenSymbol || sig.keyword)
               .toUpperCase()
               .slice(0, 9);
@@ -440,179 +402,69 @@ export default function LiveSignalsBar({
                 key={sig.keyword}
                 className="sig-card"
                 onClick={() => click(sig)}
+                title={`${tierLabel} · ${keyPlats.map((p) => PLAT_LABEL[p] || p).join(", ")}`}
                 style={{
-                  position: "relative",
-                  minWidth: 0,
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
                   background: "#0a0a0a",
                   border: "1px solid #161616",
-                  borderRadius: 10,
-                  padding: "10px 11px 9px",
-                  display: "flex",
-                  flexDirection: "column" as const,
-                  gap: 7,
+                  borderRadius: 6,
+                  padding: "4px 9px",
+                  whiteSpace: "nowrap" as const,
                 }}
               >
-                {/* Tier chip — a status tab hanging off the top edge,
-                    rather than crammed inline next to the ticker */}
-                <div
+                <span
                   style={{
-                    position: "absolute",
-                    top: -1,
-                    left: 10,
-                    fontSize: 7,
-                    fontWeight: 900,
-                    ...MONO,
-                    color: "#0a0a0a",
+                    width: 5,
+                    height: 5,
+                    borderRadius: "50%",
                     background: tc,
-                    padding: "2px 7px",
-                    borderRadius: "0 0 4px 4px",
-                    letterSpacing: "0.06em",
+                    flexShrink: 0,
                   }}
-                >
-                  {tierLabel}
-                </div>
-
-                {/* Symbol + age */}
-                <div
+                />
+                <span
                   style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    justifyContent: "space-between",
-                    gap: 6,
-                    marginTop: 6,
+                    color: "#e8e8e8",
+                    fontSize: 11,
+                    fontWeight: 800,
+                    ...MONO,
+                    letterSpacing: "-0.01em",
                   }}
                 >
-                  <span
-                    style={{
-                      color: "#f0f0f0",
-                      fontSize: 15,
-                      fontWeight: 800,
-                      ...MONO,
-                      letterSpacing: "-0.01em",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap" as const,
-                      lineHeight: 1.1,
-                    }}
-                  >
-                    ${sym}
-                  </span>
-                  <span
-                    style={{
-                      color: "#3a3a3a",
-                      fontSize: 8,
-                      ...MONO,
-                      flexShrink: 0,
-                      marginTop: 2,
-                    }}
-                  >
-                    {ageMin < 1 ? "now" : `${ageMin}m`}
-                  </span>
-                </div>
-
-                {/* Mcap */}
+                  ${sym}
+                </span>
                 <span
                   style={{
                     color: "#e8490f",
-                    fontSize: 12,
-                    fontWeight: 700,
+                    fontSize: 10,
+                    fontWeight: 600,
                     ...MONO,
                   }}
                 >
                   {fmtMcap(sig.initialMcap)}
                 </span>
-
-                {/* AI score — a real gauge bar, not a dot grid */}
                 {canSeeAiScore && typeof sig.aiScore === "number" && (
-                  <div
+                  <span
                     style={{
-                      display: "flex",
-                      flexDirection: "column" as const,
-                      gap: 3,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      ...MONO,
+                      color:
+                        sig.aiTier === "HOT"
+                          ? HOT_COLOR
+                          : sig.aiTier === "WATCH"
+                            ? "#ffaa00"
+                            : "#00c47a",
                     }}
                   >
-                    <div
-                      style={{
-                        height: 4,
-                        borderRadius: 3,
-                        background: "#141414",
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          height: "100%",
-                          width: `${Math.max(0, Math.min(100, sig.aiScore))}%`,
-                          background:
-                            sig.aiTier === "HOT"
-                              ? HOT_COLOR
-                              : sig.aiTier === "WATCH"
-                                ? "#ffaa00"
-                                : "#00c47a",
-                          borderRadius: 3,
-                          transition: "width .3s ease",
-                        }}
-                      />
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 8,
-                        fontWeight: 700,
-                        ...MONO,
-                        alignSelf: "flex-end",
-                        color:
-                          sig.aiTier === "HOT"
-                            ? HOT_COLOR
-                            : sig.aiTier === "WATCH"
-                              ? "#ffaa00"
-                              : "#00c47a",
-                      }}
-                    >
-                      {sig.aiScore}/100
-                    </span>
-                  </div>
+                    {sig.aiScore}
+                  </span>
                 )}
-
-                {/* Platforms */}
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 3,
-                    flexWrap: "wrap" as const,
-                    marginTop: "auto",
-                    paddingTop: 2,
-                  }}
-                >
-                  {keyPlats.map((p) => (
-                    <span
-                      key={p}
-                      style={{
-                        fontSize: 7,
-                        ...MONO,
-                        color: PLAT_COLOR[p] || "#444",
-                        background: `${PLAT_COLOR[p] || "#444"}12`,
-                        border: `1px solid ${PLAT_COLOR[p] || "#444"}26`,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        letterSpacing: "0.03em",
-                      }}
-                    >
-                      {PLAT_LABEL[p] || p.slice(0, 3).toUpperCase()}
-                    </span>
-                  ))}
-                  {sig.platforms.length > 4 && (
-                    <span
-                      style={{
-                        fontSize: 7,
-                        color: "#333",
-                        ...MONO,
-                        alignSelf: "center",
-                      }}
-                    >
-                      +{sig.platforms.length - 4}
-                    </span>
-                  )}
-                </div>
+                <span style={{ color: "#333", fontSize: 9, ...MONO }}>
+                  {ageMin < 1 ? "now" : `${ageMin}m`}
+                </span>
               </div>
             );
           })}

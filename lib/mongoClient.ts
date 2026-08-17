@@ -92,6 +92,13 @@ export async function ensureIndexes(): Promise<void> {
       .collection("telegram_links")
       .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+    // ── wallet_reputation ─────────────────────────────────────────────────────
+    // _id is already the wallet address (unique by definition), so the only
+    // extra index needed is for querying "who's been reliably winning
+    // lately" — sorted by how recently a wallet was last seen as a top
+    // holder, for any future leaderboard/admin view.
+    await db.collection("wallet_reputation").createIndex({ lastSeenAt: -1 });
+
     console.log("[mongoClient] Indexes ensured");
   } catch (err) {
     // Non-fatal — app still works, just potentially slower queries

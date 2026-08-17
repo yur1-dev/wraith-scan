@@ -12,6 +12,7 @@ import { MemeTrend } from "@/app/app/page";
 
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
+  fontVariantNumeric: "tabular-nums" as const,
 };
 
 function trimAddress(addr: string) {
@@ -333,7 +334,9 @@ function CoinSearch({
         const addr = pair.baseToken?.address;
         if (!addr) continue;
         const liquidity = pair.liquidity?.usd ?? 0;
-        const mcap = pair.marketCap ?? pair.fdv ?? 0;
+        // FDV is not circulating market cap. Leave MCAP blank until the
+        // shared live-price source confirms a real marketCap value.
+        const mcap = Number(pair.marketCap) > 0 ? Number(pair.marketCap) : 0;
         const priceUsd = parseFloat(pair.priceUsd ?? "0");
         const existing = seen.get(addr);
         if (!existing || liquidity > existing.liquidity) {
@@ -415,7 +418,9 @@ function CoinSearch({
               symbol: pair.baseToken?.symbol ?? "???",
               icon: pair.info?.imageUrl ?? undefined,
               priceUsd: parseFloat(pair.priceUsd ?? "0"),
-              marketCap: pair.marketCap ?? pair.fdv ?? 0,
+              // Do not seed the panel with FDV when circulating MCAP is absent.
+              marketCap:
+                Number(pair.marketCap) > 0 ? Number(pair.marketCap) : 0,
               liquidity: pair.liquidity?.usd ?? 0,
               volume24h: pair.volume?.h24 ?? 0,
               priceChange24h: pair.priceChange?.h24 ?? 0,
@@ -997,7 +1002,9 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                 style={{
                   width: "100%",
                   background: tgLinked ? "#001a0d" : "transparent",
-                  border: "none",
+                  borderTop: "none",
+                  borderLeft: "none",
+                  borderRight: "none",
                   borderBottom: "1px solid #0d0d0d",
                   color: tgLinked
                     ? "#00c47a"

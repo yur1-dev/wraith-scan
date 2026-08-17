@@ -8,12 +8,17 @@ import { ITokenHistory, TOKEN_HISTORY_COLLECTION } from "@/models/TokenHistory";
 // ─── POST /api/ai-score ───────────────────────────────────────────────────────
 // Scores a new token candidate against your historical win patterns.
 //
-// Flow:
-//   1. Fetch your last 50 wins (peakMcap >= 2x initialMcap, earned) from DB
-//   2. Build a prompt with win patterns + candidate data
-//   3. Call Claude claude-sonnet-4-20250514 — returns JSON { score, tier, reason }
-//   4. Persist aiScore + aiTier onto the token's history doc
-//   5. Return { score, tier, reason } to recordTokenSighting
+// $0 BUDGET VERSION — the old flow called the Claude API on every single
+// isNew:true sighting, which at meme-coin sighting velocity was a real,
+// ongoing dollar cost for something a weighted heuristic does in <1ms for
+// free. That LLM call has been removed entirely. This route is now pure
+// heuristic scoring — no external API calls of any kind, no network cost,
+// no per-token dollar cost, ever.
+//
+// It still learns from your win history (same win-definition logic as
+// before: peakMcap >= 2x initialMcap, with the grace-period/current-price
+// corroboration checks), it just uses that history to bias the heuristic
+// weights slightly instead of feeding it into a prompt.
 //
 // Score 0–100:
 //   >= 70 → HOT SIGNAL — louder Telegram alert, top of scanner
@@ -45,82 +50,6 @@ function calcMultiplier(init: number, peak: number): number {
   return !init ? 0 : peak / init;
 }
 
-function buildPrompt(wins: ITokenHistory[], candidate: ScoreRequest): string {
-  const winSummaries = wins.slice(0, 30).map((w) => {
-    const mult = calcMultiplier(w.initialMcap, w.peakMcap);
-    return {
-      mcap: w.initialMcap,
-      tier: "HIGH",
-      platforms: w.platforms,
-      hasCeleb: !!w.celebMention,
-      multiplier: parseFloat(mult.toFixed(2)),
-      timeToXh: w.peakMcapTs
-        ? parseFloat(((w.peakMcapTs - w.seenAt) / 3_600_000).toFixed(1))
-        : null,
-    };
-  });
-
-  const avgMcap =
-    wins.length > 0
-      ? Math.round(wins.reduce((s, w) => s + w.initialMcap, 0) / wins.length)
-      : 0;
-
-  const celebWins = wins.filter((w) => !!w.celebMention).length;
-  const celebHitRate =
-    wins.length > 0 ? Math.round((celebWins / wins.length) * 100) : 0;
-
-  const pumpfunWins = wins.filter((w) =>
-    w.platforms.includes("pumpfun"),
-  ).length;
-  const dexWins = wins.filter((w) =>
-    w.platforms.includes("dexscreener"),
-  ).length;
-
-  return `You are a meme coin signal scorer for a personal trading scanner.
-
-Your job: score a NEW TOKEN CANDIDATE from 0 to 100 based on how closely it matches historical win patterns.
-
-=== HISTORICAL WIN PATTERNS (last ${wins.length} wins) ===
-Average spotted mcap: $${avgMcap.toLocaleString()}
-Celeb mention win rate: ${celebHitRate}% of wins had celeb signal
-Pumpfun presence in wins: ${pumpfunWins}/${wins.length}
-DexScreener presence in wins: ${dexWins}/${wins.length}
-
-Recent wins detail:
-${JSON.stringify(winSummaries, null, 2)}
-
-=== CANDIDATE TOKEN ===
-Keyword: ${candidate.keyword}
-MCap at spot: $${candidate.mcap.toLocaleString()}
-Scanner tier: ${candidate.tier}
-Platforms detected: ${candidate.platforms.join(", ")}
-Celeb mention: ${candidate.celebMention || "none"}
-AI context: ${candidate.aiContext || "none"}
-Cross-platform count: ${candidate.crossPlatforms ?? 1}
-Price change 24h: ${candidate.priceChange24h ?? 0}%
-
-=== SCORING RULES ===
-- MCap sweet spot for this scanner is $3K–$50K (most wins came from here)
-- Celeb + onchain (pumpfun/dex) together = highest hit rate, score it higher
-- ULTRA tier > HIGH tier > MEDIUM tier
-- Cross-platform >= 3 = strong signal
-- Price already up significantly (>200%) = might be late, score lower
-- Healthy negative: price down slightly (<-30%) is ok, down more = risk
-- If mcap > $200K, score lower (less room to 2x)
-
-Respond ONLY with a JSON object, no markdown, no explanation outside the JSON:
-{
-  "score": <number 0-100>,
-  "tier": <"HOT" | "WATCH" | "SKIP">,
-  "reason": <one sentence max 100 chars explaining score>
-}
-
-Rules:
-- score >= 70 → tier must be "HOT"
-- score 40-69 → tier must be "WATCH"  
-- score < 40 → tier must be "SKIP"`;
-}
-
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id)
@@ -135,19 +64,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── API key guard — fail fast if not configured ────────────────────────────
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicApiKey) {
-    console.error("[ai-score] ANTHROPIC_API_KEY is not set");
-    const score = heuristicScore(body);
-    const tier = score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
-    return NextResponse.json({
-      score,
-      tier,
-      reason: "Heuristic fallback (ANTHROPIC_API_KEY not configured)",
-    });
-  }
-
   const userId = session.user.id;
 
   try {
@@ -157,6 +73,9 @@ export async function POST(req: NextRequest) {
     );
 
     // ── 1. Fetch historical wins ──────────────────────────────────────────
+    // Kept purely so the heuristic can lean on real win-rate stats (celeb
+    // hit rate, mcap sweet spot) instead of guessed weights. Still zero
+    // external cost — this is your own Mongo data.
     const PEAK_GRACE_MS = 5 * 60 * 1000;
     const allHistory = await col
       .find({ userId, initialMcap: { $gt: 0 }, peakMcap: { $gt: 0 } })
@@ -173,89 +92,7 @@ export async function POST(req: NextRequest) {
       return false;
     });
 
-    // ── 2. If no wins yet, use heuristic scoring ──────────────────────────
-    if (wins.length < 3) {
-      const score = heuristicScore(body);
-      const tier = score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
-      const result: ScoreResponse = {
-        score,
-        tier,
-        reason: `Heuristic (${wins.length} wins in history — learning mode)`,
-      };
-      await persistScore(col, userId, body.keyword, result);
-      return NextResponse.json(result);
-    }
-
-    // ── 3. Call Claude API ────────────────────────────────────────────────
-    const prompt = buildPrompt(wins, body);
-
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicApiKey, // ← FIXED: explicit API key
-        "anthropic-version": "2023-06-01", // ← FIXED: required header
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 256,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!claudeRes.ok) {
-      console.error(
-        "[ai-score] Claude API error:",
-        claudeRes.status,
-        await claudeRes.text(),
-      );
-      const score = heuristicScore(body);
-      const tier = score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
-      const result: ScoreResponse = {
-        score,
-        tier,
-        reason: "Heuristic fallback (Claude API error)",
-      };
-      await persistScore(col, userId, body.keyword, result);
-      return NextResponse.json(result);
-    }
-
-    const claudeData = await claudeRes.json();
-    const rawText = claudeData.content
-      ?.map((b: { type: string; text?: string }) =>
-        b.type === "text" ? b.text : "",
-      )
-      .join("")
-      .trim();
-
-    // ── 4. Parse JSON response ────────────────────────────────────────────
-    let result: ScoreResponse;
-    try {
-      const clean = rawText.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean) as {
-        score: number;
-        tier: string;
-        reason: string;
-      };
-      const score = Math.max(0, Math.min(100, Math.round(parsed.score)));
-      const tier: "HOT" | "WATCH" | "SKIP" =
-        score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
-      result = {
-        score,
-        tier,
-        reason:
-          typeof parsed.reason === "string"
-            ? parsed.reason.slice(0, 100)
-            : "AI scored",
-      };
-    } catch {
-      console.error("[ai-score] parse error:", rawText);
-      const score = heuristicScore(body);
-      const tier = score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
-      result = { score, tier, reason: "Heuristic fallback (parse error)" };
-    }
-
-    // ── 5. Persist score onto the token doc ───────────────────────────────
+    const result = heuristicScore(body, wins);
     await persistScore(col, userId, body.keyword, result);
 
     return NextResponse.json(result);
@@ -288,30 +125,105 @@ async function persistScore(
   }
 }
 
-// ─── Heuristic fallback (no win history yet) ──────────────────────────────────
-function heuristicScore(c: ScoreRequest): number {
+// ─── Heuristic scorer (now the ONLY scorer) ───────────────────────────────────
+// Same rule weights as the old fallback, plus a reason-string builder so you
+// don't lose the "why" context that used to come from Claude's sentence.
+// Every branch that adds/subtracts points also records a short reason
+// fragment; the top contributing fragments get joined into the final reason.
+function heuristicScore(c: ScoreRequest, wins: ITokenHistory[]): ScoreResponse {
   let score = 40;
+  const reasons: { pts: number; text: string }[] = [];
 
-  if (c.tier === "ULTRA") score += 20;
-  else if (c.tier === "HIGH") score += 12;
-  else if (c.tier === "MEDIUM") score += 4;
+  if (c.tier === "ULTRA") {
+    score += 20;
+    reasons.push({ pts: 20, text: "ULTRA tier" });
+  } else if (c.tier === "HIGH") {
+    score += 12;
+    reasons.push({ pts: 12, text: "HIGH tier" });
+  } else if (c.tier === "MEDIUM") {
+    score += 4;
+    reasons.push({ pts: 4, text: "MEDIUM tier" });
+  }
 
-  if (c.celebMention) score += 15;
+  if (c.celebMention) {
+    score += 15;
+    reasons.push({ pts: 15, text: "celeb mention" });
+  }
 
-  if (c.mcap >= 3_000 && c.mcap <= 50_000) score += 15;
-  else if (c.mcap > 50_000 && c.mcap <= 150_000) score += 5;
-  else if (c.mcap > 200_000) score -= 10;
+  if (c.mcap >= 3_000 && c.mcap <= 50_000) {
+    score += 15;
+    reasons.push({ pts: 15, text: "sweet-spot mcap" });
+  } else if (c.mcap > 50_000 && c.mcap <= 150_000) {
+    score += 5;
+    reasons.push({ pts: 5, text: "decent mcap range" });
+  } else if (c.mcap > 200_000) {
+    score -= 10;
+    reasons.push({ pts: -10, text: "mcap too high" });
+  }
 
   const platCount = c.platforms.length;
-  if (platCount >= 3) score += 10;
-  else if (platCount === 2) score += 5;
+  if (platCount >= 3) {
+    score += 10;
+    reasons.push({ pts: 10, text: `${platCount} platforms` });
+  } else if (platCount === 2) {
+    score += 5;
+    reasons.push({ pts: 5, text: "2 platforms" });
+  }
 
-  if ((c.crossPlatforms ?? 0) >= 3) score += 8;
+  if ((c.crossPlatforms ?? 0) >= 3) {
+    score += 8;
+    reasons.push({ pts: 8, text: "cross-platform confirmed" });
+  }
 
   const p24 = c.priceChange24h ?? 0;
-  if (p24 > 50 && p24 < 300) score += 5;
-  if (p24 > 500) score -= 10;
-  if (p24 < -50) score -= 8;
+  if (p24 > 50 && p24 < 300) {
+    score += 5;
+    reasons.push({ pts: 5, text: "healthy momentum" });
+  }
+  if (p24 > 500) {
+    score -= 10;
+    reasons.push({ pts: -10, text: "likely already pumped" });
+  }
+  if (p24 < -50) {
+    score -= 8;
+    reasons.push({ pts: -8, text: "sharp drawdown" });
+  }
 
-  return Math.max(0, Math.min(100, score));
+  // ── Win-history bias — free, uses only your own Mongo data ─────────────
+  // If you have enough win history, nudge the score based on how closely
+  // this candidate's mcap/celeb profile matches what's actually worked.
+  if (wins.length >= 3) {
+    const celebWins = wins.filter((w) => !!w.celebMention).length;
+    const celebHitRate = celebWins / wins.length;
+    if (c.celebMention && celebHitRate > 0.5) {
+      score += 5;
+      reasons.push({ pts: 5, text: "matches your celeb win pattern" });
+    }
+
+    const avgWinMcap =
+      wins.reduce((s, w) => s + w.initialMcap, 0) / wins.length;
+    if (avgWinMcap > 0) {
+      const ratio = c.mcap / avgWinMcap;
+      if (ratio >= 0.3 && ratio <= 3) {
+        score += 5;
+        reasons.push({ pts: 5, text: "mcap near your avg win" });
+      }
+    }
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const tier: "HOT" | "WATCH" | "SKIP" =
+    score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "SKIP";
+
+  // Build reason from the top 2 contributing fragments by absolute weight.
+  const topReasons = reasons
+    .sort((a, b) => Math.abs(b.pts) - Math.abs(a.pts))
+    .slice(0, 2)
+    .map((r) => r.text);
+  const reason =
+    topReasons.length > 0
+      ? topReasons.join(" + ").slice(0, 100)
+      : "Baseline heuristic score";
+
+  return { score, tier, reason };
 }

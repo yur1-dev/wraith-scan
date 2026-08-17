@@ -12,6 +12,7 @@ const MAX_MCAP = 100_000;
 
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
+  fontVariantNumeric: "tabular-nums" as const,
 };
 
 const TIER_COLOR: Record<string, string> = {
@@ -208,7 +209,9 @@ export default function LiveSignalsBar({
       hasTicker: !!s.contractAddress,
       crossPlatforms: s.crossPlatforms || 1,
       isNewCoin: false,
-      mcap: s.initialMcap,
+      // Historical MCAP is intentionally not used as the current value.
+      // TokenPanel fetches a fresh validated quote immediately on selection.
+      mcap: undefined,
       platforms: s.platforms,
       contractAddress: s.contractAddress,
       celebMention: s.celebMention,

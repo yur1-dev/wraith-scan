@@ -74,6 +74,21 @@ const _candleCache = new Map<
   { candles: Candle[]; source: string; ts: number }
 >();
 
+// ─── LAST-GOOD CANDLE SET ───────────────────────────────────────────────────
+// Separate from _candleCache (which expires every 15s). This persists as
+// long as the process is alive and only gets overwritten by a result that's
+// at least as complete as what's already there. Prevents the chart from
+// visibly downgrading — e.g. going from a real 20-candle history to a
+// 2-candle sparse on-chain fallback — just because a single poll happened to
+// catch Birdeye/Gecko between updates, or the on-chain trade count is still
+// thin. The client always gets the best data we've ever produced for this
+// address+timeframe, not just whatever the most recent fetch happened to
+// return.
+const _lastGoodCandles = new Map<
+  string,
+  { candles: Candle[]; source: string }
+>();
+
 // ─── CIRCUIT BREAKER ────────────────────────────────────────────────────────
 const SOURCE_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
 const _sourceDownUntil: Record<string, number> = {
@@ -161,7 +176,15 @@ async function fromGeckoTerminal(
       return null;
     }
     const poolsData = await poolsRes.json();
-    const pool = poolsData?.data?.[0];
+    const pools = Array.isArray(poolsData?.data) ? poolsData.data : [];
+    // Gecko returns pools ordered by an opaque ranking, not guaranteed current
+    // liquidity. Select the deepest Solana pool so the OHLCV series matches the
+    // market that is actually contributing the token's price.
+    const pool = [...pools].sort(
+      (a, b) =>
+        Number(b?.attributes?.reserve_in_usd ?? 0) -
+        Number(a?.attributes?.reserve_in_usd ?? 0),
+    )[0];
     const poolAddress = pool?.attributes?.address;
     if (!poolAddress) return null;
 
@@ -296,6 +319,34 @@ async function getSolUsdUncached(
     );
   }
 
+  try {
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+      { signal: AbortSignal.timeout(5000), cache: "no-store" },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const price = parseFloat(data?.solana?.usd ?? "0");
+      if (price > 0) {
+        _solUsdCache = { price, ts: Date.now() };
+        return price;
+      }
+      console.warn(
+        "[token-chart] getSolUsd: Coingecko fallback returned no usable price",
+        JSON.stringify(data).slice(0, 200),
+      );
+    } else {
+      const body = await res.text().catch(() => "");
+      console.warn(
+        "[token-chart] getSolUsd: Coingecko fallback failed",
+        res.status,
+        body.slice(0, 200),
+      );
+    }
+  } catch (e) {
+    console.error("[token-chart] getSolUsd: Coingecko fallback threw", e);
+  }
+
   return _solUsdCache?.price ?? 0;
 }
 
@@ -327,45 +378,94 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ candles, source });
   }
 
-  // ── on-chain RPC (Helius) + Birdeye + GeckoTerminal, ALL in parallel ────
-  const [onchainRes, birdeyeRes, geckoRes] = await Promise.allSettled([
-    fromPumpFunOnChain(address, cfg, connection, () =>
-      getSolUsd(origin, cookie),
-    ),
-    isDown("birdeye") ? Promise.resolve(null) : fromBirdeye(address, cfg),
-    isDown("geckoterminal")
-      ? Promise.resolve(null)
-      : fromGeckoTerminal(address, cfg),
+  // ── on-chain RPC (Helius) + Birdeye + GeckoTerminal ─────────────────────
+  // All three run concurrently — brand-new tokens (still on the bonding
+  // curve) almost never have Birdeye/GeckoTerminal data yet, so the old
+  // code that waited for those two to fully finish (up to their 8s
+  // timeouts) before even looking at the on-chain result meant every
+  // freshly-spotted token sat blank for ~8s even though on-chain data was
+  // ready in well under a second. Racing all three fixes that.
+  const onchainPromise = fromPumpFunOnChain(address, cfg, connection, () =>
+    getSolUsd(origin, cookie),
+  );
+  const birdeyePromise = isDown("birdeye")
+    ? Promise.resolve(null)
+    : fromBirdeye(address, cfg);
+  const geckoPromise = isDown("geckoterminal")
+    ? Promise.resolve(null)
+    : fromGeckoTerminal(address, cfg);
+
+  const [birdeyeRes, geckoRes, onchainRes] = await Promise.allSettled([
+    birdeyePromise,
+    geckoPromise,
+    onchainPromise,
   ]);
 
-  const onchain = onchainRes.status === "fulfilled" ? onchainRes.value : null;
   const birdeye = birdeyeRes.status === "fulfilled" ? birdeyeRes.value : null;
   const gecko = geckoRes.status === "fulfilled" ? geckoRes.value : null;
-
+  const onchain = onchainRes.status === "fulfilled" ? onchainRes.value : null;
   if (onchainRes.status === "rejected") {
     console.error("[token-chart] on-chain fetch threw", onchainRes.reason);
   }
 
   const candidates: { candles: Candle[]; source: string }[] = [];
-  if (onchain && onchain.length)
-    candidates.push({ candles: onchain, source: "pumpfun-onchain" });
   if (birdeye && birdeye.length)
     candidates.push({ candles: birdeye, source: "birdeye" });
   if (gecko && gecko.length)
     candidates.push({ candles: gecko, source: "geckoterminal" });
+  if (onchain && onchain.length)
+    candidates.push({ candles: onchain, source: "pumpfun-onchain" });
 
-  const strong = candidates
-    .filter((c) => c.candles.length >= MIN_CANDLES)
-    .sort((a, b) => b.candles.length - a.candles.length)[0];
-  if (strong) return respond(strong.candles, strong.source);
+  // Prefer one canonical source consistently. Choosing the longest response
+  // made the chart silently switch between providers and sometimes display a
+  // different pool's history than the token's live market data. On-chain
+  // stays last in priority since it's the fallback for tokens the two
+  // indexers haven't picked up yet, not a preferred source once they have.
+  const sourcePriority = ["birdeye", "geckoterminal", "pumpfun-onchain"];
+  const strongCandidate = sourcePriority
+    .map((source) =>
+      candidates.find(
+        (candidate) =>
+          candidate.source === source &&
+          candidate.candles.length >= MIN_CANDLES,
+      ),
+    )
+    .find((candidate): candidate is { candles: Candle[]; source: string } =>
+      Boolean(candidate),
+    );
+
+  if (strongCandidate) {
+    _lastGoodCandles.set(cacheKey, {
+      candles: strongCandidate.candles,
+      source: strongCandidate.source,
+    });
+    return respond(strongCandidate.candles, strongCandidate.source);
+  }
 
   const best = candidates.sort(
     (a, b) => b.candles.length - a.candles.length,
   )[0];
-  if (best) {
-    return NextResponse.json({
+
+  const lastGood = _lastGoodCandles.get(cacheKey);
+
+  // Only accept this weaker/sparse result if it's actually an improvement
+  // over what we last served. Otherwise keep showing the last-good set —
+  // a thin on-chain fallback with 2 candles should never replace a real
+  // 20-candle history just because Birdeye/Gecko momentarily returned
+  // nothing on this particular poll.
+  if (best && (!lastGood || best.candles.length > lastGood.candles.length)) {
+    const sparse = { candles: best.candles, source: `sparse-${best.source}` };
+    _lastGoodCandles.set(cacheKey, {
       candles: best.candles,
-      source: `sparse-${best.source}`,
+      source: best.source,
+    });
+    return NextResponse.json(sparse);
+  }
+
+  if (lastGood) {
+    return NextResponse.json({
+      candles: lastGood.candles,
+      source: `stale-${lastGood.source}`,
     });
   }
 

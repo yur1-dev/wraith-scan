@@ -518,8 +518,9 @@ export function bucketTrades(
   const median = sortedPrices[Math.floor(sortedPrices.length / 2)];
 
   // Only apply the outlier filter when there's enough of a sample to trust
-  // the median — with 1-2 trades a single price IS the data, not an outlier.
-  const OUTLIER_RATIO = 20;
+  // the median. Increased to 500x to allow for explosive meme coin peaks
+  // while still catching 10,000x dust/routing outliers.
+  const OUTLIER_RATIO = 500;
   const filtered =
     priced.length >= 3
       ? priced.filter(

@@ -8,6 +8,7 @@ import { useState } from "react";
 
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
+  fontVariantNumeric: "tabular-nums" as const,
 };
 
 export default function TelegramConnect({ linked }: { linked: boolean }) {

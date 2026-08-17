@@ -22,6 +22,7 @@ import {
   fetchTokenMeta,
   HISTORY_KEY,
 } from "./MemeScanner";
+import Panel from "./Panel";
 
 interface McapSnapshot {
   ts: number;
@@ -55,6 +56,7 @@ interface Props {
 
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
+  fontVariantNumeric: "tabular-nums" as const,
 };
 
 const STALE_NOTIFIED_KEY = "wraith_stale_notified_keys";
@@ -847,7 +849,9 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
       hasTicker: !!entry.contractAddress,
       crossPlatforms: entry.platforms?.length || 1,
       isNewCoin: false,
-      mcap: entry.currentMcap || entry.initialMcap,
+      // Persisted values describe a past snapshot, not a current quote.
+      // TokenPanel will request the current validated market data on open.
+      mcap: undefined,
       platforms: entry.platforms,
       contractAddress: entry.contractAddress,
       celebMention: entry.celebMention,
@@ -879,17 +883,31 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
               const mcap = await fetchCurrentMcap(entry.contractAddress!, true); // bulk=true skips Jupiter overlay for background refresh
               if (!mcap || mcap <= 0) return;
               const nowMs = Date.now();
+              // Sanity-check against the last known GOOD reading and the
+              // last ACTUAL poll time — not the last snapshot. Snapshots
+              // only get appended when price moves >5% or 30min pass, so
+              // a flat/stable token's lastSnap can be many minutes stale
+              // even while polling itself is running fine every 60s. That
+              // used to let the 5-minute staleness escape hatch fire on
+              // every quiet token, disabling the outlier guard entirely —
+              // one bad DexScreener read (wrong pair picked, stale cache,
+              // momentary bad liquidity sort) would then get locked in as
+              // a permanent, wildly wrong peakMcap. entry.currentMcap and
+              // entry.lastChecked are updated on every single poll, so
+              // they reflect reality regardless of how "boring" the token
+              // has been.
+              const prevMcap = entry.currentMcap || entry.initialMcap;
+              const prevCheckedAt = entry.lastChecked || entry.seenAt;
               const e: HistoryEntry = {
                 ...entry,
                 snapshots: safeSnapshots(entry.snapshots),
               };
               e.currentMcap = mcap;
               e.lastChecked = nowMs;
-              const lastSnap = e.snapshots[e.snapshots.length - 1];
               const isPlausiblePeak =
-                !lastSnap ||
-                mcap <= lastSnap.mcap * 3 ||
-                nowMs - lastSnap.ts > 300_000;
+                !prevMcap ||
+                mcap <= prevMcap * 10 || // Relaxed from 3x to 10x to catch real explosive pumps
+                nowMs - prevCheckedAt > 300_000;
               if (mcap > e.peakMcap && isPlausiblePeak) {
                 e.peakMcap = mcap;
                 e.peakMcapTs = nowMs;
@@ -1047,17 +1065,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
   const showPurgeBanner = deadCount > 0 && !purgeDismissed;
 
   return (
-    <div
-      style={{
-        background: C.bg,
-        border: "none",
-        borderRadius: 0,
-        overflow: "hidden",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <Panel style={{ background: C.bg, border: "none", height: "100%" }}>
       <style>{`
         @keyframes dpulse{0%,100%{opacity:1}50%{opacity:.4}}
         @keyframes aglow{0%,100%{box-shadow:0 0 8px #ffd70022}50%{box-shadow:0 0 18px #ffd70055}}
@@ -2282,6 +2290,6 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
           );
         })}
       </div>
-    </div>
+    </Panel>
   );
 }

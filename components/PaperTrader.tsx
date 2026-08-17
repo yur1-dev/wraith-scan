@@ -164,6 +164,7 @@ function lsSet<T>(key: string, val: T) {
 }
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
+  fontVariantNumeric: "tabular-nums" as const,
 };
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 

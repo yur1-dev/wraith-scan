@@ -20,7 +20,7 @@ body {
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #ff6600;
+  background: #ff5a1f;
 }
 
 /* ── ADD THESE TO YOUR globals.css ── */
@@ -54,5 +54,37 @@ select {
   /* Prevent double-tap zoom */
   * {
     touch-action: manipulation;
+  }
+}
+
+/* Sharpness pass: preserve original palette, reduce softness. */
+button,
+input,
+select,
+textarea {
+  border-radius: 3px;
+}
+button {
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    transform 0.12s ease;
+}
+button:active {
+  transform: translateY(1px);
+}
+hr {
+  border: 0;
+  border-top: 1px solid #1c1c1c;
+}
+
+/* Add this to app/globals.css — powers the Skeleton loading component */
+@keyframes wraith-skeleton {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
   }
 }

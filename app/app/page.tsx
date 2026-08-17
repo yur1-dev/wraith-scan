@@ -375,7 +375,9 @@ function TokenBottomSheet({
                 style={{
                   flex: 1,
                   background: activeTab === t ? "#0d0d0d" : "transparent",
-                  border: "none",
+                  borderTop: "none",
+                  borderLeft: "none",
+                  borderRight: "none",
                   borderBottom: `2px solid ${activeTab === t ? "#e8490f" : "transparent"}`,
                   color: activeTab === t ? "#e8490f" : "#444",
                   fontSize: 10,
@@ -590,7 +592,7 @@ export default function Home() {
           const next = Math.max(
             MIN_PX,
             Math.min(
-              hStartW.current + dx,
+              hStartW.current - dx,
               totalW - rightW - MIN_PX - HANDLE_W * 2,
             ),
           );
@@ -770,7 +772,9 @@ export default function Home() {
                 style={{
                   flex: 1,
                   background: active ? "#0d0d0d" : "transparent",
-                  border: "none",
+                  borderBottom: "none",
+                  borderLeft: "none",
+                  borderRight: "none",
                   borderTop: `2px solid ${active ? "#e8490f" : "transparent"}`,
                   color: active ? "#e8490f" : locked ? "#2a2a2a" : "#484848",
                   padding: "10px 4px 8px",
@@ -833,7 +837,7 @@ export default function Home() {
       <Header onSelectMeme={handleSelectMeme} />
 
       {/* ── TICKER STRIP ── */}
-      <LiveSignalsBar onSelectMeme={setSelectedMeme} />
+      <LiveSignalsBar onSelectMeme={handleSelectMeme} />
 
       <main
         style={{
@@ -955,7 +959,7 @@ export default function Home() {
                 </div>
                 <div style={{ flex: 1, overflow: "hidden" }}>
                   <MemeScanner
-                    onSelectMeme={setSelectedMeme}
+                    onSelectMeme={handleSelectMeme}
                     selectedMeme={selectedMeme}
                   />
                 </div>
@@ -1013,7 +1017,7 @@ export default function Home() {
                 overscrollBehavior: "contain",
               }}
             >
-              <WinsPanel onSelectMeme={setSelectedMeme} />
+              <WinsPanel onSelectMeme={handleSelectMeme} />
             </div>
           </div>
         </div>
@@ -1048,7 +1052,9 @@ export default function Home() {
               height: "min(520px, 70vh)",
               zIndex: 300,
               background: "#050505",
-              border: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderTop: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderLeft: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderRight: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
               borderBottom: "none",
               borderRadius: "10px 10px 0 0",
               boxShadow: "0 -4px 40px #000000cc",
@@ -1084,7 +1090,9 @@ export default function Home() {
               height: 44,
               zIndex: 300,
               background: "#0a0a0a",
-              border: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderBottom: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderLeft: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
+              borderRight: `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`,
               borderTop: sniperMinimized
                 ? `1px solid ${canSnipe ? "#e8490f55" : "#2a2a2a"}`
                 : "1px solid #1a1a1a",

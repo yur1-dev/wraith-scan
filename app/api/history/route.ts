@@ -116,7 +116,11 @@ export async function POST(req: NextRequest) {
     if (safeMcap > 0) {
       $set.currentMcap = safeMcap;
 
-      if (safeMcap > existing.peakMcap) {
+      // FIX: Only update peak if the mcap is realistic relative to liquidity (if known)
+      // or if it's not a massive outlier spike (>5x previous peak in one go)
+      const isOutlier = existing.peakMcap > 0 && safeMcap > existing.peakMcap * 5 && (now - existing.peakMcapTs < 300000);
+      
+      if (safeMcap > existing.peakMcap && !isOutlier) {
         $set.peakMcap = safeMcap;
         $set.peakMcapTs = now;
       }

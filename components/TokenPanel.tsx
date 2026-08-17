@@ -17,6 +17,7 @@ import {
 } from "lightweight-charts";
 import { MemeTrend } from "@/app/app/page";
 import { getTokenPrice } from "@/lib/getTokenPrice";
+import type { SmartWallet } from "@/lib/getWalletStats";
 
 interface ScanResult extends MemeTrend {
   platforms?: string[];
@@ -28,8 +29,12 @@ interface ScanResult extends MemeTrend {
   priceChange1h?: number;
   priceChange24h?: number;
   contractAddress?: string;
+  tokenImageUrl?: string;
   rugRisk?: "low" | "medium" | "high" | "unknown";
   rugDetails?: string;
+  topHolderPct?: number;
+  smartMoneyScore?: number;
+  smartWallets?: SmartWallet[];
   aiContext?: string;
   isViralTrend?: boolean;
   onDex?: boolean;
@@ -107,27 +112,33 @@ const PLATFORM_ICON: Record<string, string> = {
   hackernews: "🔶",
 };
 
-// ── Palette — untouched, exactly as before ──────────────────────────────────
+// ── Palette — refreshed for lore.trade-style clarity, orange accent kept ────
+// Same variable names as before (nothing downstream needs to change), just
+// tuned values: hairline borders instead of solid dark-gray ones, softer
+// label/sub contrast steps, and a true near-black card surface instead of
+// pure #0a0a0a which read a little flat next to the app's #060b14 base.
 const C = {
-  label: "#666",
-  sub: "#888",
-  body: "#aaa",
-  dim: "#555",
+  label: "rgba(255,255,255,0.5)",
+  sub: "rgba(255,255,255,0.45)",
+  body: "rgba(255,255,255,0.75)",
+  dim: "rgba(255,255,255,0.32)",
   accent: "#e8490f",
-  green: "#00c47a",
+  green: "#22c55e",
   gold: "#ffd700",
   purple: "#a855f7",
   blue: "#00b4d8",
-  red: "#ff4444",
-  border: "#1a1a1a",
+  red: "#f04141",
+  border: "rgba(255,255,255,0.06)",
+  borderHover: "rgba(255,255,255,0.12)",
   bg: "#0a0a0a",
   bgDark: "#060606",
 };
 
-// ── Shared motion / surface tokens (new — purely structural, no new colors) ─
+// ── Shared motion / surface tokens ───────────────────────────────────────────
 const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 const TRANSITION_FAST = `all 0.15s ${EASE}`;
 const TRANSITION = `all 0.25s ${EASE}`;
+const RADIUS = 16; // rounded-2xl equivalent, consistent everywhere now
 
 function fmtMcap(n?: number): string {
   if (!n) return "—";
@@ -211,6 +222,10 @@ async function fetchCandles(ca: string, tf: string): Promise<Candle[]> {
 }
 
 // ── Small reusable surfaces ─────────────────────────────────────────────────
+// Base card surface used across the whole app. Hairline border, generous
+// radius, a very subtle lift on hover instead of the old harder border-swap
+// — this is the single change that does the most to make everything feel
+// like one consistent system instead of a pile of separately-styled boxes.
 function Card({
   children,
   style,
@@ -227,15 +242,34 @@ function Card({
       onMouseLeave={() => hoverable && setHover(false)}
       style={{
         background: C.bg,
-        border: `1px solid ${hover ? "#2a2a2a" : C.border}`,
-        borderRadius: 8,
+        border: `1px solid ${hover ? C.borderHover : C.border}`,
+        borderRadius: RADIUS,
         transition: TRANSITION_FAST,
         transform: hover ? "translateY(-1px)" : "none",
+        boxShadow: hover ? "0 8px 24px -12px rgba(0,0,0,0.5)" : "none",
         ...style,
       }}
     >
       {children}
     </div>
+  );
+}
+
+// Skeleton block — used by StatCard's loading state and reusable anywhere
+// else a panel needs a "data incoming" placeholder instead of a blank card.
+function Skeleton({ w, h }: { w: number | string; h: number }) {
+  return (
+    <div
+      style={{
+        width: w,
+        height: h,
+        borderRadius: 4,
+        background:
+          "linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 37%, rgba(255,255,255,0.04) 63%)",
+        backgroundSize: "400% 100%",
+        animation: "wraith-skeleton 1.4s ease infinite",
+      }}
+    />
   );
 }
 
@@ -253,33 +287,38 @@ function StatCard({
   sub?: string;
 }) {
   return (
-    <Card hoverable style={{ padding: "10px 12px" }}>
+    <Card hoverable style={{ padding: "14px 16px" }}>
       <div
         style={{
           color: C.label,
-          fontSize: 8,
+          fontSize: 10,
           ...MONO,
-          letterSpacing: "0.14em",
-          marginBottom: 6,
+          letterSpacing: "0.1em",
+          marginBottom: 8,
           textTransform: "uppercase" as const,
         }}
       >
         {label}
       </div>
-      <div
-        style={{
-          color: loading ? "#222" : color || "#e2e2e2",
-          fontSize: 16,
-          fontWeight: 800,
-          ...MONO,
-          letterSpacing: "-0.01em",
-          transition: TRANSITION_FAST,
-        }}
-      >
-        {loading ? "···" : value}
-      </div>
+      {loading ? (
+        <Skeleton w="70%" h={18} />
+      ) : (
+        <div
+          style={{
+            color: color || "#f2f2f2",
+            fontSize: 18,
+            fontWeight: 700,
+            ...MONO,
+            letterSpacing: "-0.01em",
+            fontVariantNumeric: "tabular-nums",
+            transition: TRANSITION_FAST,
+          }}
+        >
+          {value}
+        </div>
+      )}
       {sub && !loading && (
-        <div style={{ color: C.sub, fontSize: 8, ...MONO, marginTop: 3 }}>
+        <div style={{ color: C.sub, fontSize: 10, ...MONO, marginTop: 5 }}>
           {sub}
         </div>
       )}
@@ -306,90 +345,59 @@ function TokenChart({
   contractAddress,
   onOpenFull,
   height = 280,
-  liveMcap,
-  livePrice,
 }: {
   contractAddress: string;
   onOpenFull: () => void;
   height?: number;
-  liveMcap?: number; // current mcap from liveData, used to derive implied supply
-  livePrice?: number; // current price from liveData, paired with liveMcap
+  liveMcap?: number; // kept in the prop signature so call sites don't need
+  livePrice?: number; // edits — no longer used now that MCAP mode is gone.
 }) {
-  const [mode, setMode] = useState<"line" | "candles">("line");
-  const [valueMode, setValueMode] = useState<"price" | "mcap">("price");
+  // ── SIMPLIFIED CHART — rebuilt from scratch after the old version's
+  // MCAP-mode manual autoscale clamp was silently squashing candles to an
+  // invisible sliver. Dropped: MCAP value mode, the shift-drag measure
+  // tool, and the multi-stage outlier "rescue" filtering. What's left is
+  // close to what pump.fun/poocoin actually run: fetch candles, sanity
+  // check them, hand them to lightweight-charts, let its own autoscale do
+  // the work. Less code to fight with. ──
+  const [mode, setMode] = useState<"line" | "candles">("candles");
   const [tf, setTf] = useState<(typeof TIMEFRAMES)[number]["key"]>("15m");
-
-  // candles only ever carry price — mcap = price * supply, and we don't
-  // have supply directly, so back it out from the live price/mcap pair
-  // you're already fetching elsewhere (liveData). Ratio holds roughly
-  // constant since supply doesn't change, so it's safe to apply across
-  // every historical candle even though liveMcap/livePrice are "now" values.
-  const mcapMultiplier =
-    liveMcap && livePrice && livePrice > 0 ? liveMcap / livePrice : null;
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastPrice, setLastPrice] = useState<number | null>(null);
-  const [loadingMs, setLoadingMs] = useState(0);
-  const [renderError, setRenderError] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<
     ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null
   >(null);
-  const hasFitRef = useRef(false); // only auto-fit once per token/tf, not on every poll tick
-  const candlesRef = useRef<Candle[]>([]); // mirror of `candles` state, read inside native mouse handlers so they're never stale
-  const [measureBox, setMeasureBox] = useState<{
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-    price1: number;
-    price2: number;
-    t1: number;
-    t2: number;
-  } | null>(null);
-  const measuringRef = useRef(false);
-  const measureStartRef = useRef<{ x: number; y: number } | null>(null);
-  const measurePhaseRef = useRef<"idle" | "placing">("idle"); // click-to-start, move freely, click again to lock
+  const hasFitRef = useRef(false);
+  const fetchIdRef = useRef(0);
 
   // Fetch + poll candle data
   useEffect(() => {
     let alive = true;
+    const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
-    setLoadingMs(0);
-    setCandles([]); // clear stale chart from previous token immediately
-    setLastPrice(null);
+    hasFitRef.current = false;
 
-    const startedAt = Date.now();
-    const tick = setInterval(() => {
-      if (alive) setLoadingMs(Date.now() - startedAt);
-    }, 500);
-
-    hasFitRef.current = false; // new token/timeframe — allow one fresh auto-fit
-    measurePhaseRef.current = "idle";
-    measureStartRef.current = null;
-    setMeasureBox(null); // stale box from the previous token was staying on screen
     fetchCandles(contractAddress, tf).then((c) => {
-      if (!alive) return;
-      setCandles(c);
+      if (!alive || fetchIdRef.current !== currentFetchId) return;
+      if (c.length) setCandles(c);
       setLoading(false);
     });
-    const t = setInterval(() => {
+
+    const poll = setInterval(() => {
       fetchCandles(contractAddress, tf).then((c) => {
-        if (alive && c.length) setCandles(c);
+        if (!alive || fetchIdRef.current !== currentFetchId) return;
+        if (c.length) setCandles(c);
       });
     }, 10000);
+
     return () => {
       alive = false;
-      clearInterval(t);
-      clearInterval(tick);
+      clearInterval(poll);
     };
   }, [contractAddress, tf]);
-
-  useEffect(() => {
-    candlesRef.current = candles;
-  }, [candles]);
 
   // Create chart once per mount
   useEffect(() => {
@@ -406,25 +414,7 @@ function TokenChart({
         vertLines: { color: "#161616" },
         horzLines: { color: "#161616" },
       },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-        vertLine: {
-          color: "#555",
-          width: 1,
-          style: 2,
-          labelBackgroundColor: "#0a0a0a",
-          visible: true,
-          labelVisible: true,
-        },
-        horzLine: {
-          color: "#555",
-          width: 1,
-          style: 2,
-          labelBackgroundColor: "#0a0a0a",
-          visible: true,
-          labelVisible: true,
-        },
-      },
+      crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
         borderColor: "#1a1a1a",
         scaleMargins: { top: 0.1, bottom: 0.15 },
@@ -442,113 +432,21 @@ function TokenChart({
 
     chartRef.current = chart;
 
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
+    // ResizeObserver instead of window "resize" — dragging the panel
+    // divider in page.tsx only changes a div's width via React state, it
+    // never fires a window resize event, so the chart never knew to
+    // repaint at its new width. ResizeObserver watches the container
+    // element directly and catches that case too.
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        chart.applyOptions({ width: entry.contentRect.width });
       }
-    };
-    window.addEventListener("resize", handleResize);
-    handleResize();
-
-    // ── Shift+drag measure tool ──────────────────────────────────────────
-    // lightweight-charts has NO built-in measure tool (that's TradingView's
-    // paid charting_library, a different product). Building it manually:
-    // shift+mousedown starts a drag, mousemove tracks it converting pixel
-    // coords to price/time via the chart's own coordinate APIs, mouseup
-    // ends the drag but leaves the box on screen until dismissed.
-    const el = containerRef.current;
-
-    const handleClick = (e: MouseEvent) => {
-      if (!el || !seriesRef.current) return;
-
-      // idle → shift+click drops the first point and starts placing
-      if (measurePhaseRef.current === "idle") {
-        if (!e.shiftKey) {
-          setMeasureBox(null); // plain click with nothing active — clears any leftover box
-          return;
-        }
-        e.preventDefault();
-        const rect = el.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        measureStartRef.current = { x, y };
-        measurePhaseRef.current = "placing";
-        chart.applyOptions({ handleScroll: false, handleScale: false });
-        setMeasureBox({
-          x1: x,
-          y1: y,
-          x2: x,
-          y2: y,
-          price1: 0,
-          price2: 0,
-          t1: 0,
-          t2: 0,
-        });
-        return;
-      }
-
-      // placing → any click locks the second point wherever it currently is
-      if (measurePhaseRef.current === "placing") {
-        measurePhaseRef.current = "idle";
-        measureStartRef.current = null;
-        chart.applyOptions({ handleScroll: true, handleScale: true });
-        // measureBox already holds the latest position from the last mousemove
-      }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (
-        measurePhaseRef.current !== "placing" ||
-        !measureStartRef.current ||
-        !el ||
-        !seriesRef.current
-      )
-        return;
-      const rect = el.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const { x: x1, y: y1 } = measureStartRef.current;
-
-      const price1 = seriesRef.current.coordinateToPrice(y1);
-      const price2 = seriesRef.current.coordinateToPrice(y);
-      const t1 = chart.timeScale().coordinateToTime(x1);
-      const t2 = chart.timeScale().coordinateToTime(x);
-
-      setMeasureBox({
-        x1,
-        y1,
-        x2: x,
-        y2: y,
-        price1: price1 ?? 0,
-        price2: price2 ?? 0,
-        t1: (t1 as number) ?? 0,
-        t2: (t2 as number) ?? 0,
-      });
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        measurePhaseRef.current = "idle";
-        measureStartRef.current = null;
-        chart.applyOptions({ handleScroll: true, handleScale: true });
-        setMeasureBox(null);
-      }
-    };
-
-    el?.addEventListener("click", handleClick);
-    // Capture phase, and on the element itself — lightweight-charts' own
-    // crosshair handler sits on the internal canvas and stops mousemove
-    // from bubbling to window, so a window-level listener never fires
-    // while the cursor is actually over the chart. Capture-phase on `el`
-    // runs before that internal handler gets a chance to stop it.
-    el?.addEventListener("mousemove", handleMouseMove, { capture: true });
-    window.addEventListener("keydown", handleKeyDown);
+    });
+    ro.observe(containerRef.current);
 
     return () => {
-      window.removeEventListener("resize", handleResize);
-      el?.removeEventListener("click", handleClick);
-      el?.removeEventListener("mousemove", handleMouseMove, { capture: true });
-      window.removeEventListener("keydown", handleKeyDown);
+      ro.disconnect();
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -567,14 +465,8 @@ function TokenChart({
 
     const priceFormat = {
       type: "custom" as const,
-      // minMove has to scale with the actual magnitude of the values being
-      // plotted. 0.00000001 works for sub-cent token prices but is 19
-      // orders of magnitude too fine for mcap values (~$10K-$1M+), which
-      // was making the autoscale/tick generator produce garbage padded
-      // ranges (e.g. axis running down to $-100000) on sparse data.
-      minMove: valueMode === "mcap" ? 1 : 0.00000001,
-      formatter: (p: number) =>
-        valueMode === "mcap" ? fmtMcap(p) : fmtPrice(p),
+      minMove: 0.00000001,
+      formatter: (p: number) => fmtPrice(p),
     };
 
     if (mode === "candles") {
@@ -593,187 +485,87 @@ function TokenChart({
         priceFormat,
       });
     }
-  }, [mode, valueMode]);
+  }, [mode]);
 
-  // Push data into the active series
+  // Push data into the active series — minimal validation only: drop
+  // candles with non-finite or non-positive OHLC values (these crash
+  // lightweight-charts' setData hard, for the whole array, with no visible
+  // error). Everything else — scaling, ranging, fitting — is left to the
+  // library's own autoscale instead of a manual clamp.
   useEffect(() => {
     if (!seriesRef.current) return;
 
     if (!candles.length) {
-      seriesRef.current.setData([]); // clear stale series when switching tokens
-      chartRef.current?.applyOptions({
-        rightPriceScale: { visible: false }, // hide axis instead of rendering garbage ticks on empty data
-      });
+      seriesRef.current.setData([]);
       return;
     }
 
-    chartRef.current?.applyOptions({ rightPriceScale: { visible: true } });
-
     const sortedRaw = [...candles].sort((a, b) => a.t - b.t);
-    // Dedupe by timestamp — lightweight-charts throws a hard, uncatchable
-    // assertion error if two candles share the same time value.
     const deduped = Array.from(
       new Map(sortedRaw.map((c) => [c.t, c])).values(),
     );
-
-    // Sanitize: lightweight-charts also throws hard on NaN/Infinity/zero
-    // values or on low > min(open,close) / high < max(open,close). A single
-    // bad candle from an upstream source (pump.fun forward-fill, a $0 tick,
-    // a negative price during a bad extraction) crashes setData() for the
-    // WHOLE array with no visible error — that's the "just goes black"
-    // symptom. Drop only the bad candle(s), keep the rest.
-    // Reject candles where any OHLC value is more than 1000x smaller than
-    // this candle's own high — that's a forward-fill/rounding artifact
-    // (e.g. 3.39e-21 next to a real $0.00003 price), not a real trade.
-    // A plain `n <= 0` check lets these through since they're still
-    // technically positive, which blows up lightweight-charts' autoscale.
     const perCandleValid = deduped.filter((c) => {
       const nums = [c.o, c.h, c.l, c.c];
-      if (
-        nums.some((n) => typeof n !== "number" || !Number.isFinite(n) || n <= 0)
-      )
-        return false;
-      if (c.l > Math.min(c.o, c.c) || c.h < Math.max(c.o, c.c)) return false;
-      const maxVal = Math.max(...nums);
-      const minVal = Math.min(...nums);
-      if (maxVal / minVal > 1000) return false; // degenerate spread within one candle
-      return true;
+      return nums.every(
+        (n) => typeof n === "number" && Number.isFinite(n) && n > 0,
+      );
     });
 
-    // Cross-candle check — a candle can be internally consistent (passes
-    // the check above) but still be a forward-fill artifact sitting orders
-    // of magnitude away from every other candle. That single outlier drags
-    // the whole autoscale down toward zero (and even negative, via chart
-    // padding), which is the "jumps back to near-zero" symptom. Compare
-    // each candle's close against the MEDIAN close of the whole set —
-    // median instead of mean so one existing outlier can't skew the
-    // baseline it's being checked against.
-    const closes = [...perCandleValid.map((c) => c.c)].sort((a, b) => a - b);
+    // One extra check, kept narrow on purpose: reject candles whose close
+    // is wildly off from the median close of the set (e.g. 1e-20 next to
+    // real $0.00003 prices — a known pump.fun forward-fill artifact, not a
+    // real trade). This is NOT the old MCAP autoscale clamp — it doesn't
+    // touch chart ranging or scaling, it just stops a single garbage data
+    // point from being handed to lightweight-charts at all.
+    const closes = perCandleValid.map((c) => c.c).sort((a, b) => a - b);
     const medianClose = closes.length
       ? closes[Math.floor(closes.length / 2)]
       : 0;
-    const sorted =
+    // Check ALL of o/h/l/c against the median, not just close — a candle's
+    // close can be perfectly normal while its high/low still carries the
+    // 1e-20 forward-fill artifact, and lightweight-charts' autoscale reads
+    // high/low too, so a bad low/high alone is enough to blow out the axis.
+    const valid =
       medianClose > 0
-        ? perCandleValid.filter(
-            (c) => c.c / medianClose > 0.02 && c.c / medianClose < 50,
+        ? perCandleValid.filter((c) =>
+            [c.o, c.h, c.l, c.c].every(
+              (v) => v / medianClose > 0.01 && v / medianClose < 100,
+            ),
           )
         : perCandleValid;
 
-    if (!sorted.length) {
-      setRenderError(
-        `all ${deduped.length} candles failed validation — check console`,
-      );
-      console.error(
-        "[TokenChart] every candle was invalid, raw sample:",
-        deduped.slice(0, 3),
-      );
+    if (!valid.length) {
+      seriesRef.current.setData([]);
       return;
     }
-    if (sorted.length < deduped.length) {
-      console.warn(
-        `[TokenChart] dropped ${deduped.length - sorted.length} invalid candle(s)`,
-        deduped.filter((c) => !sorted.includes(c)),
-      );
+
+    setLastPrice(valid[valid.length - 1].c);
+
+    if (mode === "candles") {
+      const data: CandlestickData<Time>[] = valid.map((c) => ({
+        time: (c.t / 1000) as Time,
+        open: c.o,
+        high: c.h,
+        low: c.l,
+        close: c.c,
+      }));
+      (seriesRef.current as ISeriesApi<"Candlestick">).setData(data);
+    } else {
+      const data: LineData<Time>[] = valid.map((c) => ({
+        time: (c.t / 1000) as Time,
+        value: c.c,
+      }));
+      (seriesRef.current as ISeriesApi<"Line">).setData(data);
     }
 
-    setLastPrice(sorted[sorted.length - 1].c);
-
-    const mult = valueMode === "mcap" && mcapMultiplier ? mcapMultiplier : 1;
-
-    try {
-      let plottedValues: number[] = [];
-
-      if (mode === "candles") {
-        const data: CandlestickData<Time>[] = sorted.map((c) => ({
-          time: (c.t / 1000) as Time,
-          open: c.o * mult,
-          high: c.h * mult,
-          low: c.l * mult,
-          close: c.c * mult,
-        }));
-        (seriesRef.current as ISeriesApi<"Candlestick">).setData(data);
-        plottedValues = data.flatMap((d) => [d.open, d.high, d.low, d.close]);
-      } else {
-        const data: LineData<Time>[] = sorted.map((c) => ({
-          time: (c.t / 1000) as Time,
-          value: c.c * mult,
-        }));
-        (seriesRef.current as ISeriesApi<"Line">).setData(data);
-        plottedValues = data.map((d) => d.value);
-      }
-
-      // MCAP mode: don't trust lightweight-charts' autoscale. It's fine on
-      // clean price data, but MCAP values are price candles multiplied by
-      // a large static ratio, so any single upstream artifact (which the
-      // filters above don't catch 100% of, since the source data itself
-      // is inconsistent poll-to-poll) gets amplified into a huge outlier
-      // that drags the whole axis toward zero/negative. Clamp the visible
-      // range manually off the ACTUAL plotted min/max instead, so one bad
-      // point can only ever push the range to its own value, never beyond.
-      const priceScale = chartRef.current?.priceScale("right");
-      if (valueMode === "mcap" && plottedValues.length && priceScale) {
-        const lo = Math.min(...plottedValues);
-        const hi = Math.max(...plottedValues);
-        const pad = (hi - lo) * 0.1 || hi * 0.1 || 1;
-        priceScale.applyOptions({
-          autoScale: false,
-        });
-        chartRef.current?.applyOptions({
-          rightPriceScale: {
-            autoScale: false,
-          },
-        });
-        seriesRef.current.applyOptions({
-          autoscaleInfoProvider: () => ({
-            priceRange: {
-              minValue: Math.max(0, lo - pad),
-              maxValue: hi + pad,
-            },
-          }),
-        });
-      } else if (priceScale) {
-        priceScale.applyOptions({ autoScale: true });
-        chartRef.current?.applyOptions({
-          rightPriceScale: { autoScale: true },
-        });
-        seriesRef.current.applyOptions({ autoscaleInfoProvider: undefined });
-      }
-
-      if (!hasFitRef.current) {
-        chartRef.current?.timeScale().fitContent();
-        hasFitRef.current = true;
-      }
-      setRenderError(null);
-    } catch (e) {
-      console.error(
-        "[TokenChart] setData threw",
-        e,
-        "sample:",
-        sorted.slice(0, 5),
-      );
-      setRenderError(e instanceof Error ? e.message : "chart render failed");
+    if (!hasFitRef.current) {
+      chartRef.current?.timeScale().fitContent();
+      hasFitRef.current = true;
     }
-  }, [candles, mode, valueMode, mcapMultiplier]);
+  }, [candles, mode]);
 
   const up =
     candles.length > 1 ? candles[candles.length - 1].c >= candles[0].c : true;
-
-  const measureStats = measureBox
-    ? (() => {
-        const pctChange =
-          measureBox.price1 !== 0
-            ? ((measureBox.price2 - measureBox.price1) / measureBox.price1) *
-              100
-            : 0;
-        const priceDelta = measureBox.price2 - measureBox.price1;
-        const tLo = Math.min(measureBox.t1, measureBox.t2);
-        const tHi = Math.max(measureBox.t1, measureBox.t2);
-        const barsCount = candlesRef.current.filter(
-          (c) => c.t / 1000 >= tLo && c.t / 1000 <= tHi,
-        ).length;
-        return { pctChange, priceDelta, barsCount, span: fmtSpan(tHi - tLo) };
-      })()
-    : null;
 
   return (
     <Card style={{ overflow: "hidden", marginBottom: 12 }}>
@@ -822,58 +614,6 @@ function TokenChart({
               }}
             >
               {m.label}
-            </button>
-          ))}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            background: "#050505",
-            border: `1px solid ${C.border}`,
-            borderRadius: 6,
-            padding: 2,
-            gap: 2,
-          }}
-        >
-          {(
-            [
-              { key: "price", label: "PRICE" },
-              { key: "mcap", label: "MCAP" },
-            ] as const
-          ).map((v) => (
-            <button
-              key={v.key}
-              onClick={() => setValueMode(v.key)}
-              disabled={v.key === "mcap" && !mcapMultiplier}
-              title={
-                v.key === "mcap" && !mcapMultiplier
-                  ? "mcap unavailable — no live supply data yet"
-                  : undefined
-              }
-              style={{
-                background: valueMode === v.key ? "#e8490f14" : "transparent",
-                color:
-                  v.key === "mcap" && !mcapMultiplier
-                    ? "#333"
-                    : valueMode === v.key
-                      ? C.accent
-                      : C.dim,
-                border: `1px solid ${valueMode === v.key ? "#e8490f33" : "transparent"}`,
-                borderRadius: 4,
-                fontSize: 8,
-                fontWeight: 800,
-                ...MONO,
-                letterSpacing: "0.08em",
-                padding: "4px 9px",
-                cursor:
-                  v.key === "mcap" && !mcapMultiplier
-                    ? "not-allowed"
-                    : "pointer",
-                transition: TRANSITION_FAST,
-              }}
-            >
-              {v.label}
             </button>
           ))}
         </div>
@@ -1013,47 +753,9 @@ function TokenChart({
             >
               LOADING CHART…
             </div>
-            <div
-              style={{
-                color: C.sub,
-                fontSize: 8,
-                ...MONO,
-              }}
-            >
-              {loadingMs < 4000
-                ? "fetching candles"
-                : loadingMs < 9000
-                  ? "still fetching — on-chain fallback can be slow"
-                  : "taking longer than usual, hang tight"}
-            </div>
             <style>{`
               @keyframes tp-spin { to { transform: rotate(360deg); } }
             `}</style>
-          </div>
-        )}
-        {!loading && candles.length > 0 && candles.length < 3 && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              color: C.dim,
-              fontSize: 9,
-              ...MONO,
-              zIndex: 1,
-              background: C.bgDark,
-              textAlign: "center",
-              padding: 16,
-            }}
-          >
-            <span>TOO NEW — NOT ENOUGH TRADE HISTORY YET</span>
-            <span style={{ fontSize: 8, opacity: 0.6 }}>
-              chart fills in as trades come through
-            </span>
           </div>
         )}
         {!loading && !candles.length && (
@@ -1081,146 +783,49 @@ function TokenChart({
             </span>
           </div>
         )}
-        <div
-          ref={containerRef}
-          style={{ width: "100%", height: "100%", cursor: "crosshair" }}
-        />
-        {measureBox && measureStats && (
-          <>
-            {(() => {
-              const bx1 = Math.min(measureBox.x1, measureBox.x2);
-              const by1 = Math.min(measureBox.y1, measureBox.y2);
-              const bw = Math.abs(measureBox.x2 - measureBox.x1);
-              const bh = Math.abs(measureBox.y2 - measureBox.y1);
-              const cx = bx1 + bw / 2;
-              const cy = by1 + bh / 2;
-              const up = measureStats.pctChange >= 0;
-              const boxColor = C.accent;
-              return (
-                <>
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: bx1,
-                      top: by1,
-                      width: bw,
-                      height: bh,
-                      background: `${boxColor}4d`,
-                      border: `1px solid ${boxColor}`,
-                      pointerEvents: "none" as const,
-                      zIndex: 3,
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: bx1,
-                      top: cy - 0.5,
-                      width: bw,
-                      height: 1,
-                      background: "#fff",
-                      opacity: 0.8,
-                      pointerEvents: "none" as const,
-                      zIndex: 4,
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: cx - 0.5,
-                      top: by1,
-                      width: 1,
-                      height: bh,
-                      background: "#fff",
-                      opacity: 0.8,
-                      pointerEvents: "none" as const,
-                      zIndex: 4,
-                    }}
-                  />
-                  {[
-                    { l: bx1 - 5, t: cy - 4, rot: 270 },
-                    { l: bx1 + bw - 3, t: cy - 4, rot: 90 },
-                    { l: cx - 4, t: by1 - 5, rot: 0 },
-                    { l: cx - 4, t: by1 + bh - 3, rot: 180 },
-                  ].map((a, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        position: "absolute",
-                        left: a.l,
-                        top: a.t,
-                        width: 0,
-                        height: 0,
-                        borderLeft: "4px solid transparent",
-                        borderRight: "4px solid transparent",
-                        borderBottom: "6px solid #fff",
-                        opacity: 0.8,
-                        transform: `rotate(${a.rot}deg)`,
-                        pointerEvents: "none" as const,
-                        zIndex: 4,
-                      }}
-                    />
-                  ))}
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: cx,
-                      top: by1 - 6,
-                      transform: "translate(-50%, -100%)",
-                      background: boxColor,
-                      color: "#fff",
-                      fontSize: 10,
-                      ...MONO,
-                      fontWeight: 700,
-                      padding: "6px 10px",
-                      borderRadius: 4,
-                      pointerEvents: "none" as const,
-                      zIndex: 5,
-                      whiteSpace: "nowrap" as const,
-                      lineHeight: 1.6,
-                      textAlign: "center" as const,
-                    }}
-                  >
-                    <div>
-                      {fmtPrice(Math.abs(measureStats.priceDelta))} (
-                      {up ? "+" : ""}
-                      {measureStats.pctChange.toFixed(2)}%)
-                    </div>
-                    <div style={{ opacity: 0.9, fontWeight: 500 }}>
-                      {measureStats.barsCount} bars, {measureStats.span}
-                    </div>
-                  </div>
-                </>
-              );
-            })()}
-          </>
-        )}
-        {renderError && (
+        {loading && candles.length > 0 && (
           <div
             style={{
               position: "absolute",
-              inset: 0,
-              display: "flex",
-              flexDirection: "column" as const,
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              color: C.red,
-              fontSize: 9,
-              ...MONO,
+              top: 8,
+              right: 8,
               zIndex: 2,
-              background: C.bgDark,
-              textAlign: "center" as const,
-              padding: 16,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: "#0a0a0acc",
+              border: `1px solid #222`,
+              borderRadius: 5,
+              padding: "4px 8px",
+              backdropFilter: "blur(2px)",
             }}
           >
-            <span>CHART RENDER ERROR</span>
-            <span style={{ fontSize: 8, color: C.sub, opacity: 0.8 }}>
-              {renderError}
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                border: `2px solid #222`,
+                borderTopColor: C.accent,
+                animation: "tp-spin 0.7s linear infinite",
+              }}
+            />
+            <span
+              style={{
+                color: C.sub,
+                fontSize: 8,
+                ...MONO,
+                letterSpacing: "0.08em",
+              }}
+            >
+              UPDATING…
             </span>
+            <style>{`
+              @keyframes tp-spin { to { transform: rotate(360deg); } }
+            `}</style>
           </div>
         )}
-
+        <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
         {lastPrice !== null && candles.length > 0 && (
           <div
             style={{
@@ -1239,9 +844,7 @@ function TokenChart({
                 ...MONO,
               }}
             >
-              {valueMode === "mcap" && mcapMultiplier
-                ? fmtMcap(lastPrice * mcapMultiplier)
-                : fmtPrice(lastPrice)}
+              {fmtPrice(lastPrice)}
             </div>
           </div>
         )}
@@ -1333,6 +936,7 @@ export default function TokenPanel({ selectedMeme }: Props) {
   const { connection } = useConnection();
   const [evidence, setEvidence] = useState<ViralEvidence | null>(null);
   const [liveData, setLiveData] = useState<LiveTokenData>({});
+  const [liveDataAddress, setLiveDataAddress] = useState<string | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "overview" | "evidence" | "safety"
@@ -1340,6 +944,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
   const [fullChart, setFullChart] = useState(false);
   const [solBalance, setSolBalance] = useState<number | null>(null);
   const [copiedCA, setCopiedCA] = useState(false);
+
+  const liveFetchId = useRef(0);
+  const evidenceFetchId = useRef(0);
 
   useEffect(() => {
     if (!publicKey) return;
@@ -1350,25 +957,47 @@ export default function TokenPanel({ selectedMeme }: Props) {
   }, [publicKey, connection, selectedMeme]);
 
   useEffect(() => {
-    if (!selectedMeme?.contractAddress) {
+    const currentId = ++liveFetchId.current;
+    if (!selectedMeme) {
       setLiveData({});
+      setLiveDataAddress(null);
+      setLiveLoading(false);
+      return;
+    }
+    if (!selectedMeme.contractAddress) {
+      setLiveData({});
+      setLiveDataAddress(null);
+      setLiveLoading(false);
       return;
     }
     setLiveLoading(true);
-    setLiveData({}); // clear stale stats from previous token immediately
+    // DO NOT clear setLiveData({}) here — it causes the UI to flicker to blank.
+    // Instead, we let the new data overwrite the old one when it arrives.
+    // The Header already uses selectedMeme for initial display.
     fetchLiveTokenData(selectedMeme.contractAddress).then((d) => {
-      setLiveData(d);
+      if (liveFetchId.current !== currentId) return;
+      if (d && Object.keys(d).length) {
+        setLiveData(d);
+        setLiveDataAddress(selectedMeme.contractAddress!);
+      }
       setLiveLoading(false);
     });
     // Poll every 8s — Jupiter Price v2 is fast enough, matches chart update cadence
     const t = setInterval(() => {
-      if (selectedMeme?.contractAddress)
-        fetchLiveTokenData(selectedMeme.contractAddress).then((d) => {
-          if (d && Object.keys(d).length) setLiveData(d);
+      const contractAddress = selectedMeme?.contractAddress;
+      if (contractAddress) {
+        const pollId = liveFetchId.current;
+        fetchLiveTokenData(contractAddress).then((d) => {
+          if (liveFetchId.current !== pollId) return;
+          if (d && Object.keys(d).length) {
+            setLiveData(d);
+            setLiveDataAddress(contractAddress);
+          }
         });
+      }
     }, 8000);
     return () => clearInterval(t);
-  }, [selectedMeme?.contractAddress]);
+  }, [selectedMeme]);
 
   const fetchEvidence = useCallback(async (meme: ScanResult) => {
     setEvidence({
@@ -1403,14 +1032,21 @@ export default function TokenPanel({ selectedMeme }: Props) {
   }, []);
 
   useEffect(() => {
-    if (selectedMeme) {
+    if (!selectedMeme) {
       setEvidence(null);
       setActiveTab("overview");
       setFullChart(false);
-      fetchEvidence(selectedMeme);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMeme?.contractAddress ?? selectedMeme?.keyword]);
+
+    const currentId = ++evidenceFetchId.current;
+    setEvidence(null);
+    setActiveTab("overview");
+    setFullChart(false);
+    fetchEvidence(selectedMeme).then(() => {
+      if (evidenceFetchId.current !== currentId) return;
+    });
+  }, [selectedMeme, fetchEvidence]);
 
   const copyCA = () => {
     if (!selectedMeme?.contractAddress) return;
@@ -1470,15 +1106,19 @@ export default function TokenPanel({ selectedMeme }: Props) {
     );
   }
 
-  // liveData.mcap comes from Jupiter (real-time) — never fall back to selectedMeme.mcap
-  // which was captured at scan time and is always stale
-  const displayMcap = liveData.mcap ?? undefined;
-  const displayLiq = liveData.liquidity || selectedMeme.liquidity;
-  const displayCh1h = liveData.priceChange1h ?? selectedMeme.priceChange1h;
-  const displayCh24h = liveData.priceChange24h ?? selectedMeme.priceChange24h;
-  const displayAge = liveData.age || selectedMeme.ageLabel;
-  const displayPrice = liveData.price;
-  const displayVolume = liveData.volume24h || selectedMeme.volume;
+  // Keep the no-flicker behavior, but never use a quote belonging to a
+  // different contract while the newly selected token is loading.
+  const currentLiveData =
+    liveDataAddress === selectedMeme.contractAddress ? liveData : {};
+  const displayMcap = currentLiveData.mcap ?? selectedMeme.mcap;
+  const displayLiq = currentLiveData.liquidity || selectedMeme.liquidity;
+  const displayCh1h =
+    currentLiveData.priceChange1h ?? selectedMeme.priceChange1h;
+  const displayCh24h =
+    currentLiveData.priceChange24h ?? selectedMeme.priceChange24h;
+  const displayAge = currentLiveData.age || selectedMeme.ageLabel;
+  const displayPrice = currentLiveData.price;
+  const displayVolume = currentLiveData.volume24h || selectedMeme.volume;
   const safetyScore = evidence?.safetyScore ?? null;
   const prediction = evidence?.prediction ?? null;
   const safetyColor =
@@ -1555,6 +1195,44 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 flexWrap: "wrap" as const,
               }}
             >
+              {selectedMeme.tokenImageUrl ? (
+                <img
+                  src={selectedMeme.tokenImageUrl}
+                  alt=""
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    objectFit: "cover" as const,
+                    flexShrink: 0,
+                    border: `1px solid ${C.border}`,
+                  }}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display =
+                      "none";
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    background: "#1a1a1a",
+                    border: `1px solid ${C.border}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: C.dim,
+                    fontSize: 11,
+                    fontWeight: 800,
+                    ...MONO,
+                    flexShrink: 0,
+                  }}
+                >
+                  {selectedMeme.keyword.charAt(0).toUpperCase()}
+                </div>
+              )}
               <span
                 style={{
                   color: isCeleb ? C.gold : "#fff",
@@ -1566,6 +1244,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
               >
                 ${selectedMeme.keyword.toUpperCase()}
               </span>
+              {selectedMeme.contractAddress && (
+                <CopyButton value={selectedMeme.contractAddress} />
+              )}
               {isCeleb && (
                 <Badge color={C.gold} bg="#ffd7000d">
                   ⭐ {selectedMeme.celebMention?.toUpperCase() || "CELEB"}
@@ -1757,7 +1438,9 @@ export default function TokenPanel({ selectedMeme }: Props) {
               onClick={() => setActiveTab(key)}
               style={{
                 background: "transparent",
-                border: "none",
+                borderTop: "none",
+                borderLeft: "none",
+                borderRight: "none",
                 borderBottom:
                   activeTab === key
                     ? `2px solid ${C.accent}`
@@ -1863,6 +1546,115 @@ export default function TokenPanel({ selectedMeme }: Props) {
                 color={displayVolume ? C.accent : undefined}
               />
             </div>
+
+            {/* Smart money — wallets buying in with a confirmed win rate on
+                this token. Net worth alone isn't shown as a signal by itself;
+                only wallets we actually have win-rate data for are listed,
+                since a rich wallet with no track record isn't "smart money,"
+                it's just a big wallet. */}
+            {selectedMeme.smartWallets &&
+              selectedMeme.smartWallets.length > 0 && (
+                <Card style={{ padding: "10px 12px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: C.label,
+                        fontSize: 8,
+                        ...MONO,
+                        letterSpacing: "0.14em",
+                      }}
+                    >
+                      🧠 SMART MONEY
+                    </div>
+                    {selectedMeme.smartMoneyScore !== undefined && (
+                      <span
+                        style={{
+                          color:
+                            selectedMeme.smartMoneyScore >= 60
+                              ? C.green
+                              : selectedMeme.smartMoneyScore >= 30
+                                ? "#ffaa00"
+                                : C.dim,
+                          fontSize: 9,
+                          ...MONO,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {selectedMeme.smartMoneyScore}/100
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column" as const,
+                      gap: 6,
+                    }}
+                  >
+                    {selectedMeme.smartWallets
+                      .filter(
+                        (w) =>
+                          w.winRatePct !== undefined &&
+                          (w.tradeCount ?? 0) >= 2,
+                      )
+                      .sort((a, b) => (b.winRatePct ?? 0) - (a.winRatePct ?? 0))
+                      .slice(0, 5)
+                      .map((w) => (
+                        <div
+                          key={w.address}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            fontSize: 9,
+                            ...MONO,
+                          }}
+                        >
+                          <span style={{ color: C.body }}>
+                            {w.address.slice(0, 4)}…{w.address.slice(-4)}
+                          </span>
+                          <span style={{ display: "flex", gap: 8 }}>
+                            {w.netWorthUsd !== undefined && (
+                              <span style={{ color: C.sub }}>
+                                {fmtMcap(w.netWorthUsd)} net worth
+                              </span>
+                            )}
+                            {w.winRatePct !== undefined && (
+                              <span
+                                style={{
+                                  color:
+                                    w.winRatePct >= 75
+                                      ? C.green
+                                      : w.winRatePct >= 55
+                                        ? "#ffaa00"
+                                        : C.red,
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {w.winRatePct.toFixed(0)}% win
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    {selectedMeme.smartWallets.filter(
+                      (w) =>
+                        w.winRatePct !== undefined && (w.tradeCount ?? 0) >= 2,
+                    ).length === 0 && (
+                      <div style={{ color: C.dim, fontSize: 9, ...MONO }}>
+                        No confirmed win-rate data on top holders yet
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              )}
 
             {/* Contract address */}
             {selectedMeme.contractAddress && (
@@ -2355,6 +2147,38 @@ export default function TokenPanel({ selectedMeme }: Props) {
 }
 
 // ── Small presentational helpers ────────────────────────────────────────────
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        });
+      }}
+      title={value}
+      style={{
+        background: "transparent",
+        border: `1px solid ${C.border}`,
+        color: copied ? C.green : C.dim,
+        fontSize: 10,
+        ...MONO,
+        padding: "4px 9px",
+        borderRadius: 8,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        transition: TRANSITION_FAST,
+      }}
+    >
+      {copied ? "✓ COPIED" : `${value.slice(0, 4)}…${value.slice(-4)} ⧉`}
+    </button>
+  );
+}
+
 function Badge({
   children,
   color,
@@ -2369,14 +2193,15 @@ function Badge({
   return (
     <span
       style={{
-        fontSize: 9,
+        fontSize: 10,
         color,
-        border: `1px solid ${color}44`,
-        background: bg,
-        padding: "3px 7px",
-        borderRadius: 4,
+        border: `1px solid ${color}33`,
+        background: bg ?? `${color}14`,
+        padding: "4px 9px",
+        borderRadius: 8,
         ...MONO,
-        fontWeight: bold ? 700 : 400,
+        fontWeight: bold ? 700 : 500,
+        letterSpacing: "0.02em",
       }}
     >
       {children}
@@ -2402,21 +2227,23 @@ function LinkPill({
     >
       <div
         style={{
-          background: "#0d0d0d",
-          border: `1px solid ${color}33`,
+          background: "rgba(255,255,255,0.03)",
+          border: `1px solid ${color}2a`,
           color,
-          fontSize: 9,
+          fontSize: 10,
           ...MONO,
-          padding: "6px 11px",
-          borderRadius: 5,
+          padding: "7px 12px",
+          borderRadius: 10,
           cursor: "pointer",
           transition: TRANSITION_FAST,
         }}
         onMouseEnter={(e) =>
-          ((e.currentTarget as HTMLElement).style.background = "#141414")
+          ((e.currentTarget as HTMLElement).style.background =
+            "rgba(255,255,255,0.06)")
         }
         onMouseLeave={(e) =>
-          ((e.currentTarget as HTMLElement).style.background = "#0d0d0d")
+          ((e.currentTarget as HTMLElement).style.background =
+            "rgba(255,255,255,0.03)")
         }
       >
         ↗ {label}

@@ -21,6 +21,11 @@ import { scanLimiter, checkLimit } from "@/lib/ratelimit";
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { env } from "@/lib/env";
+import { getSmartMoneyIntel, type SmartWallet } from "@/lib/getWalletStats";
+import {
+  recordWalletObservations,
+  getWalletReputationBoost,
+} from "@/lib/walletReputation";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -944,6 +949,8 @@ interface ConvictionInput {
   nearGraduation?: boolean;
   rugRisk?: "low" | "medium" | "high" | "unknown";
   confirmationSources?: number;
+  topHolderPct?: number;
+  smartMoneyScore?: number;
 }
 
 interface ConvictionResult {
@@ -962,6 +969,48 @@ function calcConviction(input: ConvictionInput): ConvictionResult {
     return { score: 0, tier: "SKIP", reasons: [], killers: ["High rug risk"] };
   if (input.mcap !== undefined && input.mcap > MAX_MCAP)
     return { score: 0, tier: "SKIP", reasons: [], killers: ["Mcap too high"] };
+
+  // NEW: Dead token filter (Mobius Strip heuristic)
+  // If a token has high mcap but zero liquidity relative to it, it's a dead end.
+  if (input.mcap && input.liquidity) {
+    const liqToMcap = input.liquidity / input.mcap;
+    if (liqToMcap < 0.005 && input.mcap > 50000) {
+      return {
+        score: 0,
+        tier: "SKIP",
+        reasons: [],
+        killers: ["Dead liquidity ratio (<0.5%)"],
+      };
+    }
+  }
+
+  // Holder concentration — graduated, not just the >50% binary that rugRisk
+  // already enforces upstream. One wallet holding a third of supply is a
+  // near-certain dump/rug even if it's under the "high risk" cutoff, so this
+  // scales the penalty instead of treating 10% and 49% the same.
+  if (input.topHolderPct !== undefined && input.topHolderPct > 0) {
+    if (input.topHolderPct > 0.4) {
+      return {
+        score: 0,
+        tier: "SKIP",
+        reasons: [],
+        killers: [
+          `Top holder owns ${(input.topHolderPct * 100).toFixed(0)}% — near-certain dump risk`,
+        ],
+      };
+    } else if (input.topHolderPct > 0.25) {
+      score -= 15;
+      killers.push(
+        `Top holder owns ${(input.topHolderPct * 100).toFixed(0)}% — high concentration`,
+      );
+    } else if (input.topHolderPct > 0.12) {
+      score -= 6;
+      killers.push(`Top holder owns ${(input.topHolderPct * 100).toFixed(0)}%`);
+    } else {
+      score += 4;
+      reasons.push("Holders well distributed");
+    }
+  }
   if (input.priceChange1h !== undefined && input.priceChange1h > MAX_1H_CHANGE)
     return {
       score: 0,
@@ -1129,6 +1178,16 @@ function calcConviction(input: ConvictionInput): ConvictionResult {
   } else if (input.rugRisk === "medium") {
     score -= 5;
     killers.push("Medium rug risk");
+  }
+
+  if (input.smartMoneyScore !== undefined && input.smartMoneyScore > 0) {
+    if (input.smartMoneyScore >= 60) {
+      score += 15;
+      reasons.push("Confirmed-winning wallets buying in");
+    } else if (input.smartMoneyScore >= 30) {
+      score += 8;
+      reasons.push("Some smart money present");
+    }
   }
 
   score = Math.max(0, Math.min(100, score));
@@ -3016,6 +3075,7 @@ async function scanCMCNew() {
 async function checkRug(ca: string): Promise<{
   risk: "low" | "medium" | "high" | "unknown";
   details: string;
+  topHolderPct?: number;
 }> {
   try {
     const r = await safeFetch(
@@ -3037,20 +3097,25 @@ async function checkRug(ca: string): Promise<{
       return {
         risk: "high",
         details: `Top holder owns ${(topHolderPct * 100).toFixed(0)}%`,
+        topHolderPct,
       };
     if (highRisks.length > 0)
       return {
         risk: "high",
         details: highRisks.slice(0, 2).join(", "),
+        topHolderPct,
       };
     if (score > 5000 || medRisks.length >= 3)
       return {
         risk: "medium",
         details: medRisks.slice(0, 2).join(", ") || "moderate risk",
+        topHolderPct,
       };
-    if (score === -1) return { risk: "unknown", details: "no score data" };
-    if (score >= 0) return { risk: "low", details: "passed rugcheck" };
-    return { risk: "unknown", details: "no data" };
+    if (score === -1)
+      return { risk: "unknown", details: "no score data", topHolderPct };
+    if (score >= 0)
+      return { risk: "low", details: "passed rugcheck", topHolderPct };
+    return { risk: "unknown", details: "no data", topHolderPct };
   } catch {
     return { risk: "unknown", details: "failed" };
   }
@@ -3108,6 +3173,9 @@ interface ScoreEntry {
   contractAddress?: string;
   rugRisk?: "low" | "medium" | "high" | "unknown";
   rugDetails?: string;
+  topHolderPct?: number;
+  smartMoneyScore?: number;
+  smartWallets?: SmartWallet[];
   aiContext?: string;
   viralContext?: string;
   celebMention?: string;
@@ -3882,7 +3950,7 @@ export async function GET() {
         v.telegramScore,
     }))
     .sort((a, b) => b.totalScore - a.totalScore)
-    .slice(0, 15);
+    .slice(0, 35);
 
   const rugChecks = await Promise.all(
     topByTotalScore.map(async ({ key, v }) => ({
@@ -3890,13 +3958,47 @@ export async function GET() {
       ...(await checkRug(v.contractAddress!)),
     })),
   );
-  for (const { key, risk, details } of rugChecks) {
+  for (const { key, risk, details, topHolderPct } of rugChecks) {
     const e = scoreMap.get(key);
     if (e) {
       e.rugRisk = risk;
       e.rugDetails = details;
+      e.topHolderPct = topHolderPct;
     }
   }
+
+  // ── Smart money — same top-35 batch, runs in parallel with rugcheck above
+  // rather than as a separate pass. Two Birdeye calls per token (holders +
+  // PnL), both already covered by BIRDEYE_API_KEY.
+  const smartMoneyChecks = await Promise.all(
+    topByTotalScore.map(async ({ key, v }) => ({
+      key,
+      intel: await getSmartMoneyIntel(v.contractAddress!),
+    })),
+  );
+  // Cross-scan reputation: blend each wallet's accumulated track record
+  // (learned over past scans, from Mongo) into this scan's raw score —
+  // this is the part that actually "learns" instead of judging each
+  // wallet fresh every single scan.
+  const allWallets = smartMoneyChecks.flatMap((c) => c.intel.topWallets);
+  const repBoost = await getWalletReputationBoost(
+    allWallets.map((w) => w.address),
+  );
+  for (const { key, intel } of smartMoneyChecks) {
+    const e = scoreMap.get(key);
+    if (!e) continue;
+    const repAdj = intel.topWallets.reduce(
+      (sum, w) => sum + (repBoost.get(w.address) ?? 0) * 0.15,
+      0,
+    );
+    e.smartMoneyScore = Math.max(
+      0,
+      Math.min(100, Math.round(intel.smartMoneyScore + repAdj)),
+    );
+    e.smartWallets = intel.topWallets;
+  }
+  // Fire-and-forget — don't block the scan response on a Mongo write.
+  if (allWallets.length) recordWalletObservations(allWallets);
   logs.push(`[Rugcheck] ${rugChecks.length} tokens checked`);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -4040,6 +4142,12 @@ export async function GET() {
         v.storyScore * 7.0 +
         v.twitterScore * 4.0 +
         v.telegramScore * 5.0;
+      // Smart Money boost: 0-100 score mapped to 1.0x - 3.5x multiplier.
+      // ScoreEntry keeps this optional because wallet intel may be unavailable;
+      // normalize it before arithmetic so rankings never become NaN.
+      const smartMoneyScore = v.smartMoneyScore ?? 0;
+      const smartMoneyBonus = 1 + (smartMoneyScore / 100) * 2.5;
+
       const finalRawScore = Math.round(
         raw *
           mentionWeight *
@@ -4052,17 +4160,18 @@ export async function GET() {
           twitterBonus *
           telegramBonus *
           coinabilityBonus *
+          finalMcapMult *
           viralBonus *
           rugPenalty *
           liqBonus *
           globalAgeMult *
-          finalMcapMult *
           velMult *
           volSpike *
           animalFinalBoost *
           confirmFinalBonus *
           gradFinalBonus *
-          replyBonus,
+          replyBonus *
+          smartMoneyBonus,
       );
 
       const { bonus: narrativeBonusCheck } = getNarrativeBonus(keyword);
@@ -4085,6 +4194,8 @@ export async function GET() {
         nearGraduation: v.nearGraduation,
         rugRisk: v.rugRisk,
         confirmationSources: sourceConfirmationMap.get(keyword)?.size,
+        topHolderPct: v.topHolderPct,
+        smartMoneyScore,
       });
 
       if (conviction.tier === "SKIP") return null;
@@ -4131,6 +4242,9 @@ export async function GET() {
         contractAddress: v.contractAddress,
         rugRisk: v.rugRisk,
         rugDetails: v.rugDetails,
+        topHolderPct: v.topHolderPct,
+        smartMoneyScore: v.smartMoneyScore,
+        smartWallets: v.smartWallets,
         aiContext: v.narrativeStory || v.aiContext || v.viralContext,
         celebMention: v.celebMention,
         narrativeStory: v.narrativeStory,

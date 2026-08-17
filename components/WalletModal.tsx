@@ -5,6 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 
 const MONO = {
   fontFamily: "'JetBrains Mono', 'Fira Mono', monospace" as const,
+  fontVariantNumeric: "tabular-nums" as const,
 };
 
 interface Props {

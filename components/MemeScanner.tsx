@@ -786,7 +786,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
         marginTop: 4,
         background: "#080808",
         border: "1px solid #161616",
-        borderRadius: 10,
+        borderRadius: 4,
       }}
     >
       <div>
@@ -1050,19 +1050,12 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
   );
 
   useEffect(() => {
-    const cached =
-      typeof window !== "undefined"
-        ? JSON.parse(localStorage.getItem("wraith_token_history_v2") || "{}")
-        : {};
-    const hasRecent = Object.values(cached).some(
-      (e: any) => Date.now() - (e as any).seenAt < 5 * 60 * 1000,
-    );
-    if (!hasRecent) {
-      fetchTrends();
-    } else {
-      setLastScan("cached");
-      setCountdown(REFRESH_INTERVAL);
-    }
+    // Always fetch on mount — the old cache-freshness check set the
+    // "cached" label but never actually used the cached data to populate
+    // `trends`, nor called fetchTrends(), so the panel sat empty until the
+    // next 9+ minute auto-scan interval fired. Just fetch; fetchTrends()
+    // itself is cheap to call and the panel should never render empty.
+    fetchTrends();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1436,7 +1429,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                 background: active ? `${col}14` : "#0a0a0a",
                 border: `1px solid ${active ? col + "55" : "#161616"}`,
                 color: active ? col : "#555",
-                borderRadius: 20,
+                borderRadius: 4,
                 padding: "4px 11px",
                 fontSize: 9,
                 fontWeight: active ? 700 : 400,
@@ -1465,7 +1458,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       {filtered.length === 0 && !loading && !error && (
         <div
           style={{
-            flex: 1,
+            minHeight: 160,
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -1476,7 +1469,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
           <div
             style={{
               color: "#222",
-              fontSize: 28,
+              fontSize: 18,
               ...MONO,
               letterSpacing: "0.3em",
             }}
@@ -1538,7 +1531,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       : "#140800"
                     : "#0a0a0a",
                   border: `1px solid ${isSelected ? (isCeleb ? "#ffd70044" : "#e8490f44") : "#161616"}`,
-                  borderRadius: 10,
+                  borderRadius: 4,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",

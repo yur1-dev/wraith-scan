@@ -53,7 +53,8 @@ async function getSolUsd(): Promise<number> {
     );
     const data = await res.json();
     const price = parseFloat(
-      data?.data?.So11111111111111111111111111111111111111112?.price ?? "0",
+      data?.data?.So11111111111111111111111111111111111111112?.price ?? 
+        data?.So11111111111111111111111111111111111111112?.usdPrice ?? "0",
     );
     if (price > 0) {
       _solUsdCache = { price, ts: Date.now() };
@@ -72,6 +73,8 @@ async function fromPumpFun(ca: string): Promise<LiveTokenPrice | null> {
     });
     if (!res.ok) return null;
     const d = await res.json();
+    
+    // pump.fun market_cap is usually the "real" circulating market cap on the curve
     const mcap = d?.usd_market_cap ?? d?.market_cap ?? 0;
     if (!mcap || mcap <= 0) return null;
 
@@ -100,11 +103,12 @@ export async function getTokenPrice(
   ca: string,
   opts?: { skipJupiter?: boolean },
 ): Promise<LiveTokenPrice> {
-  const cached = _cache.get(ca);
+  const cacheKey = `${ca}|${opts?.skipJupiter ? "1" : "0"}`;
+  const cached = _cache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_MS) return cached.data;
 
   const result = await _fetchTokenPrice(ca, opts?.skipJupiter ?? false);
-  _cache.set(ca, { data: result, ts: Date.now() });
+  _cache.set(cacheKey, { data: result, ts: Date.now() });
   return result;
 }
 
@@ -135,16 +139,22 @@ async function _fetchTokenPrice(
           ? Math.floor((Date.now() - pair.pairCreatedAt) / 60000)
           : undefined;
 
-        // Use circulating marketCap, not fdv (fdv = total supply, inflated)
-        const dexMcap = pair.marketCap || pair.fdv || 0;
-        const dexPrice = parseFloat(pair.priceUsd || "0") || 0;
+        // Keep price, liquidity, volume, and market cap tied to the same
+        // canonical Solana pair. FDV is not circulating market cap, so use it
+        // only as an explicitly marked fallback; never manufacture a value from
+        // liquidity (that created false numbers such as 118k MC).
+        const dexPrice = Number(pair.priceUsd) || 0;
+        const hasMarketCap = Number(pair.marketCap) > 0;
+        const dexMcap = hasMarketCap
+          ? Number(pair.marketCap)
+          : Number(pair.fdv) > 0
+            ? Number(pair.fdv)
+            : undefined;
 
-        if (dexPrice > 0 && dexMcap > 0) {
-          const freshSupply = dexMcap / dexPrice;
+        if (hasMarketCap && dexPrice > 0) {
+          const freshSupply = Number(pair.marketCap) / dexPrice;
           const cachedSupply = _supplyCache.get(ca);
-          // Refresh if unset, or if the new read disagrees with cache by more
-          // than 5% — a stale/bad first snapshot shouldn't get locked in
-          // permanently.
+          // Only learn supply from a real market-cap value, never from FDV.
           if (
             !cachedSupply ||
             Math.abs(freshSupply - cachedSupply) / cachedSupply > 0.05
@@ -156,40 +166,51 @@ async function _fetchTokenPrice(
         let mcap = dexMcap;
         let price = dexPrice;
 
-        // Overlay Jupiter — the price swaps actually execute at, more
-        // current than DexScreener's cached pair snapshot when available.
-        // Skipped for bulk background refreshes (WinsPanel tracking N
-        // tokens at once) since that precision only matters for whatever
-        // token the user actually has open — halves the request count
-        // for bulk callers with zero visible accuracy loss there.
+        // Jupiter is useful for a fresher executable price, but combining two
+        // materially different sources produces a fake market cap. Accept it
+        // only when it is within 33% of the canonical DEX pair.
         try {
-          if (skipJupiter) throw new Error("skip");
-          const jupRes = await fetch(`/api/jupiter?endpoint=price&ids=${ca}`, {
-            signal: AbortSignal.timeout(4000),
-          });
-          const jupData = await jupRes.json();
-          const jupPrice = parseFloat(jupData?.data?.[ca]?.price ?? "0");
-          if (jupPrice > 0) {
-            price = jupPrice;
-            const supply = _supplyCache.get(ca);
-            if (supply && supply > 0) {
-              mcap = jupPrice * supply;
-            } else if (dexMcap > 0 && dexPrice > 0) {
-              mcap = (jupPrice / dexPrice) * dexMcap;
+          if (!skipJupiter && dexPrice > 0) {
+            const jupRes = await fetch(`/api/jupiter?endpoint=price&ids=${ca}`, {
+              signal: AbortSignal.timeout(4000),
+            });
+            if (jupRes.ok) {
+              const jupData = await jupRes.json();
+              const jupPrice = Number(
+                jupData?.[ca]?.usdPrice ??
+                  jupData?.data?.[ca]?.usdPrice ??
+                  jupData?.data?.[ca]?.price ??
+                  0,
+              );
+              const priceRatio = jupPrice / dexPrice;
+              if (
+                jupPrice > 0 &&
+                Number.isFinite(priceRatio) &&
+                priceRatio >= 0.67 &&
+                priceRatio <= 1.5
+              ) {
+                price = jupPrice;
+                const supply = _supplyCache.get(ca);
+                // If circulating supply is known from DexScreener's actual
+                // marketCap, keep MCAP internally consistent with Jupiter.
+                if (supply && supply > 0 && hasMarketCap) {
+                  mcap = jupPrice * supply;
+                }
+                return {
+                  mcap,
+                  price,
+                  liquidity: pair.liquidity?.usd,
+                  priceChange1h: pair.priceChange?.h1,
+                  priceChange24h: pair.priceChange?.h24,
+                  volume24h: pair.volume?.h24,
+                  ageMinutes,
+                  source: "dexscreener+jupiter",
+                };
+              }
             }
-            return {
-              mcap,
-              price,
-              liquidity: pair.liquidity?.usd,
-              priceChange1h: pair.priceChange?.h1,
-              priceChange24h: pair.priceChange?.h24,
-              volume24h: pair.volume?.h24,
-              ageMinutes,
-              source: "dexscreener+jupiter",
-            };
           }
         } catch {
-          // Jupiter unavailable — DexScreener values still valid
+          // Jupiter unavailable or inconsistent — keep the canonical pair data.
         }
 
         return {
@@ -216,9 +237,6 @@ async function _fetchTokenPrice(
 }
 
 // ─── Back-compat thin wrappers ──────────────────────────────────────────────
-// So existing call sites (fetchCurrentMcap, fetchMcap, fetchLiveTokenData)
-// can be swapped to call these without restructuring every caller at once.
-
 export async function getMcap(
   ca: string,
   opts?: { skipJupiter?: boolean },

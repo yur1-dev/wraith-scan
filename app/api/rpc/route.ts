@@ -67,10 +67,18 @@ export async function POST(req: NextRequest) {
   }
 
   // ── RATE LIMIT ────────────────────────────────────────────────────────────
-  // Fails open if Redis is unavailable — better than taking down all RPC calls
+  // Fail closed if Redis is unavailable. This endpoint fans out to public RPC
+  // providers, so allowing unlimited requests during a limiter outage would
+  // turn an infrastructure failure into an abuse vector.
   const rateLimitResult = await rpcLimiter
     .limit(session.user.id)
-    .catch(() => ({ success: true }));
+    .catch(() => null);
+  if (!rateLimitResult) {
+    return NextResponse.json(
+      { error: "Rate limiter unavailable" },
+      { status: 503 },
+    );
+  }
   if (!rateLimitResult.success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }

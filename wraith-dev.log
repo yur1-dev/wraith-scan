@@ -1,0 +1,24 @@
+
+> wraith-app@0.1.0 dev
+> next dev
+
+⚠ Port 3000 is in use by an unknown process, using available port 3001 instead.
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://192.168.56.1:3001
+- Environments: .env.local
+✓ Ready in 1939ms
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          23716
+- Dir:          C:\Users\yuri\Documents\Dev Works\wraith-app
+- Log:          .next\dev\logs\next-development.log
+
+Run taskkill /PID 23716 /F to stop it.
+[?25h
+
+C:\Users\yuri\Documents\Dev Works\wraith-app>'unction' is not recognized as an internal or external command,
+operable program or batch file.
+
+C:\Users\yuri\Documents\Dev Works\wraith-app>

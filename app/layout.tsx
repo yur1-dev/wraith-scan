@@ -28,7 +28,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en" className={mono.variable}>
-      <body style={{ fontFamily: "var(--font-mono)" }}>
+      <body>
         <AppSessionProvider session={session}>
           <WalletProvider>
             <WraithTierProvider>{children}</WraithTierProvider>

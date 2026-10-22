@@ -1,12 +1,38 @@
 @import "tailwindcss";
 
+:root {
+  --font-sans: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  --color-app: #090a0f;
+  --color-surface: #101117;
+  --color-surface-raised: #151720;
+  --color-surface-hover: #1b1d27;
+  --color-text: #f4f5f7;
+  --color-muted: #a0a3ad;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --accent: #e8490f;
+  --color-positive: #22c55e;
+  --color-negative: #ef4444;
+  --color-new: #a855f7;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
-  background: #080808;
-  color: white;
+  background: var(--color-app);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 ::-webkit-scrollbar {
@@ -23,8 +49,6 @@ body {
   background: #ff5a1f;
 }
 
-/* ── ADD THESE TO YOUR globals.css ── */
-
 /* Prevent zoom on input focus (iOS) */
 input,
 textarea,
@@ -32,8 +56,6 @@ select {
   font-size: 16px !important; /* iOS won't zoom if >= 16px */
 }
 
-/* But override for monospace display inputs that are intentionally small — 
-   we handle this by wrapping in a scale transform instead */
 @media (max-width: 767px) {
   /* Allow scroll bounce on mobile panels */
   .mobile-scroll {
@@ -57,29 +79,154 @@ select {
   }
 }
 
-/* Sharpness pass: preserve original palette, reduce softness. */
-button,
-input,
-select,
-textarea {
-  border-radius: 3px;
-}
-button {
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease,
-    color 0.12s ease,
-    transform 0.12s ease;
-}
-button:active {
-  transform: translateY(1px);
-}
 hr {
   border: 0;
-  border-top: 1px solid #1c1c1c;
+  border-top: 1px solid var(--color-border);
 }
 
-/* Add this to app/globals.css — powers the Skeleton loading component */
+.wraith-dashboard {
+  background:
+    radial-gradient(
+      ellipse at 50% -18%,
+      rgba(232, 73, 15, 0.075),
+      transparent 42%
+    ),
+    var(--color-app) !important;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.wraith-dashboard [style*="font-family"],
+.wraith-dashboard button,
+.wraith-dashboard input,
+.wraith-dashboard select,
+.wraith-dashboard textarea {
+  font-family: var(--font-sans) !important;
+}
+
+.wraith-dashboard button {
+  border-radius: var(--radius-control) !important;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    transform 0.12s ease;
+}
+
+.wraith-dashboard button:active {
+  transform: translateY(1px);
+}
+
+.wraith-dashboard input,
+.wraith-dashboard select,
+.wraith-dashboard textarea {
+  border-radius: var(--radius-control) !important;
+}
+
+.wraith-dashboard [role="button"] {
+  border-radius: var(--radius-card) !important;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.wraith-dashboard [role="button"]:hover {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.035),
+    inset 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.wraith-dashboard > header {
+  background: rgba(16, 17, 23, 0.94) !important;
+  border-bottom-color: var(--color-border) !important;
+  backdrop-filter: blur(18px);
+}
+
+.wraith-scanner {
+  background: var(--color-surface) !important;
+  border-right-color: var(--color-border) !important;
+}
+
+.wraith-scanner [style*="font-family"] {
+  font-family: var(--font-sans) !important;
+}
+
+.wraith-scanner [style*="border-bottom"] {
+  border-bottom-color: var(--color-border) !important;
+}
+
+.wraith-dashboard [style*="font-size: 8px"],
+.wraith-dashboard [style*="font-size: 9px"],
+.wraith-dashboard [style*="font-size: 10px"],
+.wraith-dashboard [style*="font-size: 11px"] {
+  font-size: 12px !important;
+}
+
+.wraith-dashboard [style*="color: #444"],
+.wraith-dashboard [style*="color: #484848"],
+.wraith-dashboard [style*="color: #555"],
+.wraith-dashboard [style*="color: #666"],
+.wraith-dashboard [style*="color: #777"] {
+  color: var(--color-muted) !important;
+}
+
+@media (min-width: 768px) {
+  .wraith-dashboard main {
+    padding: 10px 12px !important;
+  }
+
+  .wraith-dashboard main > div:first-child {
+    padding: 0 0 10px !important;
+  }
+
+  .wraith-dashboard main > div:first-child > div:nth-child(1),
+  .wraith-dashboard main > div:first-child > div:nth-child(3),
+  .wraith-dashboard main > div:first-child > div:nth-child(5) {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+  .wraith-dashboard main > div:first-child > div:first-child {
+    width: 220px !important;
+  }
+
+  .wraith-dashboard main > div:first-child > div:nth-child(5) {
+    width: 260px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .wraith-dashboard > nav {
+    background: rgba(21, 23, 32, 0.9) !important;
+    border-top-color: var(--color-border) !important;
+    backdrop-filter: blur(18px);
+  }
+
+  .wraith-dashboard > nav button {
+    border-radius: var(--radius-control) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @keyframes wraith-skeleton {
   0% {
     background-position: 100% 50%;

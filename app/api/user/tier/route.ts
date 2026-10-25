@@ -3,26 +3,34 @@
 // Saves tier to MongoDB so the alert broadcaster can query it.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import clientPromise from "@/lib/mongoClient";
 import { ObjectId } from "mongodb";
+import { getPrivySession } from "@/lib/privyAuth";
+import { getDb } from "@/lib/mongoClient";
+
+const VALID_TIERS = ["GHOST", "SHADE", "SPECTER", "WRAITH"];
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id)
+  const session = await getPrivySession();
+  if (!session?.user?.id || !ObjectId.isValid(session.user.id))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { tier, walletAddress } = await req.json();
+  let body: { tier?: unknown; walletAddress?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-  // Validate tier value
-  const validTiers = ["GHOST", "SHADE", "SPECTER", "WRAITH"];
-  if (!validTiers.includes(tier))
+  const { tier, walletAddress } = body;
+  if (typeof tier !== "string" || !VALID_TIERS.includes(tier))
     return NextResponse.json({ error: "Invalid tier" }, { status: 400 });
+  if (
+    walletAddress !== undefined &&
+    (typeof walletAddress !== "string" || walletAddress.length > 64)
+  )
+    return NextResponse.json({ error: "Invalid wallet" }, { status: 400 });
 
-  const client = await clientPromise;
-  const db = client.db();
-
+  const db = await getDb();
   await db.collection("users").updateOne(
     { _id: new ObjectId(session.user.id) },
     {

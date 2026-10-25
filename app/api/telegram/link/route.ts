@@ -1,15 +1,14 @@
 // app/api/telegram/link/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAppSession } from "@/lib/session";
 import clientPromise from "@/lib/mongoClient";
 import { ObjectId } from "mongodb";
 import crypto from "crypto";
 
 // POST — generate a one-time deep link token
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await getAppSession();
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -33,7 +32,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE — unlink Telegram from account
 export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await getAppSession();
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -44,7 +43,7 @@ export async function DELETE(req: NextRequest) {
     .collection("users")
     .updateOne(
       { _id: new ObjectId(session.user.id) },
-      { $unset: { telegramChatId: "", telegramLinkedAt: "", tier: "" } },
+      { $unset: { telegramChatId: "", telegramLinkedAt: "" } },
     );
 
   return NextResponse.json({ ok: true });

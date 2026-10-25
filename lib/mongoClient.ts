@@ -56,18 +56,13 @@ export async function ensureIndexes(): Promise<void> {
   try {
     const db = await getDb();
 
-    // ── users (managed by NextAuth adapter) ───────────────────────────────────
-    // NextAuth creates its own indexes, but these cover our app-level queries.
+    // ── account identity ──────────────────────────────────────────────────────
     await db
       .collection("users")
       .createIndex({ email: 1 }, { unique: true, sparse: true });
-
-    // ── sessions (NextAuth) ───────────────────────────────────────────────────
-    await db.collection("sessions").createIndex({ userId: 1 });
-    await db.collection("sessions").createIndex(
-      { expires: 1 },
-      { expireAfterSeconds: 0 }, // MongoDB TTL — auto-deletes expired sessions
-    );
+    await db
+      .collection("users")
+      .createIndex({ privyUserId: 1 }, { unique: true, sparse: true });
 
     // ── positions ─────────────────────────────────────────────────────────────
     // Primary query: all positions for a user, sorted by open time

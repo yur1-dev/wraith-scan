@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAppSession } from "@/lib/session";
 import { analyzeLimiter, checkLimit } from "@/lib/ratelimit";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
@@ -202,7 +201,7 @@ function buildPrediction(
 }
 
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await getAppSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAppSession } from "@/lib/session";
 import { getDb } from "@/lib/mongoClient";
 import { Collection } from "mongodb";
 import { ITokenHistory, TOKEN_HISTORY_COLLECTION } from "@/models/TokenHistory";
@@ -51,7 +50,7 @@ function calcMultiplier(init: number, peak: number): number {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await getAppSession();
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

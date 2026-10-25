@@ -1,0 +1,100 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { MemeTrend } from "@/app/app/page";
+
+type Pair = {
+  chainId: string;
+  pairAddress: string;
+  pairCreatedAt?: number;
+  baseToken: { address: string; name: string; symbol: string };
+  priceUsd?: string;
+  priceChange?: { m5?: number; h1?: number; h24?: number };
+  volume?: { m5?: number; h24?: number };
+  liquidity?: { usd?: number };
+  marketCap?: number;
+  fdv?: number;
+  info?: { imageUrl?: string };
+};
+type Row = Pair & { ageMinutes: number };
+
+const money = (value?: number) => {
+  if (!value || !Number.isFinite(value)) return "—";
+  return value >= 1e6 ? `$${(value / 1e6).toFixed(1)}M` : value >= 1e3 ? `$${(value / 1e3).toFixed(1)}K` : `$${value.toFixed(0)}`;
+};
+
+export default function TokenMarketList({ onSelectMeme, selectedMeme }: { onSelectMeme: (meme: MemeTrend) => void; selectedMeme: MemeTrend | null }) {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    try {
+      setError("");
+      const candidateUrls = [
+        "https://api.dexscreener.com/token-boosts/top/v1",
+        "https://api.dexscreener.com/token-boosts/latest/v1",
+        "https://api.dexscreener.com/token-profiles/latest/v1",
+      ];
+      const candidateLists = await Promise.all(candidateUrls.map(async (url): Promise<unknown> => {
+        try {
+          const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+          return response.ok ? await response.json() : [];
+        } catch { return []; }
+      }));
+      const supported = new Set(["solana", "base", "ethereum", "bsc", "monad"]);
+      const byChain = new Map<string, string[]>();
+      for (const candidates of candidateLists) if (Array.isArray(candidates)) for (const item of candidates) {
+        if (!item || typeof item !== "object" || !("chainId" in item) || !("tokenAddress" in item)) continue;
+        const token = item as { chainId: string; tokenAddress: string };
+        if (!supported.has(token.chainId)) continue;
+        const group = byChain.get(token.chainId) ?? [];
+        if (group.length < 60 && !group.includes(token.tokenAddress)) group.push(token.tokenAddress);
+        byChain.set(token.chainId, group);
+      }
+      if (!byChain.size) throw new Error("Token list is temporarily unavailable.");
+      const pairGroups = await Promise.all([...byChain].map(async ([chain, addresses]) => {
+        const result = await fetch(`https://api.dexscreener.com/tokens/v1/${chain}/${[...new Set(addresses)].join(",")}`, { signal: AbortSignal.timeout(12000) });
+        return result.ok ? await result.json() as Pair[] : [];
+      }));
+      const bestPairByToken = new Map<string, Pair>();
+      for (const pair of pairGroups.flat()) {
+        if (!pair.baseToken?.address) continue;
+        const old = bestPairByToken.get(pair.baseToken.address);
+        if (!old || (pair.liquidity?.usd ?? 0) > (old.liquidity?.usd ?? 0)) bestPairByToken.set(pair.baseToken.address, pair);
+      }
+      const now = Date.now();
+      setRows([...bestPairByToken.values()]
+        .map((pair) => ({ ...pair, ageMinutes: pair.pairCreatedAt ? Math.max(0, Math.floor((now - pair.pairCreatedAt) / 60000)) : Infinity }))
+        .filter((pair) => Number(pair.priceUsd) > 0)
+        .sort((a, b) => (b.volume?.h24 ?? b.volume?.m5 ?? 0) - (a.volume?.h24 ?? a.volume?.m5 ?? 0))
+        .slice(0, 60));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load tokens.");
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 45_000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  return <section style={{ height: "100%", minHeight: 0, overflowY: "auto", color: "var(--text)" }}>
+    <header style={{ padding: "14px 14px 11px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)" }}>
+      <strong style={{ fontSize: 14 }}>Tokens</strong>
+      <button type="button" onClick={() => void refresh()} aria-label="Refresh token list" title="Refresh" style={{ width: 30, height: 30, display: "grid", placeItems: "center", border: "1px solid var(--border)", borderRadius: 8, background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}><RefreshCw size={14} /></button>
+    </header>
+    {loading ? <div style={{ padding: 20, color: "var(--text-muted)", fontSize: 12 }}>Loading tokens...</div> : error ? <div style={{ padding: 20, color: "var(--orange-hot)", fontSize: 12 }}>{error}</div> : rows.length ? rows.map((row) => {
+      const active = selectedMeme?.contractAddress === row.baseToken.address;
+      const change = row.priceChange?.h24 ?? row.priceChange?.h1 ?? row.priceChange?.m5;
+      const meme: MemeTrend = { keyword: row.baseToken.symbol, score: change ?? 0, posts: 0, source: "dexscreener", contractAddress: row.baseToken.address, tokenImageUrl: row.info?.imageUrl, mcap: row.marketCap ?? row.fdv, liquidity: row.liquidity?.usd, volume: row.volume?.h24 };
+      return <button key={row.baseToken.address} type="button" onClick={() => onSelectMeme(meme)} style={{ width: "100%", minHeight: 68, padding: "9px 13px", display: "flex", alignItems: "center", gap: 10, border: 0, borderBottom: "1px solid var(--border)", background: active ? "var(--surface-raised)" : "transparent", color: "var(--text)", textAlign: "left", cursor: "pointer" }}>
+        <span style={{ width: 38, height: 38, flex: "0 0 38px", overflow: "hidden", display: "grid", placeItems: "center", borderRadius: "50%", background: "var(--surface-raised)", color: "var(--orange-hot)", fontSize: 13, fontWeight: 700 }}>{row.info?.imageUrl ? <img src={row.info.imageUrl} alt="" width={38} height={38} style={{ objectFit: "cover" }} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : row.baseToken.symbol.slice(0, 1)}</span>
+        <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{row.baseToken.symbol}<small style={{ marginLeft: 6, color: "#35d58a", fontSize: 10, fontWeight: 600 }}>↗ {row.ageMinutes}m</small></strong><small style={{ display: "block", marginTop: 4, color: "var(--text-muted)", fontSize: 11 }}>{money(row.volume?.m5)} vol</small></span>
+        <span style={{ textAlign: "right", flex: "0 0 auto" }}><strong style={{ display: "block", fontSize: 13 }}>{money(row.marketCap ?? row.fdv)} MC</strong><small style={{ display: "block", marginTop: 4, color: change === undefined ? "var(--text-muted)" : change >= 0 ? "var(--green, #1bc47d)" : "var(--red, #ff614f)", fontSize: 11 }}>{change === undefined ? "—" : `${change >= 0 ? "▲" : "▼"} ${Math.abs(change).toFixed(2)}%`}</small></span>
+      </button>;
+    }) : <div style={{ padding: 22, color: "var(--text-muted)", fontSize: 12 }}>No tokens available right now. Try refreshing.</div>}
+  </section>;
+}

@@ -6,10 +6,13 @@ import {
   useCallback,
   createContext,
   useContext,
+  useMemo,
 } from "react";
-import { useSession } from "next-auth/react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { usePrivy } from "@privy-io/react-auth";
 import { PublicKey } from "@solana/web3.js";
+import { useWraithSession } from "@/components/SessionProvider";
+import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
 import {
   WRAITH_MINT,
   getTierFromBalance,
@@ -17,7 +20,11 @@ import {
   TIERS,
   type TierKey,
 } from "@/lib/tiers";
-import { isWhitelisted, getTierOverride } from "@/lib/whitelist";
+import {
+  isEmailWhitelisted,
+  isWhitelisted,
+  getTierOverride,
+} from "@/lib/whitelist";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -41,18 +48,54 @@ export function WraithTierProvider({
 }: {
   children: React.ReactNode;
 }) {
+  if (!PRIVY_WALLETS_ENABLED) {
+    return (
+      <UnavailableWalletTierProvider>{children}</UnavailableWalletTierProvider>
+    );
+  }
+  return <EmbeddedWalletTierProvider>{children}</EmbeddedWalletTierProvider>;
+}
+
+function EmbeddedWalletTierProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const { connection } = useConnection();
-  const { publicKey, connected } = useWallet();
-  const { status } = useSession();
+  const { data: session, status } = useWraithSession();
+  const { ready: privyReady, authenticated, user, getAccessToken } = usePrivy();
+  const embeddedSolana = user?.linkedAccounts.find(
+    (account) =>
+      account.type === "wallet" &&
+      account.chainType === "solana" &&
+      account.walletClientType === "privy",
+  );
+  const walletAddress =
+    embeddedSolana?.type === "wallet" ? embeddedSolana.address : null;
+  const publicKey = useMemo(
+    () => (walletAddress ? new PublicKey(walletAddress) : null),
+    [walletAddress],
+  );
 
   const [rawBalance, setRawBalance] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [isWhitelistMember, setIsWhitelistMember] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [isWalletWhitelistMember, setIsWalletWhitelistMember] = useState(false);
 
   const fetchBalance = useCallback(async () => {
-    if (!connected || !publicKey) {
+    if (!privyReady) {
+      setLoading(true);
+      return;
+    }
+    if (!authenticated) {
       setRawBalance(0);
-      setIsWhitelistMember(false);
+      setIsWalletWhitelistMember(false);
+      setLoading(false);
+      return;
+    }
+    if (!publicKey) {
+      setRawBalance(0);
+      setIsWalletWhitelistMember(false);
+      setLoading(false);
       return;
     }
 
@@ -60,13 +103,13 @@ export function WraithTierProvider({
 
     // Whitelist check — skip RPC entirely, force WRAITH
     if (isWhitelisted(walletStr)) {
-      setIsWhitelistMember(true);
+      setIsWalletWhitelistMember(true);
       setRawBalance(0);
       setLoading(false);
       return;
     }
 
-    setIsWhitelistMember(false);
+    setIsWalletWhitelistMember(false);
 
     // Token not deployed yet — skip RPC to avoid base58 parse error
     if (!WRAITH_MINT || WRAITH_MINT === "WRAITH_TOKEN_MINT_PLACEHOLDER") {
@@ -97,7 +140,7 @@ export function WraithTierProvider({
     } finally {
       setLoading(false);
     }
-  }, [connected, publicKey, connection]);
+  }, [authenticated, connection, privyReady, publicKey]);
 
   useEffect(() => {
     fetchBalance();
@@ -109,6 +152,8 @@ export function WraithTierProvider({
   // 3. Token balance → computed tier
   const walletStr = publicKey?.toString() ?? null;
   const tierOverride = getTierOverride(walletStr);
+  const isWhitelistMember =
+    isWalletWhitelistMember || isEmailWhitelisted(session?.user?.email);
 
   const tier = isWhitelistMember
     ? TIERS.WRAITH
@@ -118,18 +163,53 @@ export function WraithTierProvider({
 
   // ─── Sync tier to MongoDB so alert broadcaster knows who to send to ──────
   useEffect(() => {
-    if (status !== "authenticated") return;
+    if (status !== "authenticated" || !privyReady || !authenticated) return;
     if (loading) return;
     const tierKey = isWhitelistMember ? "WRAITH" : tier.key;
-    fetch("/api/user/tier", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tier: tierKey,
-        walletAddress: walletStr ?? undefined,
-      }),
-    }).catch(() => {});
-  }, [tier.key, status, loading, isWhitelistMember, walletStr]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken || cancelled) return;
+        const sessionResponse = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        });
+        if (!sessionResponse.ok) {
+          throw new Error(
+            `Could not refresh the authenticated session (${sessionResponse.status}).`,
+          );
+        }
+        if (cancelled) return;
+        const res = await fetch("/api/user/tier", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tier: tierKey,
+            walletAddress: walletStr ?? undefined,
+          }),
+        });
+        if (!res.ok && !cancelled) {
+          console.warn("[WraithTier] Tier sync rejected:", res.status);
+        }
+      } catch (error) {
+        console.error("[WraithTier] Failed to sync tier:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    getAccessToken,
+    authenticated,
+    tier.key,
+    status,
+    loading,
+    isWhitelistMember,
+    walletStr,
+    privyReady,
+  ]);
 
   const canUseFeature = useCallback(
     (feature: string) => {
@@ -148,6 +228,48 @@ export function WraithTierProvider({
         isWhitelistMember,
         canUse: canUseFeature,
         refresh: fetchBalance,
+      }}
+    >
+      {children}
+    </WraithTierContext.Provider>
+  );
+}
+
+function UnavailableWalletTierProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { data: session, status } = useWraithSession();
+  const isWhitelistMember =
+    status === "authenticated" && isEmailWhitelisted(session?.user?.email);
+  const tier = isWhitelistMember ? TIERS.WRAITH : TIERS.GHOST;
+  const canUseFeature = useCallback(
+    (feature: string) => isWhitelistMember || canUse(tier, feature),
+    [isWhitelistMember, tier],
+  );
+  const refresh = useCallback(() => {}, []);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !isWhitelistMember) return;
+    fetch("/api/user/tier", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier: "WRAITH" }),
+    }).catch((error) =>
+      console.error("[WraithTier] Failed to sync account access:", error),
+    );
+  }, [isWhitelistMember, status]);
+
+  return (
+    <WraithTierContext.Provider
+      value={{
+        tier,
+        rawBalance: 0,
+        loading: false,
+        isWhitelistMember,
+        canUse: canUseFeature,
+        refresh,
       }}
     >
       {children}
@@ -214,7 +336,7 @@ export function TierBadge({ compact = false }: { compact?: boolean }) {
             paddingLeft: 6,
           }}
         >
-          DEV
+          ACCESS
         </span>
       )}
     </div>

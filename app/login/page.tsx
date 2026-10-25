@@ -1,23 +1,13 @@
 "use client";
 
-import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { TIERS, TIER_ORDER, type TierKey } from "@/lib/tiers";
 import { useWraithTier } from "@/hooks/useWraithTier";
+import { useWraithSession } from "@/components/SessionProvider";
 
 const MONO = {
   fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
-};
-
-const ERROR_MESSAGES: Record<string, string> = {
-  OAuthSignin: "Failed to start Google sign-in.",
-  OAuthCallback: "Google sign-in was cancelled or failed.",
-  OAuthCreateAccount: "Could not create your account. Try again.",
-  EmailCreateAccount: "Could not create your account. Try again.",
-  Callback: "Sign-in callback error. Try again.",
-  OAuthAccountNotLinked: "This email is linked to a different provider.",
-  default: "Sign-in failed. Please try again.",
 };
 
 const TIER_ACCENT: Record<TierKey, string> = {
@@ -52,7 +42,6 @@ const ALL_FEATURES: { id: string; label: string }[] = [
   { id: "scanner_view", label: "View Scanner" },
   { id: "sniper", label: "Sniper / Auto-buy" },
   { id: "auto_sell", label: "Auto TP / SL / Trail" },
-  { id: "hot_wallet", label: "Hot Wallet" },
   { id: "telegram_alerts", label: "Telegram Alerts" },
   { id: "ai_score", label: "AI Score" },
   { id: "live_signals_view", label: "Live Signals" },
@@ -71,6 +60,23 @@ function patchTier(key: TierKey) {
 const DISPLAY_TIERS = Object.fromEntries(
   TIER_ORDER.map((k) => [k, patchTier(k)]),
 ) as typeof TIERS;
+
+function safeCallback(raw: string | null): string {
+  if (!raw) return "/app";
+  try {
+    if (raw.startsWith("http")) {
+      const u = new URL(raw);
+      if (typeof window !== "undefined" && u.origin !== window.location.origin)
+        return "/app";
+      return `${u.pathname}${u.search}` || "/app";
+    }
+  } catch {
+    return "/app";
+  }
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/app";
+  if (raw === "/") return "/app";
+  return raw;
+}
 
 function GhostIcon({ tier, lit }: { tier: TierKey; lit: boolean }) {
   return (
@@ -118,30 +124,53 @@ function GoogleIcon() {
   );
 }
 
-export default function LoginPage() {
-  const { data: session, status } = useSession();
+function LoginInner() {
+  const { status, login, syncAppSession } = useWraithSession();
   const { tier: currentTier, loading: tierLoading } = useWraithTier();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [loading, setLoading] = useState(false);
   const [hovered, setHovered] = useState<TierKey | null>(null);
   const [mounted, setMounted] = useState(false);
   const [buyHovered, setBuyHovered] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const redirected = useRef(false);
 
-  const errorCode = searchParams.get("error") ?? "";
-  const errorMsg = errorCode
-    ? (ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES.default)
-    : null;
+  const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
 
   useEffect(() => {
     setMounted(true);
-    if (session) router.push("/app");
-  }, [session, router]);
+  }, []);
+
+  // Once Privy says authenticated, create the app session cookie, then go.
+  // Re-runs when syncAppSession changes (identity token arriving late).
+  useEffect(() => {
+    if (status !== "authenticated" || redirected.current) return;
+    let cancelled = false;
+    setSyncError(null);
+    setSyncing(true);
+    syncAppSession()
+      .then(() => {
+        if (cancelled || redirected.current) return;
+        redirected.current = true;
+        router.replace(callbackUrl);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setSyncError(
+          err instanceof Error ? err.message : "Could not start your session.",
+        );
+        setSyncing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, syncAppSession, router, callbackUrl]);
 
   if (status === "loading") return null;
-  if (session) return null;
 
   const activeTier = mounted && !tierLoading ? currentTier.key : null;
+  const busy = syncing;
 
   return (
     <div
@@ -161,10 +190,6 @@ export default function LoginPage() {
         @keyframes fadein { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
 
         .brand { animation: flicker 9s ease-in-out infinite; }
-        .live-dot {
-          width:5px;height:5px;border-radius:50%;background:#00c47a;
-          flex-shrink:0;animation:dotpulse 2s ease-in-out infinite;display:inline-block;
-        }
         .scan-line {
           position:absolute;left:0;right:0;height:1px;
           background:linear-gradient(to right,transparent,#e8490f18,transparent);
@@ -223,64 +248,30 @@ export default function LoginPage() {
         }
         .step-row:last-child { border-bottom:none; }
 
-        /* ── LAYOUT ── */
-        .login-layout {
-          display: flex;
-          flex-direction: row;
-          height: 100vh;
-          overflow: hidden;
-        }
+        .login-layout { display:flex; flex-direction:row; height:100vh; overflow:hidden; }
         .login-left {
-          width: 52%;
-          border-right: 1px solid #111;
-          display: flex;
-          flex-direction: column;
-          padding: 24px 28px 20px;
-          position: relative;
-          height: 100vh;
-          overflow: hidden;
+          width:52%; border-right:1px solid #111; display:flex; flex-direction:column;
+          padding:24px 28px 20px; position:relative; height:100vh; overflow:hidden;
         }
         .login-right {
-          width: 48%;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          position: relative;
-          padding: 48px 48px;
-          height: 100vh;
-          overflow: hidden;
+          width:48%; display:flex; flex-direction:column; align-items:center;
+          justify-content:center; position:relative; padding:48px 48px;
+          height:100vh; overflow:hidden;
         }
 
-        /* Mobile: hide left panel entirely, right panel fills full screen */
         @media (max-width: 768px) {
-          .login-layout {
-            height: 100vh;
-            overflow: hidden;
-          }
-          .login-left {
-            display: none;
-          }
-          .login-right {
-            width: 100%;
-            padding: 0 24px;
-            justify-content: center;
-            height: 100vh;
-            overflow: hidden;
-          }
-          .login-right-inner {
-            width: 100% !important;
-            max-width: 400px !important;
-          }
+          .login-layout { height:100vh; overflow:hidden; }
+          .login-left { display:none; }
+          .login-right { width:100%; padding:0 24px; justify-content:center; height:100vh; overflow:hidden; }
+          .login-right-inner { width:100% !important; max-width:400px !important; }
         }
-
         @media (max-width: 480px) {
-          .login-right { padding: 0 20px; }
+          .login-right { padding:0 20px; }
         }
       `}</style>
 
       <div className="login-layout">
-        {/* ── LEFT — Tier cards ── */}
+        {/* LEFT — Tier cards */}
         <div className="login-left">
           <div className="scan-line" />
           <div
@@ -297,7 +288,6 @@ export default function LoginPage() {
             }}
           />
 
-          {/* Wordmark */}
           <div
             style={{
               display: "flex",
@@ -325,7 +315,6 @@ export default function LoginPage() {
             </span>
           </div>
 
-          {/* Headline */}
           <div style={{ marginBottom: 14, flexShrink: 0 }}>
             <h2
               style={{
@@ -341,11 +330,11 @@ export default function LoginPage() {
               MACHINE.
             </h2>
             <p style={{ color: "#444", fontSize: 10, lineHeight: 1.6 }}>
-              Four token-gated tiers. Balance auto-detected on wallet connect.
+              Four token-gated tiers. Balance auto-detected on your Solana
+              address.
             </p>
           </div>
 
-          {/* Cards */}
           <div
             style={{
               display: "flex",
@@ -380,7 +369,6 @@ export default function LoginPage() {
                   <div className="pc-ambient" />
 
                   <div
-                    className="tier-card-inner"
                     style={{
                       padding: "10px 14px",
                       display: "flex",
@@ -392,7 +380,6 @@ export default function LoginPage() {
                       minHeight: 0,
                     }}
                   >
-                    {/* Badge */}
                     {(isRecommended || isActive) && (
                       <div
                         style={{
@@ -415,7 +402,6 @@ export default function LoginPage() {
 
                     <GhostIcon tier={key} lit={lit} />
 
-                    {/* Name + subtitle */}
                     <div style={{ flexShrink: 0, minWidth: 90 }}>
                       <div
                         style={{
@@ -434,7 +420,6 @@ export default function LoginPage() {
                     </div>
 
                     <div
-                      className="tier-card-divider"
                       style={{
                         width: 1,
                         height: 24,
@@ -443,7 +428,6 @@ export default function LoginPage() {
                       }}
                     />
 
-                    {/* Fee */}
                     <div style={{ flexShrink: 0, minWidth: 70 }}>
                       <div
                         style={{
@@ -483,7 +467,6 @@ export default function LoginPage() {
                     </div>
 
                     <div
-                      className="tier-card-divider"
                       style={{
                         width: 1,
                         height: 24,
@@ -492,9 +475,7 @@ export default function LoginPage() {
                       }}
                     />
 
-                    {/* Features inline */}
                     <div
-                      className="tier-features-wrap"
                       style={{
                         display: "flex",
                         flexWrap: "wrap" as const,
@@ -546,7 +527,6 @@ export default function LoginPage() {
             })}
           </div>
 
-          {/* Buy CTA */}
           <div
             style={{
               marginTop: 12,
@@ -591,7 +571,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* ── RIGHT — Sign in panel ── */}
+        {/* RIGHT — Sign in panel */}
         <div className="login-right">
           <div
             style={{
@@ -611,7 +591,6 @@ export default function LoginPage() {
             className="login-right-inner"
             style={{ width: "100%", maxWidth: 360 }}
           >
-            {/* Mini brand */}
             <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
               <div
                 style={{
@@ -659,25 +638,25 @@ export default function LoginPage() {
                 SIGN IN TO ACCESS
               </h1>
               <p style={{ color: "#525252", fontSize: 11, lineHeight: 1.8 }}>
-                Connect your Google account, then link your Solana wallet — your
-                WRAITH balance auto-detects your tier instantly.
+                Sign in once. Your wallets are created automatically, and your
+                WRAITH balance on your Solana address sets your tier.
               </p>
             </div>
 
-            {errorMsg && (
+            {syncError && (
               <div
                 style={{
                   background: "#120500",
                   border: "1px solid #e8490f30",
                   borderRadius: 4,
                   padding: "10px 14px",
-                  color: "#ff6b35",
+                  color: "#ff7b3d",
                   fontSize: 10,
                   lineHeight: 1.7,
                   marginBottom: 16,
                 }}
               >
-                {errorMsg}
+                {syncError}
               </div>
             )}
 
@@ -722,15 +701,18 @@ export default function LoginPage() {
 
             <button
               className="sign-btn"
-              onClick={async () => {
-                setLoading(true);
-                await signIn("google", { callbackUrl: "/app" });
-                setLoading(false);
+              onClick={() => {
+                setSyncError(null);
+                if (status === "authenticated") {
+                  window.location.reload();
+                  return;
+                }
+                login();
               }}
-              disabled={loading}
+              disabled={busy}
             >
-              {loading ? (
-                "REDIRECTING..."
+              {busy ? (
+                "SIGNING IN..."
               ) : (
                 <>
                   <GoogleIcon />
@@ -764,14 +746,14 @@ export default function LoginPage() {
               {[
                 {
                   n: "02",
-                  title: "CONNECT WALLET",
-                  desc: "Link the Solana wallet holding your WRAITH tokens.",
+                  title: "WALLETS CREATED AUTOMATICALLY",
+                  desc: "Solana, Base, Ethereum, BNB Chain and Monad addresses, tied to your Google account.",
                   color: "#a855f7",
                 },
                 {
                   n: "03",
-                  title: "TIER AUTO-DETECTED",
-                  desc: "Features and fee discounts activate in real time.",
+                  title: "HOLD WRAITH ON YOUR SOLANA ADDRESS",
+                  desc: "Your tier is auto-detected. Features and fee discounts activate in real time.",
                   color: "#00b4d8",
                 },
                 {
@@ -846,5 +828,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
   );
 }

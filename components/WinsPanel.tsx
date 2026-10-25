@@ -22,7 +22,6 @@ import {
   fetchTokenMeta,
   HISTORY_KEY,
 } from "./MemeScanner";
-import Panel from "./Panel";
 
 interface McapSnapshot {
   ts: number;
@@ -41,6 +40,8 @@ interface HistoryEntry {
   initialMcap: number;
   peakMcap: number;
   peakMcapTs: number;
+  pendingPeakMcap?: number;
+  pendingPeakTs?: number;
   currentMcap: number;
   snapshots: McapSnapshot[];
   lastChecked: number;
@@ -74,23 +75,11 @@ const EARNED_MCAP_MULTIPLIER = 1.5;
 const MIN_MCAP = 2_000;
 const MAX_MCAP = 100_000;
 
-const C = {
-  primary: "#f0f0f0",
-  muted: "#777777",
-  dim: "#555555",
-  label: "#666666",
-  orange: "#e8490f",
-  green: "#00c47a",
-  yellow: "#ffd700",
-  purple: "#a855f7",
-  blue: "#00b4d8",
-  red: "#ff4444",
-  amber: "#ffaa00",
-  bg: "#050505",
-  bgCard: "#0d0d0d",
-  border: "#1a1a1a",
-  hot: "#ff6b35",
-};
+import { C, SPACE, RADIUS as RADIUS_SCALE, FONT, CARD_BASE } from "@/lib/theme";
+// Local alias — WinsPanel used a flat RADIUS=16 number everywhere before;
+// keep that name working so the rest of this file doesn't need a mass
+// find/replace, while the actual value now comes from the shared scale.
+const RADIUS = RADIUS_SCALE.lg;
 
 function passesSignalFilter(e: HistoryEntry): boolean {
   if (!e.contractAddress) return false;
@@ -313,7 +302,7 @@ function showWinNotif(entry: HistoryEntry, xNow: number) {
   if (Notification.permission !== "granted") return;
   const sym = (entry.tokenSymbol ?? entry.keyword).toUpperCase();
   const xStr = xNow >= 10 ? `${xNow.toFixed(1)}x` : `${xNow.toFixed(2)}x`;
-  const n = new Notification(`✅ WRAITH WIN — $${sym} ${xStr}`, {
+  const n = new Notification(`✅ WRAITH WIN — ${sym} ${xStr}`, {
     body: `Spotted ${fmtMcap(entry.initialMcap)} → Now ${fmtMcap(entry.currentMcap)}${entry.celebMention ? `\n⭐ ${entry.celebMention}` : ""}`,
     icon: entry.tokenImageUrl ?? "/favicon.ico",
     tag: `wraith-win-${entry.keyword}`,
@@ -439,22 +428,26 @@ function Spark({ snaps }: { snaps: McapSnapshot[] }) {
   const min = Math.min(...vals),
     max = Math.max(...vals),
     range = max - min || 1;
-  const W = 72,
-    H = 24;
+  const W = 200,
+    H = 40;
   const pts = safe
     .map(
       (s, i) =>
-        `${((i / (safe.length - 1)) * W).toFixed(1)},${(H - ((s.mcap - min) / range) * (H - 2) - 1).toFixed(1)}`,
+        `${((i / (safe.length - 1)) * W).toFixed(1)},${(H - ((s.mcap - min) / range) * (H - 4) - 2).toFixed(1)}`,
     )
     .join(" ");
   const up = vals[vals.length - 1] >= vals[0];
   const col = up ? C.green : C.red;
   const uid = `sg${idRef.current}${up ? "u" : "d"}`;
   return (
-    <svg width={W} height={H} style={{ display: "block", overflow: "visible" }}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      style={{ display: "block", width: "100%", height: 40, overflow: "visible" }}
+    >
       <defs>
         <linearGradient id={uid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={col} stopOpacity="0.18" />
+          <stop offset="0%" stopColor={col} stopOpacity="0.22" />
           <stop offset="100%" stopColor={col} stopOpacity="0" />
         </linearGradient>
       </defs>
@@ -463,9 +456,10 @@ function Spark({ snaps }: { snaps: McapSnapshot[] }) {
         points={pts}
         fill="none"
         stroke={col}
-        strokeWidth="1.5"
+        strokeWidth="2"
         strokeLinejoin="round"
         strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
       />
     </svg>
   );
@@ -482,7 +476,7 @@ function AiScoreBadge({
   const isHot = tier === "HOT" || score >= 70;
   const isWatch = !isHot && (tier === "WATCH" || score >= 40);
   const color = isHot ? C.hot : isWatch ? C.amber : C.dim;
-  const bg = isHot ? "#1a0800" : isWatch ? "#0d0800" : "#0a0a0a";
+  const bg = isHot ? "var(--surface-2)" : isWatch ? "var(--surface)" : "var(--bg)";
   const filled = Math.round(score / 20);
   return (
     <div
@@ -853,6 +847,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
       // TokenPanel will request the current validated market data on open.
       mcap: undefined,
       platforms: entry.platforms,
+      tokenImageUrl: entry.tokenImageUrl,
       contractAddress: entry.contractAddress,
       celebMention: entry.celebMention,
       aiContext: entry.aiContext,
@@ -904,13 +899,47 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
               };
               e.currentMcap = mcap;
               e.lastChecked = nowMs;
-              const isPlausiblePeak =
-                !prevMcap ||
-                mcap <= prevMcap * 10 || // Relaxed from 3x to 10x to catch real explosive pumps
-                nowMs - prevCheckedAt > 300_000;
-              if (mcap > e.peakMcap && isPlausiblePeak) {
+              // A single read jumping >3x from the last poll is treated as
+              // an unconfirmed spike (bad pair pick, thin-liquidity single
+              // trade, stale cache) rather than committed straight to
+              // peakMcap. It only gets promoted to the real peak once the
+              // NEXT poll also lands within ~30% of it — i.e. two polls in
+              // a row agree the price is actually up there. One bad tick on
+              // an illiquid coin can no longer permanently corrupt peak.
+              const SPIKE_MULTIPLE = 3;
+              const isDirectRead =
+                !prevMcap || mcap <= prevMcap * SPIKE_MULTIPLE;
+
+              if (mcap > e.peakMcap && isDirectRead) {
+                // Normal, believable move — commit directly.
                 e.peakMcap = mcap;
                 e.peakMcapTs = nowMs;
+                e.pendingPeakMcap = undefined;
+                e.pendingPeakTs = undefined;
+              } else if (mcap > e.peakMcap) {
+                // Suspicious spike (>3x prior read). Don't trust it yet.
+                if (
+                  e.pendingPeakMcap &&
+                  Math.abs(mcap - e.pendingPeakMcap) / e.pendingPeakMcap < 0.3
+                ) {
+                  // Second poll agrees with the first spike — confirmed real.
+                  e.peakMcap = mcap;
+                  e.peakMcapTs = nowMs;
+                  e.pendingPeakMcap = undefined;
+                  e.pendingPeakTs = undefined;
+                } else {
+                  // First sighting of this spike, or it doesn't match the
+                  // last pending one — hold it, don't commit.
+                  e.pendingPeakMcap = mcap;
+                  e.pendingPeakTs = nowMs;
+                }
+              } else if (
+                e.pendingPeakMcap &&
+                nowMs - (e.pendingPeakTs || 0) > 600_000
+              ) {
+                // Pending spike never got confirmed within 10 minutes — drop it.
+                e.pendingPeakMcap = undefined;
+                e.pendingPeakTs = undefined;
               }
               const snaps = e.snapshots;
               const last = snaps[snaps.length - 1];
@@ -1065,14 +1094,14 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
   const showPurgeBanner = deadCount > 0 && !purgeDismissed;
 
   return (
-    <Panel style={{ background: C.bg, border: "none", height: "100%" }}>
+    <div className="wx-board" style={{ background: "var(--bg)", height: "100%" }}>
       <style>{`
         @keyframes dpulse{0%,100%{opacity:1}50%{opacity:.4}}
         @keyframes aglow{0%,100%{box-shadow:0 0 8px #ffd70022}50%{box-shadow:0 0 18px #ffd70055}}
         @keyframes tgsend{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
-        @keyframes hotpulse{0%,100%{box-shadow:0 0 0 0 #ff6b3500}50%{box-shadow:0 0 8px 2px #ff6b3533}}
+        @keyframes hotpulse{0%,100%{box-shadow:0 0 0 0 #ff7b3d00}50%{box-shadow:0 0 8px 2px #ff7b3d33}}
 .wc{cursor:pointer;transition:background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;position:relative}
-        .wc:hover{background:#0d0d0d!important;transform:translateY(-1px);box-shadow:0 6px 16px -8px rgba(0,0,0,0.6)}
+        .wc:hover{background:var(--surface-3)!important;transform:translateY(-1px);box-shadow:0 8px 24px -12px rgba(0,0,0,0.55)}
         .wdel{opacity:0;transition:opacity .12s}
         .wc:hover .wdel{opacity:1}
         .tpb{animation:aglow 2s ease-in-out infinite}
@@ -1083,215 +1112,64 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
       `}</style>
 
       {/* HEADER */}
-      <div
-        style={{
-          background: "#030303",
-          borderBottom: `1px solid ${C.border}`,
-          padding: "11px 14px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexShrink: 0,
-          gap: 8,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            minWidth: 0,
-            flexWrap: "wrap",
-          }}
-        >
-          <span
-            style={{
-              color: C.orange,
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: "0.2em",
-              ...MONO,
-            }}
-          >
-            WIN TRACKER
+      <div className="wx-board-bar">
+        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span className="wx-kicker" style={{ color: "var(--accent-text)", letterSpacing: "0.16em" }}>WIN TRACKER</span>
+          <span className="wx-live">
+            <i className={refreshing ? "stale" : ""} />
           </span>
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              flexShrink: 0,
-              background: refreshing ? C.amber : C.green,
-              boxShadow: `0 0 5px ${refreshing ? C.amber : C.green}88`,
-              display: "inline-block",
-              animation: "dpulse 2s ease-in-out infinite",
-            }}
-          />
           {tpAlerts.length > 0 && (
-            <span
-              className="tpb"
-              style={{
-                fontSize: 9,
-                color: C.yellow,
-                border: `1px solid ${C.yellow}33`,
-                padding: "2px 6px",
-                borderRadius: 3,
-                ...MONO,
-                background: `${C.yellow}0f`,
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-            >
-              <DollarSign size={10} />
-              {tpAlerts.length}× TAKE PROFIT
+            <span className="wx-badge tpb" style={{ fontSize: 9, color: "#ffd700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.22)" }}>
+              <DollarSign size={9} /> {tpAlerts.length}× TAKE PROFIT
             </span>
           )}
           {hotWins > 0 && (
-            <span
-              style={{
-                fontSize: 9,
-                color: C.hot,
-                border: `1px solid ${C.hot}33`,
-                padding: "2px 6px",
-                borderRadius: 3,
-                ...MONO,
-                background: `${C.hot}0f`,
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-            >
-              <Flame size={10} />
-              {hotWins} HOT WIN{hotWins !== 1 ? "S" : ""}
+            <span className="wx-badge" style={{ fontSize: 9, color: "var(--accent-text)", background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.22)" }}>
+              <Flame size={9} /> {hotWins} HOT WIN{hotWins !== 1 ? "S" : ""}
             </span>
           )}
-          <span style={{ color: C.dim, fontSize: 9, ...MONO, flexShrink: 0 }}>
-            {refreshing ? (
-              "refreshing..."
-            ) : (
-              <span
-                style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
-              >
-                <RefreshCw size={9} /> {nextIn}s
-              </span>
-            )}
+          <span style={{ color: "var(--text-dim)", fontSize: 9, fontFamily: "var(--font-mono), monospace", display: "inline-flex", alignItems: "center", gap: 3 }}>
+            {refreshing ? "refreshing…" : <><RefreshCw size={9} /> {nextIn}s</>}
           </span>
           {tgEnabled && tgStatus !== "idle" && (
-            <span
-              className={tgStatus === "sending" ? "tgsending" : ""}
-              style={{
-                fontSize: 9,
-                ...MONO,
-                color:
-                  tgStatus === "ok"
-                    ? C.green
-                    : tgStatus === "err"
-                      ? C.red
-                      : C.blue,
-              }}
-            >
-              {tgStatus === "sending"
-                ? "TG ···"
-                : tgStatus === "ok"
-                  ? "TG ✓"
-                  : "TG ✗"}
+            <span className={tgStatus === "sending" ? "tgsending" : ""} style={{ fontSize: 9, fontFamily: "var(--font-mono), monospace", color: tgStatus === "ok" ? "var(--win)" : tgStatus === "err" ? "var(--loss)" : "var(--text-muted)" }}>
+              {tgStatus === "sending" ? "TG ···" : tgStatus === "ok" ? "TG ✓" : "TG ✗"}
             </span>
           )}
         </div>
-        <div
-          style={{
-            display: "flex",
-            gap: 5,
-            flexShrink: 0,
-            alignItems: "center",
-          }}
-        >
+        <div style={{ display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
           <button
+            type="button"
+            className="wx-icon-btn"
             onClick={notifEnabled ? undefined : enableNotifications}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: notifEnabled ? `${C.green}88` : C.dim,
-              cursor: notifEnabled ? "default" : "pointer",
-              padding: "2px 4px",
-              display: "flex",
-              alignItems: "center",
-            }}
-            title={
-              notifEnabled
-                ? "Browser notifications on"
-                : "Click to enable notifications"
-            }
+            style={{ color: notifEnabled ? "var(--win)" : "var(--text-dim)", cursor: notifEnabled ? "default" : "pointer" }}
+            title={notifEnabled ? "Browser notifications on" : "Click to enable notifications"}
           >
             <Bell size={13} />
           </button>
           {tgEnabled && (
-            <span
-              style={{
-                color: `${C.blue}88`,
-                display: "flex",
-                alignItems: "center",
-              }}
-              title="Telegram alerts on"
-            >
+            <span className="wx-icon-btn" style={{ color: "var(--text-dim)" }} title="Telegram alerts on">
               <Send size={12} />
             </span>
           )}
-          <button
-            onClick={() => runRefresh(loadSafeHistory())}
-            disabled={refreshing}
-            style={{
-              background: "#0a1a0a",
-              border: `1px solid ${C.green}22`,
-              color: refreshing ? C.dim : C.green,
-              fontSize: 9,
-              ...MONO,
-              padding: "4px 10px",
-              borderRadius: 3,
-              cursor: "pointer",
-            }}
-          >
-            {refreshing ? (
-              "···"
-            ) : (
-              <span
-                style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-              >
-                <RefreshCw size={10} /> NOW
-              </span>
-            )}
+          <button type="button" className="wx-btn" onClick={() => runRefresh(loadSafeHistory())} disabled={refreshing} style={{ fontSize: 10, color: "var(--win)" }}>
+            {refreshing ? "···" : <><RefreshCw size={10} /> NOW</>}
           </button>
-          <button
-            onClick={clearAll}
-            style={{
-              background: "transparent",
-              border: `1px solid ${C.border}`,
-              color: C.muted,
-              fontSize: 9,
-              ...MONO,
-              padding: "4px 9px",
-              borderRadius: 3,
-              cursor: "pointer",
-            }}
-          >
-            CLR
-          </button>
+          <button type="button" className="wx-btn" onClick={clearAll} style={{ fontSize: 10 }}>CLR</button>
         </div>
       </div>
 
       {/* STATS BAR */}
       {list.length > 0 && (
         <div
+          className="wins-panel-stats"
           style={{
-            background: "#030303",
-            borderBottom: `1px solid ${C.bgCard}`,
-            padding: "10px 14px",
+            background: "var(--surface)",
+            borderBottom: `1px solid ${C.border}`,
+            padding: "8px 16px",
             display: "flex",
+            alignItems: "center",
+            gap: 0,
             flexShrink: 0,
           }}
         >
@@ -1318,7 +1196,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
                 color: C.yellow,
                 sub:
                   bestTok && bestX >= 1.5
-                    ? `$${(bestTok.tokenSymbol || bestTok.keyword).toUpperCase()}`
+                    ? (bestTok.tokenSymbol || bestTok.keyword).toUpperCase()
                     : undefined,
               },
               {
@@ -1328,31 +1206,35 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
               },
               { label: "REFRESH", value: lastAt || "—", color: C.muted },
             ] as { label: string; value: string; color: string; sub?: string }[]
-          ).map((s, i) => (
+          ).map((s, i, arr) => (
             <div
               key={i}
               style={{
-                flex: i === 4 ? 1 : "none",
-                minWidth: i === 4 ? 0 : 62,
-                paddingRight: 14,
+                flex: i === 4 ? 1 : "0 0 auto",
+                minWidth: 0,
+                display: "flex",
+                alignItems: "baseline",
+                gap: 5,
+                padding: "0 12px",
+                borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
               }}
             >
-              <div
+              <span
                 style={{
                   color: C.label,
-                  fontSize: 7,
-                  letterSpacing: "0.14em",
+                  fontSize: 8,
+                  letterSpacing: "0.12em",
+                  whiteSpace: "nowrap",
                   ...MONO,
-                  marginBottom: 3,
                 }}
               >
                 {s.label}
-              </div>
-              <div
+              </span>
+              <span
                 style={{
                   color: s.color,
-                  fontSize: i === 4 ? 10 : 18,
-                  fontWeight: i === 4 ? 500 : 900,
+                  fontSize: i === 4 ? 11 : 15,
+                  fontWeight: 800,
                   ...MONO,
                   lineHeight: 1,
                   overflow: "hidden",
@@ -1361,19 +1243,12 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
                 }}
               >
                 {s.value}
-              </div>
-              {s.sub && (
-                <div
-                  style={{
-                    color: `${C.yellow}66`,
-                    fontSize: 7,
-                    ...MONO,
-                    marginTop: 2,
-                  }}
-                >
-                  {s.sub}
-                </div>
-              )}
+                {s.sub && (
+                  <span style={{ color: `${C.yellow}88`, fontSize: 8, marginLeft: 3, ...MONO }}>
+                    {s.sub}
+                  </span>
+                )}
+              </span>
             </div>
           ))}
         </div>
@@ -1383,7 +1258,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
       {showPurgeBanner && (
         <div
           style={{
-            background: "#0d0600",
+            background: "var(--bg)",
             borderBottom: `1px solid ${C.amber}22`,
             padding: "9px 14px",
             display: "flex",
@@ -1414,7 +1289,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
             <button
               onClick={confirmPurge}
               style={{
-                background: "#1a0800",
+                background: "var(--surface-2)",
                 border: `1px solid ${C.amber}44`,
                 color: C.amber,
                 fontSize: 9,
@@ -1450,7 +1325,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
       {undoSnap && undoCD > 0 && (
         <div
           style={{
-            background: "#0e0800",
+            background: "var(--bg)",
             borderBottom: `1px solid ${C.orange}22`,
             padding: "9px 14px",
             display: "flex",
@@ -1517,55 +1392,15 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
 
       {/* EMPTY STATE */}
       {list.length === 0 && !undoSnap && (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            padding: 24,
-          }}
-        >
-          <div
-            style={{
-              color: "#111",
-              fontSize: 28,
-              fontWeight: 900,
-              letterSpacing: "0.4em",
-              ...MONO,
-            }}
-          >
-            WRAITH
-          </div>
-          <div
-            style={{
-              color: C.dim,
-              fontSize: 10,
-              letterSpacing: "0.2em",
-              ...MONO,
-            }}
-          >
-            NO WINS YET
-          </div>
-          <div
-            style={{
-              color: C.dim,
-              fontSize: 9,
-              ...MONO,
-              textAlign: "center",
-              maxWidth: 180,
-              lineHeight: 1.6,
-            }}
-          >
-            Only HIGH/ULTRA signals that hit 2x appear here
-          </div>
+        <div className="wx-empty">
+          <span className="wx-kicker" style={{ fontSize: 18, opacity: 0.1, letterSpacing: "0.4em" }}>WRAITH</span>
+          <strong>No wins yet</strong>
+          <span>Only HIGH/ULTRA signals that hit 2× appear here</span>
         </div>
       )}
 
       {/* CARD LIST */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "6px 8px" }}>
+      <div className="wx-wins" style={{ padding: "6px 8px" }}>
         {list.map((entry) => {
           const snaps = safeSnapshots(entry.snapshots);
           const xNow = calcX(entry.initialMcap, entry.currentMcap);
@@ -1605,7 +1440,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
           return (
             <div
               key={entry.keyword}
-              className={`wc${isHot ? " hotcard" : ""}`}
+              className={`wc${isHot ? " hotcard" : ""}${isSel ? " selected" : ""}`}
               onClick={() => {
                 setSelKey(entry.keyword);
                 if (onSelectMeme)
@@ -1615,21 +1450,23 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
               }}
               style={{
                 marginBottom: 8,
-                borderRadius: 6,
+                borderRadius: 16,
                 overflow: "hidden",
-                border: `1px solid ${isSel ? C.orange + "55" : "#1a1a1a"}`,
-                background: "#0a0a0a",
+                border: `1px solid ${isSel ? "rgba(var(--accent-rgb),0.35)" : "var(--border)"}`,
+                background: "var(--surface)",
+                cursor: "pointer",
+                transition: "border-color 0.15s ease, transform 0.16s ease, box-shadow 0.16s ease",
               }}
             >
               {showTP && (
                 <div
                   style={{
                     borderBottom: `1px solid ${C.yellow}22`,
-                    padding: "7px 14px",
+                    padding: `${SPACE.sm}px ${SPACE.lg}px`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    background: "#0e0900",
+                    background: "var(--surface)",
                     gap: 8,
                   }}
                 >
@@ -1741,7 +1578,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
 
               <div
                 style={{
-                  padding: "11px 12px",
+                  padding: SPACE.lg,
                   opacity: isUpd ? 0.5 : 1,
                   transition: "opacity .3s",
                 }}
@@ -1781,7 +1618,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
                           ...MONO,
                         }}
                       >
-                        ${sym}
+                        {sym}
                       </span>
                       {dispName && (
                         <span
@@ -2099,7 +1936,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
                   />
                 </div>
                 {snaps.length >= 2 && (
-                  <div style={{ marginBottom: 8, marginLeft: 50 }}>
+                  <div style={{ marginBottom: 8, marginTop: 4 }}>
                     <Spark snaps={snaps} />
                   </div>
                 )}
@@ -2290,6 +2127,6 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
           );
         })}
       </div>
-    </Panel>
+    </div>
   );
 }

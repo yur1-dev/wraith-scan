@@ -1,0 +1,152 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Connection, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import { usePrivy } from "@privy-io/react-auth";
+import { useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
+import { FlaskConical, LoaderCircle } from "lucide-react";
+import { useToast } from "@/components/Toast";
+import { ataOf, TOKEN_PROGRAM_ID, transferCheckedIx } from "@/lib/splLite";
+import type { SandboxTok } from "@/lib/useSandboxTokens";
+
+const DEVNET_RPC = process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com";
+const SELL_PRESETS = [25, 50, 100];
+const BUY_PRESETS = [0.1, 0.5, 1];
+const fmt = (n: number, d = 4) => (Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: d }) : "0");
+
+export default function TestTradeDock({ token }: { token: SandboxTok }) {
+  const { user, authenticated, login } = usePrivy();
+  const { wallets } = useSolanaWallets();
+  const { signTransaction } = useSignTransaction();
+  const { push } = useToast();
+  const conn = useMemo(() => new Connection(DEVNET_RPC, "confirmed"), []);
+  const account = user?.linkedAccounts.find((a) => a.type === "wallet" && a.chainType === "solana" && a.walletClientType === "privy");
+  const address = account?.type === "wallet" ? account.address : null;
+  const wallet = address ? wallets.find((w) => w.address === address) : undefined;
+  const owner = useMemo(() => (address ? new PublicKey(address) : null), [address]);
+
+  const [mode, setMode] = useState<"buy" | "sell">("buy");
+  const [amount, setAmount] = useState("0.1");
+  const [pct, setPct] = useState(100);
+  const [sol, setSol] = useState<number | null>(null);
+  const [raw, setRaw] = useState<bigint>(BigInt(0));
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!owner) return;
+    try {
+      const mintKey = new PublicKey(token.mint);
+      const [lamports, accs] = await Promise.all([
+        conn.getBalance(owner),
+        conn.getParsedTokenAccountsByOwner(owner, { mint: mintKey, programId: TOKEN_PROGRAM_ID }).catch(() => null),
+      ]);
+      setSol(lamports / 1e9);
+      const total = (accs?.value ?? []).reduce((sum, a) => sum + BigInt((a.account.data.parsed.info as { tokenAmount: { amount: string } }).tokenAmount.amount), BigInt(0));
+      setRaw(total);
+    } catch (e) {
+      console.warn("[test dock balances]", e);
+    }
+  }, [conn, owner, token.mint]);
+
+  useEffect(() => {
+    void refresh();
+    const t = window.setInterval(() => void refresh(), 6000);
+    return () => window.clearInterval(t);
+  }, [refresh]);
+
+  const sendSigned = async (ixs: TransactionMessage["instructions"]) => {
+    if (!owner || !wallet) throw new Error("Wallet not ready");
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message();
+    const res = await signTransaction({ transaction: new VersionedTransaction(msg).serialize(), wallet, chain: "solana:devnet" });
+    const sig = await conn.sendRawTransaction(res.signedTransaction);
+    await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+    return sig;
+  };
+
+  const settle = async (side: "buy" | "sell", signature: string) => {
+    const r = await fetch("/api/devnet/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ side, mint: token.mint, signature }),
+    });
+    const d = (await r.json()) as { error?: string; tokens?: number; sol?: number };
+    if (!r.ok) throw new Error(d.error || "Settlement failed.");
+    // Unlocks posting intel on this token.
+    void fetch("/api/token-activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mint: token.mint, side, signature }),
+    }).then(() => window.dispatchEvent(new Event("wraith:trade-recorded"))).catch(() => {});
+    return d;
+  };
+
+  const trade = async () => {
+    if (!owner || busy) return;
+    setBusy(true);
+    try {
+      if (mode === "buy") {
+        const amt = Number(amount);
+        if (!(amt > 0)) throw new Error("Enter a SOL amount.");
+        if (sol !== null && amt + 0.01 > sol) throw new Error("Not enough devnet SOL. Get more in the Testnet tab.");
+        const sig = await sendSigned([SystemProgram.transfer({ fromPubkey: owner, toPubkey: new PublicKey(token.treasury), lamports: Math.round(amt * 1e9) })]);
+        const d = await settle("buy", sig);
+        push(`Bought ${fmt(d.tokens ?? 0, 2)} ${token.symbol}`, "success", { actionLabel: "VIEW TX", onAction: () => window.open(`https://explorer.solana.com/tx/${sig}?cluster=devnet`, "_blank", "noopener,noreferrer"), timeoutMs: 7000 });
+      } else {
+        const amountRaw = pct >= 100 ? raw : (raw * BigInt(pct)) / BigInt(100);
+        if (amountRaw <= BigInt(0)) throw new Error(`No ${token.symbol} to sell.`);
+        const mint = new PublicKey(token.mint);
+        const sig = await sendSigned([transferCheckedIx(ataOf(owner, mint), mint, new PublicKey(token.treasuryAta), owner, amountRaw, token.decimals)]);
+        const d = await settle("sell", sig);
+        push(`Sold ${token.symbol} for ${fmt(d.sol ?? 0, 4)} SOL`, "success", { actionLabel: "VIEW TX", onAction: () => window.open(`https://explorer.solana.com/tx/${sig}?cluster=devnet`, "_blank", "noopener,noreferrer"), timeoutMs: 7000 });
+      }
+      await refresh();
+    } catch (e) {
+      push(e instanceof Error ? e.message : "Trade failed.", "warning");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const held = Number(raw) / 10 ** token.decimals;
+
+  return (
+    <div className="ttd">
+      <div className="ttd-badge"><FlaskConical size={13} /> Devnet sandbox · play money</div>
+      <div className="ttd-tabs">
+        {(["buy", "sell"] as const).map((t) => (
+          <button key={t} type="button" className={mode === t ? `on ${t}` : ""} onClick={() => setMode(t)}>{t}</button>
+        ))}
+      </div>
+      {!authenticated ? (
+        <button type="button" className="tn-btn ttd-go" onClick={() => login()}>Sign in</button>
+      ) : (
+        <>
+          <div className="ttd-row"><span>Devnet balance</span><b>{sol === null ? "…" : `${fmt(sol, 4)} SOL`}</b></div>
+          <div className="ttd-row"><span>Price</span><b>{fmt(token.priceSol, 7)} SOL</b></div>
+          {mode === "buy" ? (
+            <>
+              <label className="ttd-label">AMOUNT IN SOL</label>
+              <input className="ttd-input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="SOL to spend" />
+              <div className="ttd-chips">
+                {BUY_PRESETS.map((p) => <button key={p} type="button" className={Number(amount) === p ? "on" : ""} onClick={() => setAmount(String(p))}>{p} SOL</button>)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="ttd-row"><span>You hold</span><b>{fmt(held, 2)} {token.symbol}</b></div>
+              <div className="ttd-chips">
+                {SELL_PRESETS.map((p) => <button key={p} type="button" className={pct === p ? "on" : ""} onClick={() => setPct(p)}>{p === 100 ? "Max" : `${p}%`}</button>)}
+              </div>
+            </>
+          )}
+          <button type="button" className={`ttd-go ${mode}`} disabled={busy || !wallet || (mode === "sell" && raw <= BigInt(0))} onClick={() => void trade()}>
+            {busy ? <LoaderCircle size={16} className="animate-spin" /> : null}
+            {busy ? "Confirm in wallet…" : `${mode === "buy" ? "Buy" : "Sell"} ${token.symbol}`}
+          </button>
+          {sol !== null && sol < 0.05 && <p className="ttd-hint">Low on devnet SOL. Use “Get devnet SOL” in the Testnet tab.</p>}
+        </>
+      )}
+    </div>
+  );
+}

@@ -1,8 +1,8 @@
 // app/api/telegram/stale/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAppSession } from "@/lib/session";
 import { getDb } from "@/lib/mongoClient";
+import { fmtUsd, footer, header, rule } from "@/lib/telegramUi";
 
 const API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -15,7 +15,7 @@ async function send(chatId: string, text: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await getAppSession();
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -59,12 +59,12 @@ export async function POST(req: NextRequest) {
   const xStr = xNow >= 10 ? `${xNow.toFixed(1)}x` : `${xNow.toFixed(2)}x`;
   const ageMin = Math.floor(ageMs / 60_000);
 
-  let msg = `☠️ <b>STALE / NO PROGRESS — $${symbol.toUpperCase()}</b>\n\n`;
-  msg += `📉 Entry: <b>${fmtMcap(initialMcap)}</b> → Now: <b>${fmtMcap(currentMcap)}</b> (<b>${xStr}</b>)\n`;
-  msg += `⏱ Age: <b>${ageMin}m</b> with no meaningful move\n`;
-  if (contractAddress) {
-    msg += `\n<a href="https://dexscreener.com/solana/${contractAddress}">View on DexScreener ↗</a>`;
-  }
+  const chain: string = body.chain ?? "solana";
+  let msg = header("☠️", "STALE · NO PROGRESS", symbol, chain);
+  msg += `\n📉 <b>Entry</b>  ${fmtUsd(initialMcap)}  →  <b>Now</b>  ${fmtUsd(currentMcap)}  (${xStr})`;
+  msg += `\n⏱ <b>${ageMin}m</b> with no meaningful move`;
+  if (contractAddress) msg += `\n${rule}\n<code>${contractAddress}</code>`;
+  msg += `\n\n${footer}`;
 
   await send(user.telegramChatId, msg);
 

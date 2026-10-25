@@ -5,9 +5,10 @@
 // PaperTrader). Nothing should hardcode a hex color, a px padding value, or
 // a borderRadius number directly in a component anymore — import from here.
 //
-// This is why panels currently look "not connected" to each other: each
-// file invented its own numbers independently. One shared object fixes
-// that at the root instead of patching each panel by eye.
+// Color values here mirror the tokens in app/globals.css (:root). Keep them
+// as literal hex/rgba (not var()) because components append alpha suffixes
+// like `${C.orange}22` and chart libraries can't read CSS variables.
+// If you change --accent in globals.css, change C.orange here too.
 // ─────────────────────────────────────────────────────────────────────────
 
 export const MONO = {
@@ -17,30 +18,27 @@ export const MONO = {
 
 // ── Color palette ───────────────────────────────────────────────────────
 export const C = {
-  primary: "#f4f5f7",
-  muted: "#a0a3ad",
-  dim: "#777b87",
-  label: "rgba(244,245,247,0.68)",
-  orange: "#e8490f",
-  green: "#22c55e",
+  primary: "var(--text)",
+  muted: "var(--text-muted)",
+  dim: "#6e6e74", // was #858e97 (blue-grey); now matches --text-dim
+  label: "rgba(237,237,238,0.72)", // was a warm-white tint; now matches --text
+  orange: "#ff7b3d", // the single accent; must match --accent
+  green: "#22c55e", // price up / win only
   yellow: "#ffd700",
   purple: "#a855f7",
-  blue: "#00b4d8",
-  red: "#ef4444",
+  blue: "#a1a1a6", // was cyan #00b4d8 (a third hue); now neutral so DEX/CHART chips blend in
+  red: "#ef4444", // price down / loss only
   amber: "#ffaa00",
-  bg: "#090a0f",
-  bgCard: "#101117",
-  border: "rgba(255,255,255,0.08)",
-  borderHover: "rgba(255,255,255,0.15)",
-  hot: "#ff6b35",
+  bg: "var(--bg)",
+  bgCard: "var(--surface)",
+  border: "rgba(255,255,255,0.08)", // matches --border
+  borderHover: "rgba(255,255,255,0.16)", // was an orange glow; now matches --border-strong
+  hot: "var(--accent-text)",
 } as const;
 
 // ── Spacing scale ───────────────────────────────────────────────────────
-// This is the piece that was completely missing. Every panel picked its
-// own padding/gap by eye (4px here, 9px there, "10px 14px" somewhere else)
-// with nothing tying them together. Use these everywhere instead of a raw
-// number — that's what actually creates consistent "breathing room" panel
-// to panel.
+// Every panel picks its padding/gap from here instead of a raw number,
+// which is what creates consistent "breathing room" panel to panel.
 export const SPACE = {
   xs: 4,
   sm: 8,

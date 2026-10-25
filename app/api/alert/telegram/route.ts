@@ -1,297 +1,90 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { getDb } from "@/lib/mongoClient";
+import { getAppSession } from "@/lib/session";
 
-const fmt = (n: number) => {
-  if (!n) return "—";
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
-  if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
-  return `$${n.toFixed(0)}`;
-};
+import { chainName, esc, footer, fmtUsd, header, rule, scoreBar, tokenKeyboard } from "@/lib/telegramUi";
+import { broadcast, claim, milestoneFor, signalMessage } from "@/lib/telegramBot";
+import type { Signal } from "@/app/api/signals/route";
 
-const scoreBar = (score: number) => {
-  const filled = Math.round(score / 10);
-  return "█".repeat(filled) + "░".repeat(10 - filled);
-};
-
-async function sendTelegramMessage(
-  botToken: string,
-  chatId: string,
-  text: string,
-) {
-  return fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-    }),
-  });
-}
-
-async function sendTelegramPhoto(
-  botToken: string,
-  chatId: string,
-  photoUrl: string,
-  caption: string,
-) {
-  return fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      photo: photoUrl,
-      caption,
-      parse_mode: "HTML",
-    }),
-  });
-}
 
 function buildEntryMessage(body: {
-  symbol: string;
-  name?: string;
-  mcap: number;
-  holders?: number;
-  contractAddress?: string;
-  celebMention?: string;
-  aiContext?: string;
-  platforms?: string[];
-  twoXTier?: string;
-  seenAt: number;
-  aiScore?: number;
-  aiTier?: "HOT" | "WATCH" | "SKIP";
-  aiReason?: string;
-  peakMcap?: number;
-  dexPaid?: boolean;
+  symbol: string; name?: string; chain?: string; mcap: number; holders?: number; contractAddress?: string;
+  celebMention?: string; aiContext?: string; platforms?: string[]; twoXTier?: string; seenAt: number;
+  aiScore?: number; aiTier?: "HOT" | "WATCH" | "SKIP"; aiReason?: string; peakMcap?: number; dexPaid?: boolean;
 }): string {
-  const statusDot = body.aiTier === "HOT" ? "🟢" : "🟡";
-  const statusLabel = body.aiTier === "HOT" ? "HOT SIGNAL" : "WATCH SIGNAL";
-  const tierEmoji =
-    body.twoXTier === "ULTRA" || body.twoXTier === "HIGH" ? "🔥" : "👁";
-  const platStr = body.platforms?.length
-    ? body.platforms.map((p) => p.toUpperCase()).join(" · ")
-    : "PUMPFUN";
-
+  const hot = body.aiTier === "HOT";
+  const plat = body.platforms?.length ? body.platforms.map((p) => p.toUpperCase()).join(" · ") : chainName(body.chain);
   const lines: string[] = [
-    `${statusDot} <b>${statusLabel} — ${body.name ?? body.symbol} — $${body.symbol}</b>`,
-    ``,
-    body.mcap ? `💰 <b>MCAP:</b> ${fmt(body.mcap)}` : "",
-    body.holders ? `🧑‍🤝‍🧑 <b>Holders:</b> ${body.holders}` : "",
-    ``,
-    `🏁 <b>First Call:</b> ${fmt(body.mcap)} (just now)`,
-    body.aiScore !== undefined ? `📈 <b>AI Score:</b> ${body.aiScore}/100` : "",
-    body.twoXTier ? `${tierEmoji} <b>Signal Tier:</b> ${body.twoXTier}` : "",
-    body.dexPaid ? `✅ <b>Dex Paid</b>` : "",
-    body.celebMention ? `⭐ <b>Signal:</b> ${body.celebMention}` : "",
-    ``,
+    header(hot ? "🟢" : "🟡", hot ? "HOT SIGNAL" : "WATCH SIGNAL", body.symbol, body.chain, body.name),
+    `💰 <b>MCap</b>  ${fmtUsd(body.mcap)}${body.holders ? `   ·   🧑‍🤝‍🧑 <b>Holders</b>  ${body.holders}` : ""}`,
   ];
-
-  if (body.aiContext) {
-    lines.push(`🧠 <b>LORE</b>`);
-    lines.push(body.aiContext);
-    lines.push(``);
+  if (body.aiScore !== undefined) lines.push(`📈 <b>Score</b>  ${body.aiScore}/100  <code>${scoreBar(body.aiScore)}</code>`);
+  if (body.twoXTier) lines.push(`${body.twoXTier === "ULTRA" || body.twoXTier === "HIGH" ? "🔥" : "👁"} <b>Tier</b>  ${esc(body.twoXTier)}${body.dexPaid ? "   ·   ✅ Dex paid" : ""}`);
+  else if (body.dexPaid) lines.push(`✅ <b>Dex paid</b>`);
+  if (body.celebMention) lines.push(`⭐ ${esc(body.celebMention)}`);
+  if (body.aiContext || body.aiReason) {
+    lines.push(rule);
+    if (body.aiContext) lines.push(`🧠 ${esc(body.aiContext)}`);
+    if (body.aiReason) lines.push(`💡 <i>${esc(body.aiReason)}</i>`);
   }
-  if (body.aiReason) {
-    lines.push(`💡 ${body.aiReason}`);
-    lines.push(``);
-  }
-
-  lines.push(`📡 <b>Sources:</b> ${platStr}`);
-  lines.push(``);
-
-  if (body.contractAddress) {
-    const ca = body.contractAddress;
-    lines.push(
-      `🔗 <a href="https://dexscreener.com/solana/${ca}">DexScreener</a> • ` +
-        `<a href="https://pump.fun/${ca}">Pump</a> • ` +
-        `<a href="https://jup.ag/swap/SOL-${ca}">Swap</a> • ` +
-        `<a href="https://birdeye.so/token/${ca}?chain=solana">BullX</a> • ` +
-        `<a href="https://solscan.io/token/${ca}">Solscan</a>`,
-    );
-    lines.push(``);
-    lines.push(`<code>${ca}</code>`);
-  }
-
-  return lines.filter((l) => l !== "").join("\n");
+  lines.push(rule, `📡 ${esc(plat)}`);
+  if (body.contractAddress) lines.push(`<code>${body.contractAddress}</code>`);
+  lines.push("", footer);
+  return lines.join("\n");
 }
 
 function buildWinMessage(body: {
-  symbol: string;
-  name?: string;
-  initialMcap: number;
-  currentMcap: number;
-  xNow: number;
-  peakMcap?: number;
-  peakX?: number;
-  holders?: number;
-  contractAddress?: string;
-  celebMention?: string;
-  platforms?: string[];
-  seenAt: number;
-  aiScore?: number;
-  aiContext?: string;
-  dexPaid?: boolean;
+  symbol: string; name?: string; chain?: string; initialMcap: number; currentMcap: number; xNow: number;
+  peakMcap?: number; peakX?: number; holders?: number; contractAddress?: string; celebMention?: string;
+  platforms?: string[]; seenAt: number; aiScore?: number; aiContext?: string; dexPaid?: boolean;
 }): string {
-  const xStr =
-    body.xNow >= 10 ? `${body.xNow.toFixed(1)}x` : `${body.xNow.toFixed(2)}x`;
-  const spottedTime = new Date(body.seenAt).toLocaleTimeString("en-PH", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Manila",
-  });
-  const platStr = body.platforms?.length
-    ? body.platforms.map((p) => p.toUpperCase()).join(" · ")
-    : "PUMPFUN";
-
+  const xStr = body.xNow >= 10 ? `${body.xNow.toFixed(1)}x` : `${body.xNow.toFixed(2)}x`;
+  const at = new Date(body.seenAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Manila" });
   const lines: string[] = [
-    `✅ <b>WRAITH WIN — $${body.symbol}</b>`,
-    `📊 ${xStr} from spotted price`,
-    `Spotted:  ${fmt(body.initialMcap)} at ${spottedTime}`,
-    `Now:      ${fmt(body.currentMcap)}`,
-    body.aiScore !== undefined
-      ? `AI Score: ${scoreBar(body.aiScore)} ${body.aiScore}/100 (at spot)`
-      : "",
-    `Sources:  ${platStr}`,
-    ``,
+    header("✅", "WRAITH WIN", body.symbol, body.chain, body.name),
+    `🚀 <b>${xStr}</b> from spotted price`,
+    `📍 <b>Spotted</b>  ${fmtUsd(body.initialMcap)}  <i>at ${at}</i>`,
+    `📊 <b>Now</b>  ${fmtUsd(body.currentMcap)}`,
   ];
-
-  if (body.contractAddress) {
-    const ca = body.contractAddress;
-    lines.push(`DEX:\nhttps://dexscreener.com/solana/${ca}`);
-    lines.push(`\nPUMP:\nhttps://pump.fun/${ca}`);
-    lines.push(`\nSWAP:\nhttps://jup.ag/swap/SOL-${ca}`);
-  }
-
-  return lines.filter((l) => l !== undefined).join("\n");
-}
-
-// ─── Broadcast to all eligible users ─────────────────────────────────────────
-async function broadcastToEligibleUsers(
-  botToken: string,
-  text: string,
-  imageUrl?: string,
-) {
-  const db = await getDb();
-
-  // Only send to users who:
-  // 1. Have linked their Telegram (telegramChatId exists)
-  // 2. Are SPECTER or WRAITH tier
-  const users = await db
-    .collection("users")
-    .find(
-      {
-        telegramChatId: { $exists: true, $ne: null },
-        tier: { $in: ["SPECTER", "WRAITH"] },
-      },
-      { projection: { telegramChatId: 1 } },
-    )
-    .toArray();
-
-  if (users.length === 0) return { sent: 0, failed: 0 };
-
-  let sent = 0;
-  let failed = 0;
-
-  // Send to each user — fire in parallel but don't let one failure block others
-  await Promise.allSettled(
-    users.map(async (user) => {
-      const chatId = user.telegramChatId as string;
-      try {
-        const res = imageUrl
-          ? await sendTelegramPhoto(botToken, chatId, imageUrl, text)
-          : await sendTelegramMessage(botToken, chatId, text);
-
-        if (res.ok) {
-          sent++;
-        } else {
-          // If photo fails, fall back to text
-          if (imageUrl) {
-            const fallback = await sendTelegramMessage(botToken, chatId, text);
-            if (fallback.ok) {
-              sent++;
-            } else {
-              failed++;
-            }
-          } else {
-            failed++;
-          }
-        }
-      } catch {
-        failed++;
-      }
-    }),
-  );
-
-  return { sent, failed };
+  if (body.peakX && body.peakX > body.xNow) lines.push(`🏔 <b>Peak</b>  ${body.peakX.toFixed(2)}x`);
+  if (body.aiScore !== undefined) lines.push(`📈 <b>Score at spot</b>  ${body.aiScore}/100  <code>${scoreBar(body.aiScore)}</code>`);
+  if (body.contractAddress) lines.push(rule, `<code>${body.contractAddress}</code>`);
+  lines.push("", footer);
+  return lines.join("\n");
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  if (!botToken)
-    return NextResponse.json(
-      { error: "Telegram not configured" },
-      { status: 503 },
-    );
+  const session = await getAppSession();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!process.env.TELEGRAM_BOT_TOKEN) return NextResponse.json({ error: "Telegram not configured" }, { status: 503 });
 
   const body = await req.json();
-
-  // _ping — used by WinsPanel to check if Telegram is configured
   if (body._ping) return NextResponse.json({ ok: true });
 
-  const alertType: "entry" | "win" = body.type === "entry" ? "entry" : "win";
-
-  const text =
-    alertType === "entry"
-      ? buildEntryMessage({
-          symbol: body.symbol,
-          name: body.name,
-          mcap: body.mcap ?? 0,
-          holders: body.holders,
-          contractAddress: body.contractAddress,
-          celebMention: body.celebMention,
-          aiContext: body.aiContext,
-          platforms: body.platforms,
-          twoXTier: body.twoXTier,
-          seenAt: body.seenAt ?? Date.now(),
-          aiScore: body.aiScore,
-          aiTier: body.aiTier,
-          aiReason: body.aiReason,
-          dexPaid: body.dexPaid,
-        })
-      : buildWinMessage({
-          symbol: body.symbol,
-          name: body.name,
-          initialMcap: body.initialMcap ?? 0,
-          currentMcap: body.currentMcap ?? 0,
-          xNow: body.xNow ?? 0,
-          peakMcap: body.peakMcap,
-          peakX: body.peakX,
-          holders: body.holders,
-          contractAddress: body.contractAddress,
-          celebMention: body.celebMention,
-          platforms: body.platforms,
-          seenAt: body.seenAt ?? Date.now(),
-          aiScore: body.aiScore,
-          aiContext: body.aiContext,
-          dexPaid: body.dexPaid,
-        });
+  const ca: string | undefined = body.contractAddress;
+  const chain: string = body.chain ?? "solana";
+  const markup = ca ? tokenKeyboard(ca, chain) : undefined;
 
   try {
-    const { sent, failed } = await broadcastToEligibleUsers(
-      botToken,
-      text,
-      body.imageUrl,
-    );
-    console.log(`[telegram] broadcast: ${sent} sent, ${failed} failed`);
-    return NextResponse.json({ ok: true, sent, failed });
+    if (body.type === "entry") {
+      // de-dupe with the server cron: whoever fires first sends, the other is a no-op
+      if (ca && !(await claim(`entry:${ca}`))) return NextResponse.json({ ok: true, deduped: true });
+      // prefer the full scanner detail when this token is in the live feed
+      let sig: Signal | undefined;
+      try {
+        const r = await fetch(`${req.nextUrl.origin}/api/signals`, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+        if (r.ok) sig = ((await r.json()) as { signals?: Signal[] }).signals?.find((x) => x.token.address === ca);
+      } catch { /* fall back to the client payload */ }
+      const text = sig
+        ? signalMessage(sig)
+        : buildEntryMessage({ symbol: body.symbol, name: body.name, chain, mcap: body.mcap ?? 0, holders: body.holders, contractAddress: ca, celebMention: body.celebMention, aiContext: body.aiContext, platforms: body.platforms, twoXTier: body.twoXTier, seenAt: body.seenAt ?? Date.now(), aiScore: body.aiScore, aiTier: body.aiTier, aiReason: body.aiReason, dexPaid: body.dexPaid });
+      const r = await broadcast("signal", text, { chain, score: sig?.score ?? body.aiScore ?? 100, markup, imageUrl: body.imageUrl ?? sig?.token.imageUrl });
+      return NextResponse.json({ ok: true, ...r });
+    }
+    const m = milestoneFor(body.xNow ?? 0) || 2;
+    if (ca && !(await claim(`win:${ca}:${m}`))) return NextResponse.json({ ok: true, deduped: true });
+    const text = buildWinMessage({ symbol: body.symbol, name: body.name, chain, initialMcap: body.initialMcap ?? 0, currentMcap: body.currentMcap ?? 0, xNow: body.xNow ?? 0, peakMcap: body.peakMcap, peakX: body.peakX, holders: body.holders, contractAddress: ca, celebMention: body.celebMention, platforms: body.platforms, seenAt: body.seenAt ?? Date.now(), aiScore: body.aiScore, aiContext: body.aiContext, dexPaid: body.dexPaid });
+    const r = await broadcast("win", text, { chain, markup });
+    return NextResponse.json({ ok: true, ...r });
   } catch (err) {
     console.error("[telegram] broadcast error:", err);
     return NextResponse.json({ error: "Broadcast failed" }, { status: 500 });

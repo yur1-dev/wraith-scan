@@ -101,11 +101,11 @@ async function fromPumpFun(ca: string): Promise<LiveTokenPrice | null> {
 
 export async function getTokenPrice(
   ca: string,
-  opts?: { skipJupiter?: boolean },
+  opts?: { skipJupiter?: boolean; maxAgeMs?: number },
 ): Promise<LiveTokenPrice> {
   const cacheKey = `${ca}|${opts?.skipJupiter ? "1" : "0"}`;
   const cached = _cache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < CACHE_MS) return cached.data;
+  if (cached && Date.now() - cached.ts < (opts?.maxAgeMs ?? CACHE_MS)) return cached.data;
 
   const result = await _fetchTokenPrice(ca, opts?.skipJupiter ?? false);
   _cache.set(cacheKey, { data: result, ts: Date.now() });

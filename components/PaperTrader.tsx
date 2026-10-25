@@ -10,10 +10,16 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
 } from "@solana/web3.js";
-import { Lock } from "lucide-react";
+import { FileText, Lock, Settings } from "lucide-react";
 import { MemeTrend } from "@/app/app/page";
 import { useWraithTier } from "@/hooks/useWraithTier";
 import { getMcap } from "@/lib/getTokenPrice";
+import StyledSelect from "@/components/StyledSelect";
+import {
+  decryptHotWalletKey as decryptKeypair,
+  deriveHotWalletRecoveryKey,
+  encryptHotWalletKey as encryptKeypair,
+} from "@/lib/hotWalletCrypto";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -263,62 +269,6 @@ async function appendTrade(trade: TradeLog): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 // CRYPTO HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
-async function deriveKey(
-  password: string,
-  salt: Uint8Array,
-): Promise<CryptoKey> {
-  const enc = new TextEncoder();
-  const km = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(password) as unknown as ArrayBuffer,
-    "PBKDF2",
-    false,
-    ["deriveKey"],
-  );
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: salt.buffer as ArrayBuffer,
-      iterations: 200000,
-      hash: "SHA-256",
-    },
-    km,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
-  );
-}
-async function encryptKeypair(
-  secretKey: Uint8Array,
-  password: string,
-): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(password, salt);
-  const ct = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
-    key,
-    secretKey.buffer as ArrayBuffer,
-  );
-  const packed = new Uint8Array(16 + 12 + ct.byteLength);
-  packed.set(salt, 0);
-  packed.set(iv, 16);
-  packed.set(new Uint8Array(ct), 28);
-  return btoa(String.fromCharCode(...packed));
-}
-async function decryptKeypair(
-  encrypted: string,
-  password: string,
-): Promise<Uint8Array> {
-  const packed = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
-  const key = await deriveKey(password, packed.slice(0, 16));
-  const plain = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: packed.slice(16, 28).buffer as ArrayBuffer },
-    key,
-    packed.slice(28).buffer as ArrayBuffer,
-  );
-  return new Uint8Array(plain);
-}
 function saveHW(d: string) {
   if (typeof window !== "undefined") localStorage.setItem(HW_KEY, d);
 }
@@ -338,14 +288,8 @@ async function encryptRecovery(
   phrase: string,
   secret: Uint8Array,
 ): Promise<string> {
-  const salt = secret.slice(0, 16);
   const iv = secret.slice(16, 28);
-  const key = await deriveKey(
-    Array.from(secret.slice(0, 32))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join(""),
-    salt,
-  );
+  const key = await deriveHotWalletRecoveryKey(secret);
   const enc = new TextEncoder();
   const ct = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
@@ -362,14 +306,8 @@ async function decryptRecovery(
   secret: Uint8Array,
 ): Promise<string | null> {
   try {
-    const salt = secret.slice(0, 16);
     const iv = secret.slice(16, 28);
-    const key = await deriveKey(
-      Array.from(secret.slice(0, 32))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join(""),
-      salt,
-    );
+    const key = await deriveHotWalletRecoveryKey(secret);
     const ct = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
     const plain = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
@@ -618,6 +556,7 @@ interface TokenData {
   mcap: number;
   imageUrl?: string;
   links?: { twitter?: string; telegram?: string; website?: string };
+  priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
 }
 
 // Supply cache — derived from DexScreener once, reused by Jupiter for live mcap
@@ -656,11 +595,11 @@ async function fetchTokenData(
     let livePrice = dexPrice;
     let liveMcap = dexMcap;
     try {
-      const jupRes = await fetch(`https://api.jup.ag/price/v2?ids=${ca}`, {
-        signal,
-      });
-      const jupData = await jupRes.json();
-      const jupPrice = parseFloat(jupData?.data?.[ca]?.price ?? "0");
+      const jupRes = await fetch(`/api/price?ids=${ca}`, { signal });
+      const jupData = jupRes.ok ? await jupRes.json() : {};
+      const jupPrice = parseFloat(
+        jupData?.data?.[ca]?.price ?? jupData?.[ca]?.usdPrice ?? "0",
+      );
       if (jupPrice > 0) {
         livePrice = jupPrice;
         const supply = _supplyCache.get(ca);
@@ -686,6 +625,12 @@ async function fetchTokenData(
           (s: { type: string }) => s.type === "telegram",
         )?.url,
         website: pool.info?.websites?.[0]?.url,
+      },
+      priceChange: {
+        m5: pool.priceChange?.m5,
+        h1: pool.priceChange?.h1,
+        h6: pool.priceChange?.h6,
+        h24: pool.priceChange?.h24,
       },
     };
   } catch {
@@ -1334,7 +1279,7 @@ async function captureShareCard(opts: {
           <div>
             <div style="display:flex;align-items:center;gap:6px;">
               <span style="color:#fff;font-size:15px;font-weight:900;letter-spacing:0.02em;">
-                $${data.symbol}
+                ${data.symbol}
               </span>
               ${
                 data.status === "watching"
@@ -1705,7 +1650,7 @@ function ShareModal({
                       letterSpacing: "0.02em",
                     }}
                   >
-                    ${data.symbol}
+                    {data.symbol}
                   </span>
                   {data.status === "watching" && (
                     <span
@@ -2883,7 +2828,7 @@ function PositionCard({
                 ...MONO,
               }}
             >
-              ${pos.symbol}
+              {pos.symbol}
             </span>
             <span
               style={{
@@ -2911,6 +2856,7 @@ function PositionCard({
               </span>
             ) : (
               <span
+                data-private-balance
                 style={{
                   fontSize: 7,
                   color: C.green,
@@ -3203,6 +3149,10 @@ export default function PaperTrader({
 
   // ── PAPER MODE STATE ──
   const canUsePaper = canUse("paper_trading");
+  const [orderMode, setOrderMode] = useState<"market" | "limit" | "advanced">(
+    "market",
+  );
+  const [autoStrat, setAutoStrat] = useState(true);
   const [paperMode, setPaperMode] = useState<boolean>(() =>
     lsGet<boolean>(PAPER_MODE_KEY, false),
   );
@@ -3213,6 +3163,19 @@ export default function PaperTrader({
       setPaperMode(false);
     }
   }, [canUsePaper, paperMode]);
+
+  // Header.tsx owns the profile-menu toggle. Keep this panel synchronized
+  // with that toggle instead of waiting for a remount.
+  useEffect(() => {
+    const resyncMode = () =>
+      setPaperMode(lsGet<boolean>(PAPER_MODE_KEY, false));
+    window.addEventListener("wraith:paper-mode-sync", resyncMode);
+    window.addEventListener("storage", resyncMode);
+    return () => {
+      window.removeEventListener("wraith:paper-mode-sync", resyncMode);
+      window.removeEventListener("storage", resyncMode);
+    };
+  }, []);
 
   const [paperBal, setPaperBal] = useState<number>(() =>
     lsGet<number>(PAPER_BAL_KEY, PAPER_STARTING_SOL),
@@ -3345,6 +3308,7 @@ export default function PaperTrader({
   const hotKeypairRef = useRef<Keypair | null>(null);
   const trailPctRef = useRef(trailPct);
   const tierRef = useRef(tier);
+  const autoStratRef = useRef(autoStrat);
   const borderFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -3383,6 +3347,9 @@ export default function PaperTrader({
   useEffect(() => {
     tierRef.current = tier;
   }, [tier]);
+  useEffect(() => {
+    autoStratRef.current = autoStrat;
+  }, [autoStrat]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3548,7 +3515,7 @@ export default function PaperTrader({
 
         if (mountedRef.current) {
           setStatus({
-            msg: `${reason} — SOLD $${pos.symbol} ${fmtPnl(exitPnl)}`,
+            msg: `${reason} — SOLD ${pos.symbol} ${fmtPnl(exitPnl)}`,
             type: "ok",
           });
           setTimeout(() => {
@@ -3644,10 +3611,12 @@ export default function PaperTrader({
           setPositionsSync((prev) =>
             prev.map((p) => (p.id === pos.id ? updated : p)),
           );
-        if (mcap >= tpMcap) triggerSell(pos.id, "TP");
-        else if (slValid && mcap <= slMcap) triggerSell(pos.id, "SL");
-        else if (newPeak > pos.entryMcap && mcap <= trailStop)
-          triggerSell(pos.id, "TRAIL");
+        if (autoStratRef.current) {
+          if (mcap >= tpMcap) triggerSell(pos.id, "TP");
+          else if (slValid && mcap <= slMcap) triggerSell(pos.id, "SL");
+          else if (newPeak > pos.entryMcap && mcap <= trailStop)
+            triggerSell(pos.id, "TRAIL");
+        }
       });
 
       // ── Paper positions ──
@@ -3672,10 +3641,12 @@ export default function PaperTrader({
         };
 
         let exitReason: "TP" | "SL" | "TRAIL" | undefined;
-        if (mcap >= tpMcap) exitReason = "TP";
-        else if (slValid && mcap <= slMcap) exitReason = "SL";
-        else if (newPeak > pos.entryMcap && mcap <= trailStop)
-          exitReason = "TRAIL";
+        if (autoStratRef.current) {
+          if (mcap >= tpMcap) exitReason = "TP";
+          else if (slValid && mcap <= slMcap) exitReason = "SL";
+          else if (newPeak > pos.entryMcap && mcap <= trailStop)
+            exitReason = "TRAIL";
+        }
 
         if (exitReason) {
           if (paperSellingRef.current.has(pos.id)) return;
@@ -3815,7 +3786,7 @@ export default function PaperTrader({
         ),
       );
       setStatus({
-        msg: `Added ${amt} SOL to $${sym} · avg entry now ${fmtMcap(avgEntryMcap)}`,
+        msg: `Added ${amt} SOL to ${sym} · avg entry now ${fmtMcap(avgEntryMcap)}`,
         type: "ok",
       });
     } else {
@@ -3841,7 +3812,7 @@ export default function PaperTrader({
       };
       setPaperPositions((prev) => [pos, ...prev]);
       setStatus({
-        msg: `Paper bought $${sym} @ ${fmtMcap(entryMcap)} · auto-sell armed`,
+        msg: `Paper bought ${sym} @ ${fmtMcap(entryMcap)} · auto-sell armed`,
         type: "ok",
       });
     }
@@ -3971,7 +3942,7 @@ export default function PaperTrader({
 
       if (mountedRef.current) {
         setStatus({
-          msg: `✓ Bought ~${displayAmt} $${sym} · auto-sell armed`,
+          msg: `✓ Bought ~${displayAmt} ${sym} · auto-sell armed`,
           type: "ok",
         });
         setTab("trade");
@@ -4021,6 +3992,19 @@ export default function PaperTrader({
     setHotPub(pub);
   }, []);
 
+  const [shareCopied, setShareCopied] = useState(false);
+  const handleShareToken = useCallback(() => {
+    const mint = (selectedMeme as { contractAddress?: string } | null)
+      ?.contractAddress;
+    if (!mint) return;
+    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/app/token/${mint}`;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    }
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 1500);
+  }, [selectedMeme]);
+
   const watchingPositions = positions.filter(
     (p) => p.status === "watching" || p.status === "selling",
   );
@@ -4036,6 +4020,44 @@ export default function PaperTrader({
       paperWatching.length
     : 0;
 
+  // ── Per-token stat row (Invested / Sold / Current / Profit) — mirrors
+  // Telemetry's header. Scoped to whichever mint is currently selected,
+  // pooling both live and paper positions/logs for that mint.
+  const selMint = (selectedMeme as { contractAddress?: string } | null)
+    ?.contractAddress;
+  const tokenStats = (() => {
+    if (!selMint) return null;
+    const livePos = positions.filter((p) => p.mint === selMint);
+    const liveLogRows = log.filter(
+      (t) => t.mint === selMint && t.status === "filled",
+    );
+    const paperPos = paperPositions.filter((p) => p.mint === selMint);
+    const paperLogRows = paperLog.filter((t) => t.mint === selMint);
+
+    const openPositions = [
+      ...livePos.filter(
+        (p) => p.status === "watching" || p.status === "selling",
+      ),
+      ...paperPos.filter((p) => p.status === "watching"),
+    ];
+    const closedRows = [...liveLogRows, ...paperLogRows];
+
+    const invested =
+      openPositions.reduce((s, p) => s + p.amountSol, 0) +
+      closedRows.reduce((s, t) => s + t.amountSol, 0);
+    const current = openPositions.reduce(
+      (s, p) => s + p.amountSol * (1 + p.currentPnlPct / 100),
+      0,
+    );
+    const sold = closedRows.reduce(
+      (s, t) => s + t.amountSol * (1 + (t.pnlPct ?? 0) / 100),
+      0,
+    );
+    const profit = current + sold - invested;
+
+    return { invested, sold, current, profit };
+  })();
+
   const SL_PRESETS = [-10, -20, -30, -50];
   const TP_PRESETS = [1.5, 2, 3, 5, 10];
   const TRAIL_PRESETS = [5, 10, 15, 20, 25];
@@ -4049,8 +4071,9 @@ export default function PaperTrader({
 
   return (
     <div
+      className="wraith-trade-panel"
       style={{
-        background: C.bg,
+        background: "var(--surface)",
         borderTop: `1px solid ${borderFlash ? C.orange + "88" : paperMode ? C.green + "44" : "#141414"}`,
         borderRadius: 0,
         overflow: "hidden",
@@ -4081,7 +4104,7 @@ export default function PaperTrader({
       {/* HEADER */}
       <div
         style={{
-          background: "#030303",
+          background: "var(--surface-2)",
           borderBottom: collapsed ? "none" : `1px solid ${C.border}`,
           padding: "8px 12px",
           display: "flex",
@@ -4149,6 +4172,7 @@ export default function PaperTrader({
           </span>
           {hotBal !== null && !paperMode && (
             <span
+              data-private-balance
               style={{
                 fontSize: 7,
                 color: hotBal < 0.05 ? C.amber : C.green,
@@ -4238,7 +4262,7 @@ export default function PaperTrader({
                   ...MONO,
                 }}
               >
-                {t === "config" ? "⚙" : t.toUpperCase()}
+                {t === "config" ? <Settings size={12} /> : t.toUpperCase()}
               </button>
             ))}
         </div>
@@ -4257,14 +4281,67 @@ export default function PaperTrader({
             style={{
               flex: 1,
               display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "20px 24px",
+              flexDirection: "column",
               overflowY: "auto",
             }}
           >
-            <div style={{ width: "100%", maxWidth: 320 }}>
-              <HotWalletSetup onUnlocked={handleUnlocked} />
+            {/* Token identity strip — keeps the top of the panel from being
+                dead space while the wallet is locked, mirrors Telemetry
+                showing token context regardless of wallet state. */}
+            {sym && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "12px 16px",
+                  borderBottom: `1px solid ${C.border}`,
+                  flexShrink: 0,
+                }}
+              >
+                <TokenAvatar
+                  imageUrl={tokenData?.imageUrl}
+                  symbol={sym}
+                  size={30}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: C.primary,
+                      fontSize: 13,
+                      fontWeight: 900,
+                      ...MONO,
+                    }}
+                  >
+                    {sym}
+                  </div>
+                  {mcap > 0 && (
+                    <div
+                      style={{
+                        color: C.orange,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        ...MONO,
+                      }}
+                    >
+                      {fmtMcap(mcap)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "center",
+                padding: "28px 24px",
+              }}
+            >
+              <div style={{ width: "100%", maxWidth: 320 }}>
+                <HotWalletSetup onUnlocked={handleUnlocked} />
+              </div>
             </div>
           </div>
         )}
@@ -4279,942 +4356,1219 @@ export default function PaperTrader({
               display: "flex",
               flexDirection: "column",
               gap: 5,
-              justifyContent: "space-between",
             }}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {/* ── MODE SWITCHER ── */}
+              {/* ── STATS ROW (Invested / Sold / Current / Profit) + Share ── */}
+              {tokenStats && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    background: C.bgCard,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    padding: "6px 8px",
+                  }}
+                >
+                  {(
+                    [
+                      ["Invested", tokenStats.invested, C.dim],
+                      ["Sold", tokenStats.sold, C.dim],
+                      ["Current", tokenStats.current, C.primary],
+                      [
+                        "Profit",
+                        tokenStats.profit,
+                        tokenStats.profit >= 0 ? C.green : C.red,
+                      ],
+                    ] as const
+                  ).map(([label, val, color]) => (
+                    <div key={label} style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 6,
+                          color: C.label,
+                          ...MONO,
+                          letterSpacing: "0.08em",
+                          marginBottom: 1,
+                        }}
+                      >
+                        {label.toUpperCase()}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          color,
+                          ...MONO,
+                          whiteSpace: "nowrap" as const,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {label === "Profit" && val > 0 ? "+" : ""}
+                        {val.toFixed(3)}
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    onClick={handleShareToken}
+                    disabled={!selMint}
+                    title="Copy shareable link"
+                    style={{
+                      background: "transparent",
+                      border: `1px solid ${C.border}`,
+                      color: shareCopied ? C.green : C.dim,
+                      fontSize: 8,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      padding: "5px 8px",
+                      borderRadius: 3,
+                      cursor: selMint ? "pointer" : "not-allowed",
+                      opacity: selMint ? 1 : 0.4,
+                      ...MONO,
+                      whiteSpace: "nowrap" as const,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {shareCopied ? "COPIED" : "SHARE"}
+                  </button>
+                </div>
+              )}
+
+              {/* ── ORDER TYPE TABS (Market / Limit / Advanced) ── */}
               <div
                 style={{
                   display: "flex",
                   gap: 3,
                   background: "#0a0a0a",
                   border: `1px solid ${C.border}`,
-                  borderRadius: 8,
-                  padding: 3,
+                  borderRadius: 6,
+                  padding: 2,
                 }}
               >
-                <button
-                  onClick={() => setPaperMode(false)}
-                  style={{
-                    flex: 1,
-                    padding: "7px 0",
-                    borderRadius: 6,
-                    border: "none",
-                    background: !paperMode ? C.orange : "transparent",
-                    color: !paperMode ? "#fff" : C.dim,
-                    fontSize: 9,
-                    fontWeight: !paperMode ? 800 : 500,
-                    letterSpacing: "0.12em",
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                    ...MONO,
-                  }}
-                >
-                  LIVE
-                </button>
-                <button
-                  onClick={() => {
-                    if (!canUsePaper) return;
-                    setPaperMode(true);
-                  }}
-                  title={!canUsePaper ? "WRAITH tier required" : undefined}
-                  style={{
-                    flex: 1,
-                    padding: "7px 0",
-                    borderRadius: 6,
-                    border: "none",
-                    background: paperMode ? "#001a08" : "transparent",
-                    color: paperMode ? C.green : canUsePaper ? C.dim : C.label,
-                    fontSize: 9,
-                    fontWeight: paperMode ? 800 : 500,
-                    letterSpacing: "0.12em",
-                    cursor: canUsePaper ? "pointer" : "not-allowed",
-                    opacity: canUsePaper ? 1 : 0.4,
-                    transition: "all 0.15s",
-                    ...MONO,
-                    boxShadow: paperMode
-                      ? `inset 0 0 0 1px ${C.green}44`
-                      : "none",
-                  }}
-                >
-                  {canUsePaper ? (
-                    "PAPER"
-                  ) : (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      PAPER <LockIcon size={9} />
-                    </span>
-                  )}
-                </button>
+                {(["market", "limit", "advanced"] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setOrderMode(m)}
+                    style={{
+                      flex: 1,
+                      padding: "5px 0",
+                      borderRadius: 4,
+                      border: "none",
+                      background: orderMode === m ? "#151515" : "transparent",
+                      color: orderMode === m ? C.primary : C.dim,
+                      fontSize: 8,
+                      fontWeight: orderMode === m ? 800 : 500,
+                      letterSpacing: "0.08em",
+                      cursor: "pointer",
+                      ...MONO,
+                    }}
+                  >
+                    {m.toUpperCase()}
+                  </button>
+                ))}
               </div>
 
-              {/* ── PAPER BALANCE BANNER (shown only in paper mode) ── */}
-              {paperMode && (
+              {orderMode !== "market" && (
                 <div
                   style={{
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: 0,
-                    padding: "2px 1px 4px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
+                    background: C.bgCard,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    padding: "16px 10px",
+                    textAlign: "center" as const,
+                    fontSize: 9,
+                    color: C.dim,
+                    ...MONO,
+                    letterSpacing: "0.04em",
                   }}
                 >
-                  <div
-                    style={{ display: "flex", alignItems: "baseline", gap: 6 }}
+                  {orderMode === "limit"
+                    ? "Limit orders coming soon."
+                    : "Advanced orders coming soon."}
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: orderMode === "market" ? "flex" : "none",
+                  flexDirection: "column",
+                  gap: 5,
+                }}
+              >
+                {/* ── MODE SWITCHER ── */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 3,
+                    background: "#0a0a0a",
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8,
+                    padding: 3,
+                  }}
+                >
+                  <button
+                    onClick={() => setPaperMode(false)}
+                    style={{
+                      flex: 1,
+                      padding: "7px 0",
+                      borderRadius: 6,
+                      border: "none",
+                      background: !paperMode ? C.orange : "transparent",
+                      color: !paperMode ? "#fff" : C.dim,
+                      fontSize: 9,
+                      fontWeight: !paperMode ? 800 : 500,
+                      letterSpacing: "0.12em",
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      ...MONO,
+                    }}
+                  >
+                    LIVE
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!canUsePaper) return;
+                      setPaperMode(true);
+                    }}
+                    title={!canUsePaper ? "WRAITH tier required" : undefined}
+                    style={{
+                      flex: 1,
+                      padding: "7px 0",
+                      borderRadius: 6,
+                      border: "none",
+                      background: paperMode ? "#001a08" : "transparent",
+                      color: paperMode
+                        ? C.green
+                        : canUsePaper
+                          ? C.dim
+                          : C.label,
+                      fontSize: 9,
+                      fontWeight: paperMode ? 800 : 500,
+                      letterSpacing: "0.12em",
+                      cursor: canUsePaper ? "pointer" : "not-allowed",
+                      opacity: canUsePaper ? 1 : 0.4,
+                      transition: "all 0.15s",
+                      ...MONO,
+                      boxShadow: paperMode
+                        ? `inset 0 0 0 1px ${C.green}44`
+                        : "none",
+                    }}
+                  >
+                    {canUsePaper ? (
+                      "PAPER"
+                    ) : (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        PAPER <LockIcon size={9} />
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                {/* ── AUTO STRAT — toggles the existing SL/TP/Trail auto-sell
+                   monitor on/off for new buys. Strategy dropdown is a stub
+                   (only "Bracket" — i.e. SL+TP+Trail — is implemented). ── */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: C.bgCard,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    padding: "6px 8px",
+                  }}
+                >
+                  <button
+                    onClick={() => setAutoStrat((v) => !v)}
+                    title={autoStrat ? "Auto Strat ON" : "Auto Strat OFF"}
+                    style={{
+                      width: 30,
+                      height: 16,
+                      borderRadius: 99,
+                      border: "none",
+                      background: autoStrat ? C.green + "55" : "#222",
+                      position: "relative",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                      transition: "background 0.15s",
+                    }}
                   >
                     <span
                       style={{
-                        fontSize: 8,
-                        color: C.dim,
-                        ...MONO,
-                        letterSpacing: "0.06em",
+                        position: "absolute",
+                        top: 2,
+                        left: autoStrat ? 16 : 2,
+                        width: 12,
+                        height: 12,
+                        borderRadius: "50%",
+                        background: autoStrat ? C.green : "#666",
+                        transition: "left 0.15s",
                       }}
-                    >
-                      Available
-                    </span>
-                    <span
+                    />
+                  </button>
+                  <span
+                    style={{
+                      fontSize: 8,
+                      color: C.dim,
+                      ...MONO,
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    AUTO STRAT
+                  </span>
+                  <StyledSelect
+                    value="bracket"
+                    disabled
+                    onChange={() => {}}
+                    ariaLabel="Auto strategy"
+                    className="wraith-select-bracket"
+                    options={[
+                      { value: "bracket", label: "Bracket (SL/TP/Trail)" },
+                    ]}
+                  />
+                </div>
+
+                {/* ── PAPER BALANCE BANNER (shown only in paper mode) ── */}
+                {paperMode && (
+                  <div
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      borderRadius: 0,
+                      padding: "2px 1px 4px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div
                       style={{
-                        fontSize: 12,
-                        fontWeight: 800,
-                        color: C.green,
-                        ...MONO,
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 6,
                       }}
                     >
-                      {paperBal.toFixed(4)} SOL
-                    </span>
-                  </div>
-                  {paperWatching.length > 0 && (
-                    <div style={{ textAlign: "right" as const }}>
-                      <div
+                      <span
                         style={{
-                          fontSize: 6,
+                          fontSize: 8,
                           color: C.dim,
                           ...MONO,
-                          marginBottom: 2,
+                          letterSpacing: "0.06em",
                         }}
                       >
-                        OPEN PnL
-                      </div>
-                      <div
+                        Available
+                      </span>
+                      <span
+                        data-private-balance
                         style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color:
+                          fontSize: 12,
+                          fontWeight: 800,
+                          color: C.green,
+                          ...MONO,
+                        }}
+                      >
+                        {paperBal.toFixed(4)} SOL
+                      </span>
+                    </div>
+                    {paperWatching.length > 0 && (
+                      <div style={{ textAlign: "right" as const }}>
+                        <div
+                          style={{
+                            fontSize: 6,
+                            color: C.dim,
+                            ...MONO,
+                            marginBottom: 2,
+                          }}
+                        >
+                          OPEN PnL
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color:
+                              paperWatching.reduce(
+                                (s, p) => s + p.currentPnlPct,
+                                0,
+                              ) /
+                                paperWatching.length >=
+                              0
+                                ? C.green
+                                : C.red,
+                            ...MONO,
+                          }}
+                        >
+                          {paperWatching.reduce(
+                            (s, p) => s + p.currentPnlPct,
+                            0,
+                          ) /
+                            paperWatching.length >=
+                          0
+                            ? "+"
+                            : ""}
+                          {(
                             paperWatching.reduce(
                               (s, p) => s + p.currentPnlPct,
                               0,
-                            ) /
-                              paperWatching.length >=
-                            0
-                              ? C.green
-                              : C.red,
-                          ...MONO,
-                        }}
-                      >
-                        {paperWatching.reduce(
-                          (s, p) => s + p.currentPnlPct,
-                          0,
-                        ) /
-                          paperWatching.length >=
-                        0
-                          ? "+"
-                          : ""}
-                        {(
-                          paperWatching.reduce(
-                            (s, p) => s + p.currentPnlPct,
-                            0,
-                          ) / paperWatching.length
-                        ).toFixed(1)}
-                        %
+                            ) / paperWatching.length
+                          ).toFixed(1)}
+                          %
+                        </div>
+                        <div style={{ fontSize: 6, color: C.dim, ...MONO }}>
+                          {paperWatching.length} open
+                        </div>
                       </div>
-                      <div style={{ fontSize: 6, color: C.dim, ...MONO }}>
-                        {paperWatching.length} open
-                      </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (confirm("Reset demo account to 10 SOL?")) {
+                          setPaperBal(10);
+                          setPaperPositions([]);
+                          setPaperLog([]);
+                        }
+                      }}
+                      style={{
+                        background: "transparent",
+                        border: `1px solid ${C.border}`,
+                        color: C.dim,
+                        fontSize: 6,
+                        padding: "3px 6px",
+                        borderRadius: 2,
+                        cursor: "pointer",
+                        ...MONO,
+                        alignSelf: "flex-start" as const,
+                      }}
+                    >
+                      RESET
+                    </button>
+                  </div>
+                )}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    background: C.bgCard,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    padding: "5px 8px",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        color: C.label,
+                        fontSize: 6,
+                        ...MONO,
+                        letterSpacing: "0.1em",
+                        marginBottom: 1,
+                      }}
+                    >
+                      HOT WALLET
                     </div>
-                  )}
+                    <div
+                      style={{
+                        color: C.dim,
+                        fontSize: 8,
+                        ...MONO,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap" as const,
+                      }}
+                    >
+                      {hotPub?.slice(0, 22)}…
+                    </div>
+                  </div>
                   <button
-                    onClick={() => {
-                      if (confirm("Reset demo account to 10 SOL?")) {
-                        setPaperBal(10);
-                        setPaperPositions([]);
-                        setPaperLog([]);
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (hotPub) {
+                        navigator.clipboard.writeText(hotPub);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
                       }
                     }}
                     style={{
                       background: "transparent",
                       border: `1px solid ${C.border}`,
-                      color: C.dim,
-                      fontSize: 6,
-                      padding: "3px 6px",
+                      color: copied ? C.green : C.dim,
+                      fontSize: 7,
+                      padding: "2px 6px",
                       borderRadius: 2,
                       cursor: "pointer",
                       ...MONO,
-                      alignSelf: "flex-start" as const,
                     }}
                   >
-                    RESET
+                    {copied ? "✓" : "COPY"}
+                  </button>
+                  {hotBal !== null && hotBal < 0.05 && (
+                    <span
+                      style={{
+                        fontSize: 7,
+                        color: C.amber,
+                        border: `1px solid ${C.amber}33`,
+                        padding: "2px 5px",
+                        borderRadius: 2,
+                        ...MONO,
+                      }}
+                    >
+                      LOW SOL
+                    </span>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHotKeypair(null);
+                      setHotPub(null);
+                      setHotBal(null);
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: `1px solid ${C.border}`,
+                      color: C.dim,
+                      fontSize: 7,
+                      padding: "2px 6px",
+                      borderRadius: 2,
+                      cursor: "pointer",
+                      ...MONO,
+                    }}
+                  >
+                    LOCK
                   </button>
                 </div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 5,
-                  background: C.bgCard,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 3,
-                  padding: "5px 8px",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
+
+                {isAvoid && ca && (
+                  <div
+                    style={{
+                      background: "#1a0000",
+                      border: `1px solid ${C.red}44`,
+                      borderRadius: 3,
+                      padding: "5px 8px",
+                      color: C.red,
+                      fontSize: 8,
+                      ...MONO,
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                      }}
+                    >
+                      <AlertIcon size={11} /> BLOCKED — Honeypot / AVOID flagged
+                      by scanner.
+                    </span>
+                  </div>
+                )}
+
+                {/* Token info */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <TokenAvatar
+                    imageUrl={tokenData?.imageUrl}
+                    symbol={sym || "?"}
+                    size={34}
+                    links={
+                      ca
+                        ? {
+                            twitter: tokenData?.links?.twitter,
+                            telegram: tokenData?.links?.telegram,
+                            website: tokenData?.links?.website,
+                            dex: `https://dexscreener.com/solana/${ca}`,
+                            pump: `https://pump.fun/${ca}`,
+                          }
+                        : undefined
+                    }
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {sym ? (
+                      <>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "baseline",
+                            gap: 6,
+                          }}
+                        >
+                          <span
+                            style={{
+                              color: C.primary,
+                              fontSize: 13,
+                              fontWeight: 900,
+                              ...MONO,
+                            }}
+                          >
+                            {sym}
+                          </span>
+                          <span
+                            style={{
+                              color: C.orange,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              ...MONO,
+                            }}
+                          >
+                            {fmtMcap(mcap)}
+                          </span>
+                        </div>
+                        {ca && (
+                          <div
+                            style={{
+                              color: C.dim,
+                              fontSize: 7,
+                              ...MONO,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap" as const,
+                            }}
+                          >
+                            {ca.slice(0, 22)}…
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <span style={{ color: C.dim, fontSize: 9, ...MONO }}>
+                        ← select token from scanner
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── 5m / 1h / 6h / 24h % change row ── */}
+                {sym && tokenData?.priceChange && (
+                  <div
+                    style={{
+                      display: "flex",
+                      background: C.bgCard,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 3,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {(
+                      [
+                        ["5m", tokenData.priceChange.m5],
+                        ["1h", tokenData.priceChange.h1],
+                        ["6h", tokenData.priceChange.h6],
+                        ["24h", tokenData.priceChange.h24],
+                      ] as const
+                    ).map(([label, val], i) => (
+                      <div
+                        key={label}
+                        style={{
+                          flex: 1,
+                          textAlign: "center" as const,
+                          padding: "5px 2px",
+                          borderLeft: i > 0 ? `1px solid ${C.border}` : "none",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 6,
+                            color: C.label,
+                            ...MONO,
+                            letterSpacing: "0.08em",
+                            marginBottom: 2,
+                          }}
+                        >
+                          {label.toUpperCase()}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 800,
+                            color:
+                              val === undefined
+                                ? C.dim
+                                : val >= 0
+                                  ? C.green
+                                  : C.red,
+                            ...MONO,
+                          }}
+                        >
+                          {val === undefined
+                            ? "—"
+                            : `${val >= 0 ? "+" : ""}${val.toFixed(2)}%`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Amount */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    flexWrap: "wrap" as const,
+                  }}
+                >
                   <div
                     style={{
                       color: C.label,
-                      fontSize: 6,
+                      fontSize: 7,
+                      letterSpacing: "0.12em",
                       ...MONO,
-                      letterSpacing: "0.1em",
-                      marginBottom: 1,
+                      flexShrink: 0,
+                      width: 22,
                     }}
                   >
-                    HOT WALLET
+                    SOL
                   </div>
-                  <div
+                  <input
+                    type="number"
+                    value={amountSol}
+                    onChange={(e) => setAmountSol(e.target.value)}
+                    min="0.01"
+                    step="0.05"
                     style={{
-                      color: C.dim,
-                      fontSize: 8,
+                      flex: "1 1 90px",
+                      minWidth: 60,
+                      background: C.bgCard,
+                      border: `1px solid ${C.border}`,
+                      color: C.primary,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      padding: "5px 8px",
+                      borderRadius: 3,
+                      outline: "none",
                       ...MONO,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap" as const,
+                      textAlign: "right" as const,
                     }}
-                  >
-                    {hotPub?.slice(0, 22)}…
+                  />
+                  {["0.05", "0.1", "0.25", "0.5"].map((v) => (
+                    <button
+                      key={v}
+                      className="samt"
+                      onClick={() => setAmountSol(v)}
+                      style={{
+                        background: amountSol === v ? "#111" : "transparent",
+                        border: `1px solid ${amountSol === v ? C.orange + "55" : C.border}`,
+                        color: amountSol === v ? C.orange : C.dim,
+                        fontSize: 8,
+                        padding: "5px 5px",
+                        borderRadius: 2,
+                        cursor: "pointer",
+                        ...MONO,
+                        flexShrink: 0,
+                        minWidth: 28,
+                      }}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+
+                {(() => {
+                  const balForPct = paperMode ? paperBal : (hotBal ?? 0);
+                  const pct =
+                    balForPct > 0
+                      ? Math.min(
+                          100,
+                          Math.round(
+                            (parseFloat(amountSol || "0") / balForPct) * 100,
+                          ),
+                        )
+                      : 0;
+                  return (
+                    <div style={{ padding: "4px 2px 2px" }}>
+                      <div style={{ position: "relative", height: 14 }}>
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: 0,
+                            right: 0,
+                            height: 4,
+                            borderRadius: 2,
+                            background: "#1a1a1a",
+                            transform: "translateY(-50%)",
+                            pointerEvents: "none",
+                          }}
+                        />
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: 0,
+                            width: `${pct}%`,
+                            height: 4,
+                            borderRadius: 2,
+                            background: C.orange,
+                            transform: "translateY(-50%)",
+                            pointerEvents: "none",
+                            transition: "width 0.08s linear",
+                          }}
+                        />
+                        {[0, 25, 50, 75, 100].map((mark) => (
+                          <div
+                            key={mark}
+                            style={{
+                              position: "absolute",
+                              top: "50%",
+                              left: `${mark}%`,
+                              width: 4,
+                              height: 4,
+                              borderRadius: "50%",
+                              background: mark <= pct ? "#fff8" : "#3a3a3a",
+                              transform: "translate(-50%, -50%)",
+                              pointerEvents: "none",
+                              zIndex: 1,
+                            }}
+                          />
+                        ))}
+                        <input
+                          className="pct-slider"
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={pct}
+                          onChange={(e) => {
+                            const p = parseFloat(e.target.value);
+                            const next = ((balForPct * p) / 100).toFixed(3);
+                            setAmountSol(next);
+                          }}
+                          style={{
+                            position: "relative",
+                            zIndex: 2,
+                            width: "100%",
+                            height: 14,
+                            background: "transparent",
+                          }}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          fontSize: 7,
+                          color: C.dim,
+                          ...MONO,
+                          marginTop: 4,
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span>0%</span>
+                        <span>25%</span>
+                        <span>50%</span>
+                        <span>75%</span>
+                        <span>100%</span>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          fontSize: 8,
+                          ...MONO,
+                        }}
+                      >
+                        <span style={{ color: C.dim }}>
+                          Buying{" "}
+                          <span style={{ color: C.primary, fontWeight: 700 }}>
+                            {amountSol || "0"} SOL
+                          </span>
+                        </span>
+                        <span style={{ color: C.dim }}>
+                          Max{" "}
+                          <span style={{ color: C.primary, fontWeight: 700 }}>
+                            {balForPct.toFixed(3)} SOL
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* SL / TP */}
+                <div
+                  style={{ display: "flex", gap: 5, flexWrap: "wrap" as const }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        color: C.label,
+                        fontSize: 7,
+                        letterSpacing: "0.12em",
+                        ...MONO,
+                        marginBottom: 3,
+                      }}
+                    >
+                      STOP LOSS
+                      {![-10, -20, -30, -50].includes(slPct) && (
+                        <span
+                          style={{
+                            color: C.red,
+                            marginLeft: 5,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {slPct}%
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 2 }}>
+                      {[-10, -20, -30, -50].map((v) => (
+                        <button
+                          key={v}
+                          className="ssl"
+                          onClick={() => setSlPct(v)}
+                          style={{
+                            flex: 1,
+                            background: slPct === v ? "#1a0000" : "transparent",
+                            border: `1px solid ${slPct === v ? C.red + "55" : C.border}`,
+                            color: slPct === v ? C.red : C.dim,
+                            fontSize: 8,
+                            fontWeight: slPct === v ? 700 : 400,
+                            padding: "4px 0",
+                            borderRadius: 2,
+                            cursor: "pointer",
+                            ...MONO,
+                          }}
+                        >
+                          {v}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        color: C.label,
+                        fontSize: 7,
+                        letterSpacing: "0.12em",
+                        ...MONO,
+                        marginBottom: 3,
+                      }}
+                    >
+                      TAKE PROFIT
+                      {![1.5, 2, 5].includes(tpX) && (
+                        <span
+                          style={{
+                            color: C.green,
+                            marginLeft: 5,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {tpX}×
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 2 }}>
+                      {[1.5, 2, 5].map((v) => (
+                        <button
+                          key={v}
+                          className="stp"
+                          onClick={() => setTpX(v)}
+                          style={{
+                            flex: 1,
+                            background: tpX === v ? "#001a00" : "transparent",
+                            border: `1px solid ${tpX === v ? C.green + "55" : C.border}`,
+                            color: tpX === v ? C.green : C.dim,
+                            fontSize: 9,
+                            fontWeight: tpX === v ? 700 : 400,
+                            padding: "4px 0",
+                            borderRadius: 2,
+                            cursor: "pointer",
+                            ...MONO,
+                          }}
+                        >
+                          {v}×
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (hotPub) {
-                      navigator.clipboard.writeText(hotPub);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1500);
-                    }
-                  }}
+
+                {/* Trail pill */}
+                <div
                   style={{
-                    background: "transparent",
-                    border: `1px solid ${C.border}`,
-                    color: copied ? C.green : C.dim,
-                    fontSize: 7,
-                    padding: "2px 6px",
-                    borderRadius: 2,
+                    background: "#0d0a00",
+                    border: `1px solid ${C.amber}22`,
+                    borderRadius: 3,
+                    padding: "4px 8px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
                     cursor: "pointer",
-                    ...MONO,
                   }}
+                  onClick={() => setTab("config")}
                 >
-                  {copied ? "✓" : "COPY"}
-                </button>
-                {hotBal !== null && hotBal < 0.05 && (
                   <span
                     style={{
                       fontSize: 7,
                       color: C.amber,
-                      border: `1px solid ${C.amber}33`,
-                      padding: "2px 5px",
-                      borderRadius: 2,
+                      fontWeight: 700,
                       ...MONO,
                     }}
                   >
-                    LOW SOL
+                    TRAIL -{trailPct}%
                   </span>
-                )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setHotKeypair(null);
-                    setHotPub(null);
-                    setHotBal(null);
-                  }}
-                  style={{
-                    background: "transparent",
-                    border: `1px solid ${C.border}`,
-                    color: C.dim,
-                    fontSize: 7,
-                    padding: "2px 6px",
-                    borderRadius: 2,
-                    cursor: "pointer",
-                    ...MONO,
-                  }}
-                >
-                  LOCK
-                </button>
-              </div>
-
-              {isAvoid && ca && (
-                <div
-                  style={{
-                    background: "#1a0000",
-                    border: `1px solid ${C.red}44`,
-                    borderRadius: 3,
-                    padding: "5px 8px",
-                    color: C.red,
-                    fontSize: 8,
-                    ...MONO,
-                  }}
-                >
+                  <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
+                    Locks gains · sells {trailPct}% below peak
+                  </span>
                   <span
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
+                      fontSize: 6,
+                      color: C.dim,
+                      ...MONO,
+                      marginLeft: "auto",
                     }}
                   >
-                    <AlertIcon size={11} /> BLOCKED — Honeypot / AVOID flagged
-                    by scanner.
+                    tap ⚙ to edit →
                   </span>
                 </div>
-              )}
 
-              {/* Token info */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <TokenAvatar
-                  imageUrl={tokenData?.imageUrl}
-                  symbol={sym || "?"}
-                  size={34}
-                  links={
-                    ca
-                      ? {
-                          twitter: tokenData?.links?.twitter,
-                          telegram: tokenData?.links?.telegram,
-                          website: tokenData?.links?.website,
-                          dex: `https://dexscreener.com/solana/${ca}`,
-                          pump: `https://pump.fun/${ca}`,
-                        }
-                      : undefined
-                  }
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {sym ? (
-                    <>
+                {/* Entry / SL / TP display */}
+                {mcap > 0 && (
+                  <div style={{ display: "flex", gap: 3 }}>
+                    {[
+                      { label: "ENTRY", value: fmtMcap(mcap), color: C.muted },
+                      {
+                        label: `SL ${slPct}%`,
+                        value: fmtMcap(slMcap),
+                        color: C.red,
+                      },
+                      {
+                        label: `TP ${tpX}×`,
+                        value: fmtMcap(tpMcap),
+                        color: C.green,
+                      },
+                    ].map((item) => (
                       <div
+                        key={item.label}
                         style={{
-                          display: "flex",
-                          alignItems: "baseline",
-                          gap: 6,
+                          flex: 1,
+                          background: C.bgCard,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 3,
+                          padding: "4px 6px",
+                          textAlign: "center" as const,
                         }}
                       >
-                        <span
+                        <div
                           style={{
-                            color: C.primary,
-                            fontSize: 13,
-                            fontWeight: 900,
+                            color: C.label,
+                            fontSize: 6,
                             ...MONO,
+                            letterSpacing: "0.1em",
+                            marginBottom: 1,
                           }}
                         >
-                          ${sym}
-                        </span>
-                        <span
+                          {item.label}
+                        </div>
+                        <div
                           style={{
-                            color: C.orange,
+                            color: item.color,
                             fontSize: 10,
                             fontWeight: 700,
                             ...MONO,
                           }}
                         >
-                          {fmtMcap(mcap)}
-                        </span>
-                      </div>
-                      {ca && (
-                        <div
-                          style={{
-                            color: C.dim,
-                            fontSize: 7,
-                            ...MONO,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap" as const,
-                          }}
-                        >
-                          {ca.slice(0, 22)}…
+                          {item.value}
                         </div>
-                      )}
-                    </>
-                  ) : (
-                    <span style={{ color: C.dim, fontSize: 9, ...MONO }}>
-                      ← select token from scanner
-                    </span>
-                  )}
-                </div>
-              </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-              {/* Amount */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  flexWrap: "wrap" as const,
-                }}
-              >
-                <div
-                  style={{
-                    color: C.label,
-                    fontSize: 7,
-                    letterSpacing: "0.12em",
-                    ...MONO,
-                    flexShrink: 0,
-                    width: 22,
-                  }}
-                >
-                  SOL
-                </div>
-                <input
-                  type="number"
-                  value={amountSol}
-                  onChange={(e) => setAmountSol(e.target.value)}
-                  min="0.01"
-                  step="0.05"
-                  style={{
-                    flex: "1 1 90px",
-                    minWidth: 60,
-                    background: C.bgCard,
-                    border: `1px solid ${C.border}`,
-                    color: C.primary,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    padding: "5px 8px",
-                    borderRadius: 3,
-                    outline: "none",
-                    ...MONO,
-                    textAlign: "right" as const,
-                  }}
-                />
-                {["0.05", "0.1", "0.25", "0.5"].map((v) => (
-                  <button
-                    key={v}
-                    className="samt"
-                    onClick={() => setAmountSol(v)}
+                {status && (
+                  <div
                     style={{
-                      background: amountSol === v ? "#111" : "transparent",
-                      border: `1px solid ${amountSol === v ? C.orange + "55" : C.border}`,
-                      color: amountSol === v ? C.orange : C.dim,
+                      background:
+                        status.type === "ok"
+                          ? "#001a0a"
+                          : status.type === "err"
+                            ? "#1a0000"
+                            : "#0d0d00",
+                      border: `1px solid ${status.type === "ok" ? C.green + "33" : status.type === "err" ? C.red + "33" : C.amber + "33"}`,
+                      borderRadius: 3,
+                      padding: "5px 8px",
+                      color:
+                        status.type === "ok"
+                          ? C.green
+                          : status.type === "err"
+                            ? C.red
+                            : C.amber,
                       fontSize: 8,
-                      padding: "5px 5px",
-                      borderRadius: 2,
-                      cursor: "pointer",
                       ...MONO,
-                      flexShrink: 0,
-                      minWidth: 28,
                     }}
                   >
-                    {v}
+                    {status.msg}
+                  </div>
+                )}
+
+                {/* ── UNIFIED BUY BUTTON — changes based on mode ── */}
+                {!paperMode ? (
+                  <button
+                    className="sb"
+                    onClick={handleBuy}
+                    disabled={!canBuy}
+                    style={{
+                      background: isAvoid
+                        ? "#1a0000"
+                        : !ca
+                          ? "#0d0d0d"
+                          : buying
+                            ? "#0d2200"
+                            : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                              ? "#111"
+                              : C.orange,
+                      border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : buying ? C.green + "44" : "transparent"}`,
+                      color: isAvoid
+                        ? C.red
+                        : !ca
+                          ? C.dim
+                          : buying
+                            ? C.green
+                            : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                              ? C.amber
+                              : "#fff",
+                      fontSize: 11,
+                      fontWeight: 900,
+                      letterSpacing: "0.14em",
+                      padding: "10px 10px",
+                      borderRadius: 8,
+                      cursor: canBuy ? "pointer" : "not-allowed",
+                      width: "100%",
+                      ...MONO,
+                      transition: "all 0.15s",
+                      boxShadow:
+                        canBuy && !buying ? `0 0 16px ${C.orange}33` : "none",
+                    }}
+                  >
+                    {isAvoid
+                      ? "HONEYPOT — BUY BLOCKED"
+                      : !ca
+                        ? "SELECT A TOKEN"
+                        : (hotBal ?? 0) < parseFloat(amountSol || "0")
+                          ? `LOW FUNDS — ${hotBal?.toFixed(3)} SOL`
+                          : buying
+                            ? "SNIPING…"
+                            : `BUY ${sym || ""} — ${amountSol} SOL`}
                   </button>
+                ) : (
+                  <button
+                    className="sb"
+                    onClick={handlePaperBuy}
+                    disabled={!canPaperBuy}
+                    style={{
+                      background: isAvoid
+                        ? "#1a0000"
+                        : !ca
+                          ? "#0d0d0d"
+                          : canPaperBuy
+                            ? "#001a08"
+                            : "#111",
+                      border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : canPaperBuy ? C.green + "66" : C.border}`,
+                      color: isAvoid
+                        ? C.red
+                        : !ca
+                          ? C.dim
+                          : canPaperBuy
+                            ? C.green
+                            : C.dim,
+                      fontSize: 11,
+                      fontWeight: 900,
+                      letterSpacing: "0.14em",
+                      padding: "10px 10px",
+                      borderRadius: 8,
+                      cursor: canPaperBuy ? "pointer" : "not-allowed",
+                      width: "100%",
+                      ...MONO,
+                      transition: "all 0.15s",
+                      boxShadow: canPaperBuy ? `0 0 16px ${C.green}22` : "none",
+                    }}
+                  >
+                    {isAvoid
+                      ? "HONEYPOT — BLOCKED"
+                      : !ca
+                        ? "SELECT A TOKEN"
+                        : paperBal < parseFloat(amountSol || "0")
+                          ? `LOW DEMO BAL — ${paperBal.toFixed(3)} SOL`
+                          : `PAPER TRADE ${sym || ""} — ${amountSol} SOL`}
+                  </button>
+                )}
+              </div>
+
+              <div
+                style={{
+                  background: C.bgCard,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                  display: "flex",
+                  alignItems: "stretch",
+                  overflow: "hidden",
+                }}
+              >
+                {[
+                  {
+                    label: `${paperMode ? "PAPER" : "LIVE"} WIN RATE`,
+                    value: paperMode
+                      ? paperFilledLogs.length
+                        ? `${((paperWins / paperFilledLogs.length) * 100).toFixed(0)}%`
+                        : "—"
+                      : filledLogs.length
+                        ? `${((wins / filledLogs.length) * 100).toFixed(0)}%`
+                        : "—",
+                    color: C.primary,
+                  },
+                  {
+                    label: "TRADES",
+                    value: String(
+                      paperMode ? paperFilledLogs.length : filledLogs.length,
+                    ),
+                    color: C.primary,
+                  },
+                  {
+                    label: "FEE",
+                    value: feeBadgeLabel ?? "—",
+                    color: tier?.feeBps === 0 ? C.green : C.amber,
+                  },
+                ].map((stat, i) => (
+                  <div
+                    key={stat.label}
+                    style={{
+                      flex: 1,
+                      padding: "9px 6px",
+                      textAlign: "center" as const,
+                      borderLeft: i > 0 ? `1px solid ${C.border}` : "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: C.label,
+                        fontSize: 6,
+                        letterSpacing: "0.1em",
+                        marginBottom: 3,
+                        ...MONO,
+                      }}
+                    >
+                      {stat.label}
+                    </div>
+                    <div
+                      style={{
+                        color: stat.color,
+                        fontSize: 12,
+                        fontWeight: 800,
+                        ...MONO,
+                      }}
+                    >
+                      {stat.value}
+                    </div>
+                  </div>
                 ))}
               </div>
-
-              {(() => {
-                const balForPct = paperMode ? paperBal : (hotBal ?? 0);
-                const pct =
-                  balForPct > 0
-                    ? Math.min(
-                        100,
-                        Math.round(
-                          (parseFloat(amountSol || "0") / balForPct) * 100,
-                        ),
-                      )
-                    : 0;
-                return (
-                  <div style={{ padding: "4px 2px 2px" }}>
-                    <div style={{ position: "relative", height: 14 }}>
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "50%",
-                          left: 0,
-                          right: 0,
-                          height: 4,
-                          borderRadius: 2,
-                          background: "#1a1a1a",
-                          transform: "translateY(-50%)",
-                          pointerEvents: "none",
-                        }}
-                      />
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "50%",
-                          left: 0,
-                          width: `${pct}%`,
-                          height: 4,
-                          borderRadius: 2,
-                          background: C.orange,
-                          transform: "translateY(-50%)",
-                          pointerEvents: "none",
-                          transition: "width 0.08s linear",
-                        }}
-                      />
-                      {[0, 25, 50, 75, 100].map((mark) => (
-                        <div
-                          key={mark}
-                          style={{
-                            position: "absolute",
-                            top: "50%",
-                            left: `${mark}%`,
-                            width: 4,
-                            height: 4,
-                            borderRadius: "50%",
-                            background: mark <= pct ? "#fff8" : "#3a3a3a",
-                            transform: "translate(-50%, -50%)",
-                            pointerEvents: "none",
-                            zIndex: 1,
-                          }}
-                        />
-                      ))}
-                      <input
-                        className="pct-slider"
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={pct}
-                        onChange={(e) => {
-                          const p = parseFloat(e.target.value);
-                          const next = ((balForPct * p) / 100).toFixed(3);
-                          setAmountSol(next);
-                        }}
-                        style={{
-                          position: "relative",
-                          zIndex: 2,
-                          width: "100%",
-                          height: 14,
-                          background: "transparent",
-                        }}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 7,
-                        color: C.dim,
-                        ...MONO,
-                        marginTop: 4,
-                        marginBottom: 4,
-                      }}
-                    >
-                      <span>0%</span>
-                      <span>25%</span>
-                      <span>50%</span>
-                      <span>75%</span>
-                      <span>100%</span>
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 8,
-                        ...MONO,
-                      }}
-                    >
-                      <span style={{ color: C.dim }}>
-                        Buying{" "}
-                        <span style={{ color: C.primary, fontWeight: 700 }}>
-                          {amountSol || "0"} SOL
-                        </span>
-                      </span>
-                      <span style={{ color: C.dim }}>
-                        Max{" "}
-                        <span style={{ color: C.primary, fontWeight: 700 }}>
-                          {balForPct.toFixed(3)} SOL
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* SL / TP */}
-              <div
-                style={{ display: "flex", gap: 5, flexWrap: "wrap" as const }}
-              >
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      color: C.label,
-                      fontSize: 7,
-                      letterSpacing: "0.12em",
-                      ...MONO,
-                      marginBottom: 3,
-                    }}
-                  >
-                    STOP LOSS
-                    {![-10, -20, -30, -50].includes(slPct) && (
-                      <span
-                        style={{ color: C.red, marginLeft: 5, fontWeight: 700 }}
-                      >
-                        {slPct}%
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 2 }}>
-                    {[-10, -20, -30, -50].map((v) => (
-                      <button
-                        key={v}
-                        className="ssl"
-                        onClick={() => setSlPct(v)}
-                        style={{
-                          flex: 1,
-                          background: slPct === v ? "#1a0000" : "transparent",
-                          border: `1px solid ${slPct === v ? C.red + "55" : C.border}`,
-                          color: slPct === v ? C.red : C.dim,
-                          fontSize: 8,
-                          fontWeight: slPct === v ? 700 : 400,
-                          padding: "4px 0",
-                          borderRadius: 2,
-                          cursor: "pointer",
-                          ...MONO,
-                        }}
-                      >
-                        {v}%
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      color: C.label,
-                      fontSize: 7,
-                      letterSpacing: "0.12em",
-                      ...MONO,
-                      marginBottom: 3,
-                    }}
-                  >
-                    TAKE PROFIT
-                    {![1.5, 2, 5].includes(tpX) && (
-                      <span
-                        style={{
-                          color: C.green,
-                          marginLeft: 5,
-                          fontWeight: 700,
-                        }}
-                      >
-                        {tpX}×
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 2 }}>
-                    {[1.5, 2, 5].map((v) => (
-                      <button
-                        key={v}
-                        className="stp"
-                        onClick={() => setTpX(v)}
-                        style={{
-                          flex: 1,
-                          background: tpX === v ? "#001a00" : "transparent",
-                          border: `1px solid ${tpX === v ? C.green + "55" : C.border}`,
-                          color: tpX === v ? C.green : C.dim,
-                          fontSize: 9,
-                          fontWeight: tpX === v ? 700 : 400,
-                          padding: "4px 0",
-                          borderRadius: 2,
-                          cursor: "pointer",
-                          ...MONO,
-                        }}
-                      >
-                        {v}×
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Trail pill */}
-              <div
-                style={{
-                  background: "#0d0a00",
-                  border: `1px solid ${C.amber}22`,
-                  borderRadius: 3,
-                  padding: "4px 8px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  cursor: "pointer",
-                }}
-                onClick={() => setTab("config")}
-              >
-                <span
-                  style={{
-                    fontSize: 7,
-                    color: C.amber,
-                    fontWeight: 700,
-                    ...MONO,
-                  }}
-                >
-                  TRAIL -{trailPct}%
-                </span>
-                <span style={{ fontSize: 7, color: C.dim, ...MONO }}>
-                  Locks gains · sells {trailPct}% below peak
-                </span>
-                <span
-                  style={{
-                    fontSize: 6,
-                    color: C.dim,
-                    ...MONO,
-                    marginLeft: "auto",
-                  }}
-                >
-                  tap ⚙ to edit →
-                </span>
-              </div>
-
-              {/* Entry / SL / TP display */}
-              {mcap > 0 && (
-                <div style={{ display: "flex", gap: 3 }}>
-                  {[
-                    { label: "ENTRY", value: fmtMcap(mcap), color: C.muted },
-                    {
-                      label: `SL ${slPct}%`,
-                      value: fmtMcap(slMcap),
-                      color: C.red,
-                    },
-                    {
-                      label: `TP ${tpX}×`,
-                      value: fmtMcap(tpMcap),
-                      color: C.green,
-                    },
-                  ].map((item) => (
-                    <div
-                      key={item.label}
-                      style={{
-                        flex: 1,
-                        background: C.bgCard,
-                        border: `1px solid ${C.border}`,
-                        borderRadius: 3,
-                        padding: "4px 6px",
-                        textAlign: "center" as const,
-                      }}
-                    >
-                      <div
-                        style={{
-                          color: C.label,
-                          fontSize: 6,
-                          ...MONO,
-                          letterSpacing: "0.1em",
-                          marginBottom: 1,
-                        }}
-                      >
-                        {item.label}
-                      </div>
-                      <div
-                        style={{
-                          color: item.color,
-                          fontSize: 10,
-                          fontWeight: 700,
-                          ...MONO,
-                        }}
-                      >
-                        {item.value}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {status && (
-                <div
-                  style={{
-                    background:
-                      status.type === "ok"
-                        ? "#001a0a"
-                        : status.type === "err"
-                          ? "#1a0000"
-                          : "#0d0d00",
-                    border: `1px solid ${status.type === "ok" ? C.green + "33" : status.type === "err" ? C.red + "33" : C.amber + "33"}`,
-                    borderRadius: 3,
-                    padding: "5px 8px",
-                    color:
-                      status.type === "ok"
-                        ? C.green
-                        : status.type === "err"
-                          ? C.red
-                          : C.amber,
-                    fontSize: 8,
-                    ...MONO,
-                  }}
-                >
-                  {status.msg}
-                </div>
-              )}
-
-              {/* ── UNIFIED BUY BUTTON — changes based on mode ── */}
-              {!paperMode ? (
-                <button
-                  className="sb"
-                  onClick={handleBuy}
-                  disabled={!canBuy}
-                  style={{
-                    background: isAvoid
-                      ? "#1a0000"
-                      : !ca
-                        ? "#0d0d0d"
-                        : buying
-                          ? "#0d2200"
-                          : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                            ? "#111"
-                            : C.orange,
-                    border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : buying ? C.green + "44" : "transparent"}`,
-                    color: isAvoid
-                      ? C.red
-                      : !ca
-                        ? C.dim
-                        : buying
-                          ? C.green
-                          : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                            ? C.amber
-                            : "#fff",
-                    fontSize: 11,
-                    fontWeight: 900,
-                    letterSpacing: "0.14em",
-                    padding: "10px 10px",
-                    borderRadius: 8,
-                    cursor: canBuy ? "pointer" : "not-allowed",
-                    width: "100%",
-                    ...MONO,
-                    transition: "all 0.15s",
-                    boxShadow:
-                      canBuy && !buying ? `0 0 16px ${C.orange}33` : "none",
-                  }}
-                >
-                  {isAvoid
-                    ? "HONEYPOT — BUY BLOCKED"
-                    : !ca
-                      ? "SELECT A TOKEN"
-                      : (hotBal ?? 0) < parseFloat(amountSol || "0")
-                        ? `LOW FUNDS — ${hotBal?.toFixed(3)} SOL`
-                        : buying
-                          ? "SNIPING…"
-                          : `BUY ${sym || ""} — ${amountSol} SOL`}
-                </button>
-              ) : (
-                <button
-                  className="sb"
-                  onClick={handlePaperBuy}
-                  disabled={!canPaperBuy}
-                  style={{
-                    background: isAvoid
-                      ? "#1a0000"
-                      : !ca
-                        ? "#0d0d0d"
-                        : canPaperBuy
-                          ? "#001a08"
-                          : "#111",
-                    border: `1px solid ${isAvoid ? C.red + "44" : !ca ? C.border : canPaperBuy ? C.green + "66" : C.border}`,
-                    color: isAvoid
-                      ? C.red
-                      : !ca
-                        ? C.dim
-                        : canPaperBuy
-                          ? C.green
-                          : C.dim,
-                    fontSize: 11,
-                    fontWeight: 900,
-                    letterSpacing: "0.14em",
-                    padding: "10px 10px",
-                    borderRadius: 8,
-                    cursor: canPaperBuy ? "pointer" : "not-allowed",
-                    width: "100%",
-                    ...MONO,
-                    transition: "all 0.15s",
-                    boxShadow: canPaperBuy ? `0 0 16px ${C.green}22` : "none",
-                  }}
-                >
-                  {isAvoid
-                    ? "HONEYPOT — BLOCKED"
-                    : !ca
-                      ? "SELECT A TOKEN"
-                      : paperBal < parseFloat(amountSol || "0")
-                        ? `LOW DEMO BAL — ${paperBal.toFixed(3)} SOL`
-                        : `PAPER TRADE ${sym || ""} — ${amountSol} SOL`}
-                </button>
-              )}
-            </div>
-
-            <div
-              style={{
-                background: C.bgCard,
-                border: `1px solid ${C.border}`,
-                borderRadius: 6,
-                display: "flex",
-                alignItems: "stretch",
-                overflow: "hidden",
-              }}
-            >
-              {[
-                {
-                  label: `${paperMode ? "PAPER" : "LIVE"} WIN RATE`,
-                  value: paperMode
-                    ? paperFilledLogs.length
-                      ? `${((paperWins / paperFilledLogs.length) * 100).toFixed(0)}%`
-                      : "—"
-                    : filledLogs.length
-                      ? `${((wins / filledLogs.length) * 100).toFixed(0)}%`
-                      : "—",
-                  color: C.primary,
-                },
-                {
-                  label: "TRADES",
-                  value: String(
-                    paperMode ? paperFilledLogs.length : filledLogs.length,
-                  ),
-                  color: C.primary,
-                },
-                {
-                  label: "FEE",
-                  value: feeBadgeLabel ?? "—",
-                  color: tier?.feeBps === 0 ? C.green : C.amber,
-                },
-              ].map((stat, i) => (
-                <div
-                  key={stat.label}
-                  style={{
-                    flex: 1,
-                    padding: "9px 6px",
-                    textAlign: "center" as const,
-                    borderLeft: i > 0 ? `1px solid ${C.border}` : "none",
-                  }}
-                >
-                  <div
-                    style={{
-                      color: C.label,
-                      fontSize: 6,
-                      letterSpacing: "0.1em",
-                      marginBottom: 3,
-                      ...MONO,
-                    }}
-                  >
-                    {stat.label}
-                  </div>
-                  <div
-                    style={{
-                      color: stat.color,
-                      fontSize: 12,
-                      fontWeight: 800,
-                      ...MONO,
-                    }}
-                  >
-                    {stat.value}
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         )}
@@ -5622,9 +5976,19 @@ export default function PaperTrader({
                                   letterSpacing: "0.1em",
                                 }}
                               >
-                                📄 PAPER POSITIONS
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
+                                  <FileText size={10} />
+                                  PAPER POSITIONS
+                                </span>
                               </span>
                               <span
+                                data-private-balance
                                 style={{ fontSize: 7, color: C.dim, ...MONO }}
                               >
                                 bal: {paperBal.toFixed(4)} SOL
@@ -5702,7 +6066,7 @@ export default function PaperTrader({
                                               ...MONO,
                                             }}
                                           >
-                                            ${pos.symbol}
+                                            {pos.symbol}
                                           </span>
                                           <span
                                             style={{
@@ -6208,6 +6572,7 @@ export default function PaperTrader({
                               }}
                             />
                             <span
+                              data-private-balance
                               style={{ fontSize: 7, color: C.dim, ...MONO }}
                             >
                               AUTO-SELL ARMED · polls every 10s · SL + TP +
@@ -6360,7 +6725,7 @@ export default function PaperTrader({
                                       ...MONO,
                                     }}
                                   >
-                                    ${t.symbol}
+                                    {t.symbol}
                                   </span>
                                   <span
                                     style={{
@@ -6563,7 +6928,7 @@ export default function PaperTrader({
                                         ...MONO,
                                       }}
                                     >
-                                      ${t.symbol}
+                                      {t.symbol}
                                     </span>
                                     <span
                                       style={{

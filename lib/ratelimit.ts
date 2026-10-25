@@ -3,7 +3,13 @@ import { Redis } from "@upstash/redis";
 
 // ─── REDIS CONNECTION ─────────────────────────────────────────────────────────
 // Fails fast at startup if UPSTASH_REDIS_REST_URL / TOKEN are missing
-const redis = Redis.fromEnv();
+// retry:false + 1s abort: if Upstash is unreachable we fail open immediately instead of stalling every request ~4-5s.
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL ?? "",
+  token: process.env.UPSTASH_REDIS_REST_TOKEN ?? "",
+  retry: false,
+  signal: () => AbortSignal.timeout(1000),
+});
 
 // ─── SAFE LIMIT HELPER ────────────────────────────────────────────────────────
 // Wraps every limiter.limit() call so a Redis outage never crashes an API route.
@@ -45,7 +51,7 @@ export const jupiterLimiter = new Ratelimit({
 // RPC proxy: 100 per minute
 export const rpcLimiter = new Ratelimit({
   redis,
-  limiter: Ratelimit.slidingWindow(100, "1 m"),
+  limiter: Ratelimit.slidingWindow(900, "1 m"),
   prefix: "wraith_rpc",
 });
 

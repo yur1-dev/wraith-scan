@@ -1,0 +1,240 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { Connection, PublicKey } from "@solana/web3.js";
+import { useSandboxToken } from "@/lib/useSandboxTokens";
+import { ExternalLink } from "lucide-react";
+import { C } from "@/lib/theme";
+import { TokenCallouts } from "@/components/TokenCallouts";
+
+const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
+const TABS = ["Swaps", "Holders", "Analysis", "Traders Intel"] as const;
+type Tab = (typeof TABS)[number];
+
+export interface TradeRow {
+  ageLabel: string;
+  type: "Buy" | "Sell";
+  amountUsd: number;
+  tokens: number;
+  mcapAtTrade: number;
+  traderShort: string;
+}
+
+export interface IntelLink {
+  url: string;
+  platform: string;
+  title: string;
+}
+
+export interface TokenDetailTabsProps {
+  trades?: TradeRow[];
+  mint?: string;
+  intelLinks?: IntelLink[];
+  intelSummary?: string;
+  currentMcap?: number | null;
+}
+
+function fmtUsd(n: number): string {
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}m`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}k`;
+  return `$${n.toFixed(2)}`;
+}
+
+function safeExternalUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function TokenDetailTabs({
+  trades = [],
+  mint,
+  intelLinks = [],
+  intelSummary,
+  currentMcap,
+}: TokenDetailTabsProps) {
+  const [tab, setTab] = useState<Tab>("Swaps");
+  const [holders, setHolders] = useState<{ wallet: string; quantity: number; share: number }[]>([]);
+  const [holdersLoading, setHoldersLoading] = useState(false);
+  const [networkHolders, setNetworkHolders] = useState<number | null>(null);
+  const { connection: mainnetConnection } = useConnection();
+  const isSandbox = Boolean(useSandboxToken(mint));
+  const connection = useMemo(
+    () => (isSandbox ? new Connection(process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com", "confirmed") : mainnetConnection),
+    [isSandbox, mainnetConnection],
+  );
+
+  useEffect(() => {
+    if (!mint) {
+      setHolders([]);
+      setNetworkHolders(null);
+      return;
+    }
+    setHolders([]);
+    setNetworkHolders(null);
+    let active = true;
+    const refreshTopAccounts = async () => {
+      setHoldersLoading(true);
+      try {
+        const mintKey = new PublicKey(mint);
+        const [accounts, supply] = await Promise.all([
+          connection.getTokenLargestAccounts(mintKey, "confirmed"),
+          connection.getTokenSupply(mintKey, "confirmed"),
+        ]);
+        const denominator = Number(supply.value.uiAmountString ?? supply.value.amount) /
+          (supply.value.uiAmountString ? 1 : 10 ** supply.value.decimals);
+        const topOwners = await Promise.all(accounts.value.slice(0, 20).map(async (account) => {
+          let wallet = account.address.toBase58();
+          try {
+            const parsed = await connection.getParsedAccountInfo(account.address, "confirmed");
+            const info = (parsed.value?.data as { parsed?: { info?: { owner?: string } } } | null)?.parsed?.info;
+            if (info?.owner) wallet = info.owner;
+          } catch (error) {
+            console.warn("[token holder owner lookup]", error);
+          }
+          const quantity = Number(account.uiAmountString ?? account.amount) /
+            (account.uiAmountString ? 1 : 10 ** account.decimals);
+          return { wallet, quantity };
+        }));
+        const aggregated = new Map<string, number>();
+        for (const holder of topOwners) {
+          aggregated.set(holder.wallet, (aggregated.get(holder.wallet) ?? 0) + holder.quantity);
+        }
+        const next = [...aggregated.entries()]
+          .map(([wallet, quantity]) => ({
+            wallet,
+            quantity,
+            share: denominator > 0 ? quantity / denominator * 100 : 0,
+          }))
+          .sort((a, b) => b.quantity - a.quantity);
+        if (active) setHolders(next);
+      } catch (error) {
+        console.error("[token holders]", error);
+        if (active) setHolders([]);
+      } finally {
+        if (active) setHoldersLoading(false);
+      }
+    };
+    const refreshNetworkCount = async () => {
+      try {
+        const response = await fetch(`/api/token-holder-count?mint=${encodeURIComponent(mint)}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`Holder count request failed (${response.status})`);
+        }
+        const payload: { holderCount?: unknown } = await response.json();
+        if (active && typeof payload.holderCount === "number" && Number.isSafeInteger(payload.holderCount)) {
+          setNetworkHolders(payload.holderCount);
+        }
+      } catch (error) {
+        console.error("[network token holders]", error);
+        if (active) setNetworkHolders(null);
+      }
+    };
+    void refreshTopAccounts();
+    void refreshNetworkCount();
+    const accountTimer = window.setInterval(() => void refreshTopAccounts(), 30_000);
+    const countTimer = window.setInterval(() => void refreshNetworkCount(), 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(accountTimer);
+      window.clearInterval(countTimer);
+    };
+  }, [connection, mint]);
+
+  const verifiedLinks = intelLinks
+    .map((link) => ({ ...link, safeUrl: safeExternalUrl(link.url) }))
+    .filter((link): link is IntelLink & { safeUrl: string } => Boolean(link.safeUrl));
+
+  return (
+    <section style={{ overflow: "hidden", border: `1px solid ${C.border}`, borderRadius: 10, background: "var(--surface)", ...MONO }}>
+      <nav aria-label="Token activity" style={{ display: "flex", gap: 5, padding: "8px 10px", borderBottom: `1px solid ${C.border}`, overflowX: "auto" }}>
+        {TABS.map((item) => (
+          <button key={item} type="button" onClick={() => setTab(item)} aria-pressed={tab === item} style={{ padding: "7px 12px", border: `1px solid ${tab === item ? "rgba(var(--accent-rgb),.32)" : "transparent"}`, borderRadius: 8, background: tab === item ? "rgba(var(--accent-rgb),.10)" : "transparent", color: tab === item ? "var(--accent-text)" : C.muted, fontSize: 11, fontWeight: tab === item ? 700 : 500, cursor: "pointer", whiteSpace: "nowrap" }}>
+            {item}{item === "Holders" && networkHolders !== null ? ` (${networkHolders.toLocaleString()})` : ""}
+          </button>
+        ))}
+      </nav>
+
+      <div style={{ minHeight: 178 }}>
+        {tab === "Holders" && holders.length > 0 ? (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 14px 0", color: C.muted, fontSize: 10 }}>
+              <span>Network-wide Solana holders</span>
+              <strong style={{ color: C.primary }}>{networkHolders?.toLocaleString() ?? "Unavailable"}</strong>
+            </div>
+            <div style={{ padding: "5px 14px 9px", color: C.dim, fontSize: 9 }}>
+              Includes token owners across apps and wallets; Wraith users are part of this network total.
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead><tr style={{ color: C.muted, textAlign: "left" }}>{["#", "Wallet", "Tokens", "Supply"].map((heading) => <th key={heading} style={{ padding: "9px 14px", fontWeight: 500 }}>{heading}</th>)}</tr></thead>
+                <tbody>{holders.map((holder, index) => <tr key={holder.wallet} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td style={{ width: 46, padding: "9px 14px", color: C.dim }}>{index + 1}</td>
+                  <td style={{ padding: "9px 14px", color: C.primary, fontFamily: "var(--font-mono), monospace" }}>{`${holder.wallet.slice(0, 5)}…${holder.wallet.slice(-5)}`}</td>
+                  <td style={{ padding: "9px 14px", color: C.primary, fontVariantNumeric: "tabular-nums" }}>{holder.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                  <td style={{ padding: "9px 14px", color: C.muted, fontVariantNumeric: "tabular-nums" }}>{holder.share.toFixed(2)}%</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </>
+        ) : tab === "Swaps" && trades.length > 0 ? (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead><tr style={{ color: C.muted, textAlign: "left" }}>{["Age", "Type", "Amount", "Tokens", "MCap", "Trader"].map((heading) => <th key={heading} style={{ padding: "10px 12px", fontWeight: 500 }}>{heading}</th>)}</tr></thead>
+              <tbody>{trades.map((row, index) => <tr key={`${row.traderShort}-${row.ageLabel}-${index}`} style={{ borderTop: `1px solid ${C.border}` }}>
+                <td style={{ padding: "10px 12px", color: C.dim }}>{row.ageLabel}</td>
+                <td style={{ padding: "10px 12px", color: row.type === "Buy" ? C.green : C.red }}>{row.type}</td>
+                <td style={{ padding: "10px 12px", color: row.type === "Buy" ? C.green : C.red }}>{fmtUsd(row.amountUsd)}</td>
+                <td style={{ padding: "10px 12px", color: C.primary }}>{row.tokens.toLocaleString()}</td>
+                <td style={{ padding: "10px 12px", color: C.primary }}>{fmtUsd(row.mcapAtTrade)}</td>
+                <td style={{ padding: "10px 12px", color: C.muted }}>{row.traderShort}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        ) : tab === "Analysis" ? (
+          <div style={{ padding: "10px 14px" }}>
+            {!intelSummary && verifiedLinks.length === 0 ? (
+              <div style={{ minHeight: 120, display: "grid", placeContent: "center", color: C.muted, fontSize: 11, textAlign: "center" }}>
+                <span>No analysis available for this token yet.</span>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {intelSummary && <div style={{ padding: 11, border: `1px solid ${C.border}`, borderRadius: 8, background: "var(--surface-2)", color: C.primary, fontSize: 11, lineHeight: 1.6 }}>{intelSummary}</div>}
+                {verifiedLinks.map((link, index) => (
+                  <a key={`${link.safeUrl}-${index}`} href={link.safeUrl} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 11px", border: `1px solid ${C.border}`, borderRadius: 8, background: "var(--surface-2)", color: C.primary, textDecoration: "none", fontSize: 10 }}>
+                    <span style={{ minWidth: 0 }}>
+                      <strong style={{ display: "block", color: "var(--accent-text)", marginBottom: 4 }}>{link.platform}</strong>
+                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{link.title || link.url}</span>
+                    </span>
+                    <ExternalLink size={13} color={C.muted} />
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : tab === "Traders Intel" ? (
+          <div>
+            {mint && <TokenCallouts mint={mint} currentMcap={currentMcap} />}
+          </div>
+        ) : tab === "Holders" ? (
+          <div style={{ minHeight: 178, display: "grid", placeContent: "center", gap: 7, padding: 20, color: C.muted, textAlign: "center" }}>
+            <strong style={{ color: C.primary, fontSize: 13 }}>{holdersLoading ? "Loading top holder accounts..." : "Top holder accounts unavailable"}</strong>
+            <span style={{ fontSize: 11 }}>Network-wide holders: <strong style={{ color: C.primary }}>{networkHolders?.toLocaleString() ?? "Unavailable"}</strong></span>
+            <span style={{ fontSize: 10 }}>The total counts token owners across Solana apps and wallets; Wraith holders are included, not added twice.</span>
+          </div>
+        ) : (
+          <div style={{ minHeight: 178, display: "grid", placeContent: "center", gap: 7, padding: 20, color: C.muted, textAlign: "center" }}>
+            <strong style={{ color: C.primary, fontSize: 13 }}>Waiting for swaps</strong>
+            <span style={{ fontSize: 10 }}>Trades appear here as soon as the first swaps are indexed.</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

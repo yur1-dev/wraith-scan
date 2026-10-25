@@ -1,9 +1,16 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import axios from "axios";
 import { MemeTrend } from "@/app/app/page";
 import { getTokenPrice } from "@/lib/getTokenPrice";
+import { C } from "@/lib/theme";
+import { prefetchCandles } from "@/lib/candleCache";
+import { TokenIcon } from "@/components/TokenIcon";
+import { QuickBuyButton } from "@/components/QuickBuyButton";
+import { Flame, Zap, Sparkles, Star, AlertTriangle } from "lucide-react";
+import { HOVER_DELAY_MS, TokenHoverPreview } from "@/components/TokenHoverChart";
 
 interface ScanResult extends MemeTrend {
   platforms?: string[];
@@ -14,6 +21,7 @@ interface ScanResult extends MemeTrend {
   mcap?: number;
   volume?: number;
   liquidity?: number;
+  topHolderPct?: number;
   priceChange1h?: number;
   priceChange24h?: number;
   contractAddress?: string;
@@ -33,6 +41,8 @@ interface ScanResult extends MemeTrend {
   // conviction fields from route
   twoXTier?: "ULTRA" | "HIGH" | "MEDIUM" | "LOW" | "SKIP";
   twoXScore?: number;
+  aiScore?: number;
+  aiTier?: "HOT" | "WATCH" | "SKIP";
 }
 
 interface McapSnapshot {
@@ -237,8 +247,8 @@ export function recordTokenSighting(result: ScanResult) {
 
   const tier = result.twoXTier;
   if (!isCeleb) {
-    if (!tier || tier === "LOW" || tier === "SKIP") return;
     if (tier === "MEDIUM" && (result.crossPlatforms ?? 0) < 2) return;
+    if (!tier || tier === "LOW" || tier === "SKIP") return;
   } else {
     if (tier === "SKIP") return;
     if (!hasOnchain && tier === "LOW") return;
@@ -281,6 +291,8 @@ export function recordTokenSighting(result: ScanResult) {
       lastChecked: now,
       twoXTier: tier,
       twoXScore: result.twoXScore,
+      aiScore: result.aiScore,
+      aiTier: result.aiTier,
       crossPlatforms,
       preMigration:
         (result.platforms || []).includes("pumpfun") &&
@@ -310,6 +322,8 @@ export function recordTokenSighting(result: ScanResult) {
     }
     if (tier) h[key].twoXTier = tier;
     if (result.twoXScore !== undefined) h[key].twoXScore = result.twoXScore;
+    if (result.aiScore !== undefined) h[key].aiScore = result.aiScore;
+    if (result.aiTier !== undefined) h[key].aiTier = result.aiTier;
     h[key].crossPlatforms = Math.max(
       h[key].crossPlatforms ?? 0,
       crossPlatforms,
@@ -402,7 +416,11 @@ async function postToServerHistory(
     return;
   }
 
-  if (!isNewToken) return;
+  // Older entries were written before AI scoring was added, and the server
+  // correctly reports them as existing. Backfill only entries that still lack
+  // a score; otherwise they remain permanently score-less in localStorage.
+  const existingHistory = loadHistory()[result.keyword];
+  if (!isNewToken && typeof existingHistory?.aiScore === "number") return;
 
   // ── 2. AI scoring ─────────────────────────────────────────────────────────
   let aiScore = 50;
@@ -492,7 +510,7 @@ function getAgeDisplay(ageMinutes: number | undefined) {
   if (days > 14)
     return {
       label: `${Math.floor(days)}d — STALE`,
-      color: "#ff4444",
+      color: C.red,
       isStale: true,
       isFresh: false,
     };
@@ -506,7 +524,7 @@ function getAgeDisplay(ageMinutes: number | undefined) {
   if (days > 3)
     return {
       label: `${Math.floor(days)}d old`,
-      color: "#ffaa00",
+      color: C.amber,
       isStale: false,
       isFresh: false,
     };
@@ -520,13 +538,13 @@ function getAgeDisplay(ageMinutes: number | undefined) {
   if (ageMinutes > 360)
     return {
       label: `${Math.floor(ageMinutes / 60)}h old`,
-      color: "#00c47a",
+      color: C.green,
       isStale: false,
       isFresh: true,
     };
   return {
     label: `${ageMinutes}m old`,
-    color: "#00c47a",
+    color: C.green,
     isStale: false,
     isFresh: true,
   };
@@ -537,10 +555,10 @@ const MONO = {
 };
 
 const PLATFORM_META: Record<string, { label: string; color: string }> = {
-  celebrity: { label: "CELEB", color: "#ffd700" },
-  ai: { label: "AI", color: "#e8490f" },
-  pumpfun: { label: "PUMP", color: "#a855f7" },
-  dexscreener: { label: "DEX", color: "#00b4d8" },
+  celebrity: { label: "CELEB", color: C.yellow },
+  ai: { label: "AI", color: C.orange },
+  pumpfun: { label: "PUMP", color: C.purple },
+  dexscreener: { label: "DEX", color: C.blue },
   twitter: { label: "X", color: "#e2e8f0" },
   coingecko: { label: "CGK", color: "#8dc63f" },
   reddit: { label: "RED", color: "#ff4500" },
@@ -553,103 +571,34 @@ const PLATFORM_META: Record<string, { label: string; color: string }> = {
 };
 
 const RUG_COLOR: Record<string, string> = {
-  low: "#00c47a",
-  medium: "#ffaa00",
+  low: C.green,
+  medium: C.amber,
   high: "#ff2222",
   unknown: "#555",
 };
-
-function TokenAvatar({
-  imageUrl,
-  symbol,
-  size = 36,
-}: {
-  imageUrl?: string;
-  symbol: string;
-  size?: number;
-}) {
-  const [imgError, setImgError] = useState(false);
-  const letter = (symbol || "?").charAt(0).toUpperCase();
-
-  if (imageUrl && !imgError) {
-    return (
-      <img
-        src={imageUrl}
-        alt={symbol}
-        width={size}
-        height={size}
-        onError={() => setImgError(true)}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          objectFit: "cover",
-          flexShrink: 0,
-          border: "1px solid #2a2a2a",
-        }}
-      />
-    );
-  }
-
-  const palette = [
-    "#e8490f",
-    "#a855f7",
-    "#00b4d8",
-    "#00c47a",
-    "#ffd700",
-    "#ff4500",
-  ];
-  const bg = palette[letter.charCodeAt(0) % palette.length];
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: `${bg}1a`,
-        border: `1px solid ${bg}44`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        color: bg,
-        fontSize: size * 0.38,
-        fontWeight: 900,
-        ...MONO,
-      }}
-    >
-      {letter}
-    </div>
-  );
-}
 
 function ConvictionBadge({ tier, score }: { tier?: string; score?: number }) {
   if (!tier || tier === "SKIP" || tier === "LOW") return null;
   const cfg =
     tier === "ULTRA"
-      ? { label: "🔥 ULTRA", color: "#ffd700", bg: "#161000" }
+      ? { label: "ULTRA", color: C.yellow, Icon: Flame }
       : tier === "HIGH"
-        ? { label: "⚡ HIGH", color: "#00c47a", bg: "#001c14" }
-        : { label: "✦ MED", color: "#ffaa00", bg: "#120c00" };
+        ? { label: "HIGH", color: C.green, Icon: Zap }
+        : { label: "MED", color: C.amber, Icon: Sparkles };
+  const Icon = cfg.Icon;
   return (
     <span
+      className="wx-badge"
       style={{
         fontSize: 8,
-        fontWeight: 700,
-        ...MONO,
         color: cfg.color,
-        background: cfg.bg,
-        border: `1px solid ${cfg.color}55`,
-        padding: "2px 7px",
-        borderRadius: 3,
-        letterSpacing: "0.08em",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        animation:
-          tier === "ULTRA" ? "wraithScan 2.2s ease-in-out infinite" : undefined,
+        background: `${cfg.color}12`,
+        border: `1px solid ${cfg.color}44`,
+        gap: 3,
+        animation: tier === "ULTRA" ? "wraithScan 2.2s ease-in-out infinite" : undefined,
       }}
     >
+      <Icon size={8} color={cfg.color} />
       {cfg.label}
       {score !== undefined ? ` ${score}` : ""}
     </span>
@@ -663,7 +612,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
   if (item.onCeleb || platforms.includes("celebrity"))
     signals.push({
       label: "CELEBRITY TRIGGER",
-      color: "#ffd700",
+      color: C.yellow,
       reason: item.celebMention
         ? `${item.celebMention} mentioned this`
         : "Celebrity/influencer mention detected",
@@ -671,7 +620,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
   if (item.onAI || platforms.includes("ai"))
     signals.push({
       label: "AI CONTEXT MATCH",
-      color: "#e8490f",
+      color: C.orange,
       reason: item.aiContext
         ? item.aiContext.slice(0, 100)
         : "Gemini AI confirmed viral potential",
@@ -679,7 +628,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
   if (platforms.includes("pumpfun") || platforms.includes("dexscreener"))
     signals.push({
       label: "ON-CHAIN ACTIVITY",
-      color: "#00b4d8",
+      color: C.blue,
       reason: item.mcap
         ? `Mcap $${item.mcap >= 1000 ? (item.mcap / 1000).toFixed(0) + "K" : item.mcap}${item.liquidity ? " · Liq $" + (item.liquidity / 1000).toFixed(0) + "K" : ""}`
         : "Active trading on Solana",
@@ -687,7 +636,7 @@ function DecisionChain({ item }: { item: ScanResult }) {
   if (platforms.some((p) => ["google-trends", "youtube", "kym"].includes(p)))
     signals.push({
       label: "VIRAL INTERNET TREND",
-      color: "#ffaa00",
+      color: C.amber,
       reason: `Trending on: ${platforms
         .filter((p) => ["google-trends", "youtube", "kym"].includes(p))
         .map((p) => PLATFORM_META[p]?.label || p)
@@ -717,13 +666,13 @@ function DecisionChain({ item }: { item: ScanResult }) {
     confidence = backendScore;
     if (backendTier === "ULTRA") {
       confidenceLabel = "ULTRA HIGH";
-      confidenceColor = "#ffd700";
+      confidenceColor = C.yellow;
     } else if (backendTier === "HIGH") {
       confidenceLabel = "HIGH";
-      confidenceColor = "#00c47a";
+      confidenceColor = C.green;
     } else if (backendTier === "MEDIUM") {
       confidenceLabel = "MODERATE";
-      confidenceColor = "#ffaa00";
+      confidenceColor = C.amber;
     } else {
       confidenceLabel = "LOW";
       confidenceColor = "#ff6600";
@@ -741,32 +690,32 @@ function DecisionChain({ item }: { item: ScanResult }) {
 
     confidence = 20;
     confidenceLabel = "SPECULATIVE";
-    confidenceColor = "#ff4444";
+    confidenceColor = C.red;
 
     if (hasCeleb && hasOnchain) {
       confidence = 95;
       confidenceLabel = "EXTREMELY HIGH";
-      confidenceColor = "#ffd700";
+      confidenceColor = C.yellow;
     } else if (hasCeleb && hasSocial) {
       confidence = 88;
       confidenceLabel = "VERY HIGH";
-      confidenceColor = "#ffd700";
+      confidenceColor = C.yellow;
     } else if (hasAI && hasOnchain && hasSocial && platformCount >= 4) {
       confidence = 82;
       confidenceLabel = "HIGH";
-      confidenceColor = "#00c47a";
+      confidenceColor = C.green;
     } else if (hasAI && hasOnchain && platformCount >= 3) {
       confidence = 70;
       confidenceLabel = "GOOD";
-      confidenceColor = "#00c47a";
+      confidenceColor = C.green;
     } else if (hasOnchain && hasSocial) {
       confidence = 58;
       confidenceLabel = "MODERATE";
-      confidenceColor = "#ffaa00";
+      confidenceColor = C.amber;
     } else if (hasOnchain && platformCount >= 2) {
       confidence = 45;
       confidenceLabel = "LOW-MODERATE";
-      confidenceColor = "#ffaa00";
+      confidenceColor = C.amber;
     } else if (hasCeleb) {
       confidence = 40;
       confidenceLabel = "LOW (no coin yet)";
@@ -777,144 +726,43 @@ function DecisionChain({ item }: { item: ScanResult }) {
   if (item.rugRisk === "medium") confidence = Math.max(confidence - 15, 5);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        padding: "12px 14px",
-        marginTop: 4,
-        background: "#080808",
-        border: "1px solid #161616",
-        borderRadius: 4,
-      }}
-    >
+    <div className="wx-scan-why">
       <div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 6,
-          }}
-        >
-          <span
-            style={{
-              color: "#666",
-              fontSize: 9,
-              ...MONO,
-              letterSpacing: "0.14em",
-            }}
-          >
-            WRAITH CONFIDENCE
-          </span>
-          <span
-            style={{
-              color: confidenceColor,
-              fontSize: 11,
-              fontWeight: 700,
-              ...MONO,
-            }}
-          >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="wx-kicker" style={{ fontSize: 8 }}>WRAITH CONFIDENCE</span>
+          <span style={{ color: confidenceColor, fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono), monospace" }}>
             {confidenceLabel} · {confidence}%
           </span>
         </div>
-        <div
-          style={{
-            height: 3,
-            background: "#1a1a1a",
-            borderRadius: 2,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              height: "100%",
-              width: `${confidence}%`,
-              background: `linear-gradient(90deg, ${confidenceColor}88, ${confidenceColor})`,
-              borderRadius: 2,
-              transition: "width 0.6s ease",
-            }}
-          />
+        <div className="wx-scan-why-bar">
+          <div className="wx-scan-why-fill" style={{ width: `${confidence}%`, background: `linear-gradient(90deg, ${confidenceColor}88, ${confidenceColor})` }} />
         </div>
       </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        <div
-          style={{
-            color: "#555",
-            fontSize: 8,
-            ...MONO,
-            letterSpacing: "0.14em",
-            marginBottom: 2,
-          }}
-        >
-          WHY WRAITH FOUND THIS
-        </div>
+        <span className="wx-kicker" style={{ fontSize: 8 }}>WHY WRAITH FOUND THIS</span>
         {signals.map((sig, i) => (
-          <div
-            key={i}
-            style={{ display: "flex", gap: 8, alignItems: "flex-start" }}
-          >
-            <div
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: sig.color,
-                flexShrink: 0,
-                marginTop: 3,
-              }}
-            />
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: sig.color, flexShrink: 0, marginTop: 3 }} />
             <div>
-              <div
-                style={{
-                  color: sig.color,
-                  fontSize: 9,
-                  fontWeight: 700,
-                  ...MONO,
-                  letterSpacing: "0.1em",
-                }}
-              >
-                {sig.label}
-              </div>
-              <div
-                style={{
-                  color: "#666",
-                  fontSize: 10,
-                  ...MONO,
-                  lineHeight: 1.5,
-                  marginTop: 1,
-                }}
-              >
-                {sig.reason}
-              </div>
+              <div style={{ color: sig.color, fontSize: 9, fontWeight: 700, fontFamily: "var(--font-mono), monospace", letterSpacing: "0.08em" }}>{sig.label}</div>
+              <div style={{ color: "var(--text-muted)", fontSize: 10, fontFamily: "var(--font-mono), monospace", lineHeight: 1.5, marginTop: 1 }}>{sig.reason}</div>
             </div>
           </div>
         ))}
         {signals.length === 0 && (
-          <div style={{ color: "#444", fontSize: 10, ...MONO }}>
+          <div style={{ color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono), monospace" }}>
             Weak signal — insufficient cross-platform confirmation
           </div>
         )}
       </div>
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" as const }}>
-        {platforms
-          .filter((p) => PLATFORM_META[p])
-          .map((p) => (
-            <span
-              key={p}
-              style={{
-                fontSize: 8,
-                ...MONO,
-                color: PLATFORM_META[p].color,
-                border: `1px solid ${PLATFORM_META[p].color}33`,
-                padding: "2px 6px",
-                borderRadius: 2,
-              }}
-            >
-              {PLATFORM_META[p].label}
-            </span>
-          ))}
+
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {platforms.filter((p) => PLATFORM_META[p]).map((p) => (
+          <span key={p} className="wx-badge" style={{ fontSize: 8, color: PLATFORM_META[p].color, background: `${PLATFORM_META[p].color}10`, border: `1px solid ${PLATFORM_META[p].color}30` }}>
+            {PLATFORM_META[p].label}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -923,20 +771,37 @@ function DecisionChain({ item }: { item: ScanResult }) {
 // ─── 10 MINUTE SCAN INTERVAL ──────────────────────────────────────────────────
 const REFRESH_INTERVAL = 600; // 10 minutes (was 90s)
 
+// Module-level cache — NOT React state, so it survives a component
+// unmount/remount from client-side navigation (e.g. clicking a token to view
+// its chart, then hitting Back). Without this, every remount re-ran
+// fetchTrends() from a blank slate — full "Fetching Pump.fun launches..."
+// animation and an empty list — even if the last scan was seconds old.
+// A hard page reload still clears it, which is the correct "start fresh"
+// case, since this only lives in memory for the current tab session.
+let scannerCache: {
+  trends: ScanResult[];
+  lastScan: string | null;
+  scannedAtMs: number;
+} | null = null;
+
 interface Props {
   onSelectMeme: (meme: MemeTrend) => void;
   selectedMeme: MemeTrend | null;
 }
 
 export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
-  const [trends, setTrends] = useState<ScanResult[]>([]);
+  const [trends, setTrends] = useState<ScanResult[]>(
+    () => scannerCache?.trends ?? [],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [scanLog, setScanLog] = useState<string[]>([]);
-  const [lastScan, setLastScan] = useState<string | null>(null);
+  const [lastScan, setLastScan] = useState<string | null>(
+    () => scannerCache?.lastScan ?? null,
+  );
   const [progress, setProgress] = useState(0);
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
-  const [autoScan, setAutoScan] = useState(true);
+  const [autoScan, setAutoScan] = useState(false); // deep scan spends API credits: manual unless switched on
   const [filter, setFilter] = useState<
     | "all"
     | "celeb"
@@ -948,10 +813,58 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     | "fresh"
     | "ultra"
   >("all");
-  const [expandedDecision, setExpandedDecision] = useState<string | null>(null);
   const [enriching, setEnriching] = useState(false);
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [hoveredKeyword, setHoveredKeyword] = useState<string | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<{ token: ScanResult; top: number; left: number } | null>(null);
+  const hoverPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverPreviewCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverPrefetchRef = useRef<ScanResult[] | null>(null);
+
+  const handleRowMouseEnter = useCallback((keyword: string) => {
+    if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredKeyword(keyword);
+    }, HOVER_DELAY_MS);
+  }, []);
+
+  const handleRowMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    // Small grace period — lets the cursor travel from the row into the
+    // popup itself (there's a few px gap) without the card slamming shut
+    // mid-move. Telemetry's own hover card has the same forgiveness.
+    if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+    hoverCloseTimerRef.current = setTimeout(() => {
+      setHoveredKeyword(null);
+    }, 180);
+  }, []);
+  const handleTokenPreviewEnter = useCallback((event: React.MouseEvent, token: ScanResult) => {
+    if (!token.contractAddress || window.matchMedia("(hover: none)").matches) return;
+    if (hoverPreviewCloseRef.current) clearTimeout(hoverPreviewCloseRef.current);
+    if (hoverPreviewTimerRef.current) clearTimeout(hoverPreviewTimerRef.current);
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    hoverPreviewTimerRef.current = setTimeout(() => {
+      const left = rect.right + 10 + 340 < window.innerWidth
+        ? rect.right + 10
+        : Math.max(8, rect.left - 350);
+      setHoverPreview({
+        token,
+        top: Math.max(8, Math.min(rect.top, window.innerHeight - 390)),
+        left,
+      });
+    }, HOVER_DELAY_MS);
+  }, []);
+
+  const handleTokenPreviewLeave = useCallback(() => {
+    if (hoverPreviewTimerRef.current) clearTimeout(hoverPreviewTimerRef.current);
+    if (hoverPreviewCloseRef.current) clearTimeout(hoverPreviewCloseRef.current);
+    hoverPreviewCloseRef.current = setTimeout(() => setHoverPreview(null), 180);
+  }, []);
+
   const loadingRef = useRef(false);
 
   const enrichWithTokenMeta = useCallback(
@@ -1023,21 +936,31 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
         const { results, logs } = res.data;
         const enriched = await enrichWithTokenMeta(results);
         enriched.forEach(recordTokenSighting);
+        const scanTime = new Date().toLocaleTimeString();
         setScanLog([...logs.slice(-8)]);
         setTrends(enriched);
-        setLastScan(new Date().toLocaleTimeString());
+        setLastScan(scanTime);
         setError("");
         setCountdown(REFRESH_INTERVAL);
-        if (enriched.length > 0 && !selectedMeme) onSelectMeme(enriched[0]);
+        scannerCache = {
+          trends: enriched,
+          lastScan: scanTime,
+          scannedAtMs: Date.now(),
+        };
       } catch (err) {
         clearInterval(ticker);
-        const msg = axios.isAxiosError(err)
-          ? err.response?.data?.error || err.message
-          : "Unknown error";
-        if (axios.isAxiosError(err) && err.response?.status === 429) {
+        const status = axios.isAxiosError(err) ? err.response?.status : null;
+        const apiMsg = axios.isAxiosError(err) ? err.response?.data?.error : null;
+        if (status === 401 || status === 403) {
+          setError("Not authenticated — sign in to use the scanner");
+          setAutoScan(false);
+        } else if (status === 429) {
           setError("Rate limit — wait a few minutes before next scan");
           setAutoScan(false);
+        } else if (status && status >= 500) {
+          setError(apiMsg || `Server error (${status}) — try again shortly`);
         } else {
+          const msg = axios.isAxiosError(err) ? (apiMsg || err.message) : "Unknown error";
           setError(`Scan failed: ${msg}`);
         }
       } finally {
@@ -1050,11 +973,19 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
   );
 
   useEffect(() => {
-    // Always fetch on mount — the old cache-freshness check set the
-    // "cached" label but never actually used the cached data to populate
-    // `trends`, nor called fetchTrends(), so the panel sat empty until the
-    // next 9+ minute auto-scan interval fired. Just fetch; fetchTrends()
-    // itself is cheap to call and the panel should never render empty.
+    // If a fresh-enough scan is already cached from before this remount
+    // (e.g. navigating to a token page and back), skip the fetch entirely —
+    // trends/lastScan were already hydrated from it in the useState
+    // initializers above, so re-fetching would just blank the list and
+    // replay the whole scan animation for no reason. Only fall through to a
+    // real fetch when there's no cache or it's aged past the refresh window.
+    const ageMs = scannerCache
+      ? Date.now() - scannerCache.scannedAtMs
+      : Infinity;
+    if (scannerCache && ageMs < REFRESH_INTERVAL * 1000) {
+      setCountdown(Math.max(1, REFRESH_INTERVAL - Math.floor(ageMs / 1000)));
+      return;
+    }
     fetchTrends();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1083,10 +1014,9 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     );
     const hasChain = p.some((x) => ["pumpfun", "dexscreener"].includes(x));
     const count = item.crossPlatforms ?? 0;
-    if (hasCeleb && hasChain) return { label: "CELEB+CHAIN", color: "#ffd700" };
-    if (hasCeleb && hasSocial)
-      return { label: "CELEB+VIRAL", color: "#ffd700" };
-    if (hasCeleb) return { label: "CELEB SIGNAL", color: "#ffd700" };
+    if (hasCeleb && hasChain) return { label: "CELEB+CHAIN", color: C.yellow };
+    if (hasCeleb && hasSocial) return { label: "CELEB+VIRAL", color: C.yellow };
+    if (hasCeleb) return { label: "CELEB SIGNAL", color: C.yellow };
     if (hasSocial && hasChain && count >= 3)
       return { label: "VIRAL+CHAIN", color: "#ff2020" };
     if (hasSocial && hasChain)
@@ -1095,10 +1025,10 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       return { label: "MEGA VIRAL", color: "#ffcc00" };
     if (hasSocial && count >= 3) return { label: "VIRAL", color: "#ffcc00" };
     if (hasChain && item.isNewCoin)
-      return { label: "NEW COIN", color: "#a855f7" };
-    if (hasChain) return { label: "ON-CHAIN", color: "#00c47a" };
+      return { label: "NEW COIN", color: C.purple };
+    if (hasChain) return { label: "ON-CHAIN", color: C.green };
     if (item.hasTicker && hasSocial)
-      return { label: "TRENDING", color: "#e8490f" };
+      return { label: "TRENDING", color: C.orange };
     return { label: "WATCH", color: "#555" };
   };
 
@@ -1122,7 +1052,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       return p.some((x) => ["pumpfun", "dexscreener"].includes(x));
     if (filter === "safe") return t.rugRisk === "low";
     return true;
-  });
+  }).sort((a, b) => b.score - a.score);
 
   const celebCount = trends.filter((t) => t.onCeleb).length;
   const viralCount = trends.filter((t) => t.isViralTrend).length;
@@ -1133,11 +1063,16 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     (t) => t.twoXTier === "ULTRA" || t.twoXTier === "HIGH",
   ).length;
 
-  const TABS: { key: typeof filter; label: string; color?: string }[] = [
+  const TABS: {
+    key: typeof filter;
+    label: string;
+    color?: string;
+    Icon?: typeof Flame;
+  }[] = [
     { key: "all", label: "ALL" },
-    { key: "ultra", label: "🔥 ULTRA/HIGH", color: "#ffd700" },
-    { key: "celeb", label: "⭐ CELEB", color: "#ffd700" },
-    { key: "fresh", label: "⚡ FRESH", color: "#00c47a" },
+    { key: "ultra", label: "TOP SETUPS", color: C.yellow, Icon: Flame },
+    { key: "celeb", label: "CELEB", color: C.yellow, Icon: Star },
+    { key: "fresh", label: "FRESH", color: C.green, Icon: Zap },
     { key: "new", label: "NEW" },
     { key: "viral", label: "VIRAL" },
     { key: "social", label: "SOCIAL" },
@@ -1164,17 +1099,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       : `${countdown}s`;
 
   return (
-    <div
-      style={{
-        background: "#060606",
-        borderRight: "1px solid #141414",
-        borderRadius: 0,
-        overflow: "hidden",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <div className="wx-board wraith-scanner">
       <style>{`
         @keyframes wraithScan {
           0%   { box-shadow: 0 0 0 0 #ffd70055, inset 0 0 0 0 #ffd70000; }
@@ -1182,210 +1107,87 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
           100% { box-shadow: 0 0 0 0 #ffd70055, inset 0 0 0 0 #ffd70000; }
         }
       `}</style>
-      {/* Header */}
-      <div
-        style={{
-          borderBottom: "1px solid #1a1a1a",
-          padding: "12px 16px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexShrink: 0,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap" as const,
-            }}
-          >
-            <span
-              style={{
-                color: "#e8490f",
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: "0.18em",
-                ...MONO,
-              }}
-            >
-              WRAITH SCANNER
+
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <div className="wx-board-bar">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span className="wx-kicker" style={{ color: "var(--accent-text)", letterSpacing: "0.16em" }}>DISCOVER</span>
+            <span className="wx-live">
+              <i className={loading || enriching ? "stale" : error ? "stale" : ""} style={error ? { background: "var(--loss)", animation: "none" } : undefined} />
             </span>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: loading ? "#ffaa00" : "#00c47a",
-                boxShadow: `0 0 6px ${loading ? "#ffaa00" : "#00c47a"}`,
-                display: "inline-block",
-              }}
-            />
-            <span
-              style={{
-                color: loading ? "#ffaa00" : enriching ? "#ffaa00" : "#00c47a",
-                fontSize: 10,
-                ...MONO,
-              }}
-            >
-              {loading ? "SCANNING" : enriching ? "ENRICHING" : "LIVE"}
+            <span style={{ fontSize: 10, fontFamily: "var(--font-mono), monospace", color: loading || enriching ? "#ffaa00" : error ? "var(--loss)" : "var(--win)" }}>
+              {loading ? "SCANNING" : enriching ? "ENRICHING" : error ? "RETRY" : "LIVE"}
             </span>
             {!loading && ultraCount > 0 && (
-              <span
-                style={{
-                  fontSize: 9,
-                  ...MONO,
-                  color: "#ffd700",
-                  border: "1px solid #ffd70033",
-                  padding: "1px 6px",
-                  borderRadius: 3,
-                  background: "#120c0022",
-                }}
-              >
-                🔥 {ultraCount} HOT
+              <span className="wx-badge" style={{ fontSize: 8, color: "#ffd700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.22)" }}>
+                <Flame size={8} color="#ffd700" /> {ultraCount} HOT
               </span>
             )}
             {!loading && celebCount > 0 && (
-              <span
-                style={{
-                  fontSize: 9,
-                  ...MONO,
-                  color: "#ffd700",
-                  border: "1px solid #ffd70033",
-                  padding: "1px 6px",
-                  borderRadius: 3,
-                }}
-              >
-                ⭐ {celebCount} CELEB
+              <span className="wx-badge" style={{ fontSize: 8, color: "#ffd700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.22)" }}>
+                <Star size={8} color="#ffd700" /> {celebCount}
               </span>
             )}
             {!loading && freshCount > 0 && (
-              <span
-                style={{
-                  fontSize: 9,
-                  ...MONO,
-                  color: "#00c47a",
-                  border: "1px solid #00c47a33",
-                  padding: "1px 6px",
-                  borderRadius: 3,
-                }}
-              >
-                ⚡ {freshCount} FRESH
+              <span className="wx-badge" style={{ fontSize: 8, color: "var(--win)", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.22)" }}>
+                <Zap size={8} color="#22c55e" /> {freshCount}
               </span>
             )}
             {!loading && viralCount > 0 && (
-              <span
-                style={{
-                  fontSize: 9,
-                  ...MONO,
-                  color: "#ff6600",
-                  border: "1px solid #ff660033",
-                  padding: "1px 6px",
-                  borderRadius: 3,
-                }}
-              >
-                🔥 {viralCount} VIRAL
+              <span className="wx-badge" style={{ fontSize: 8, color: "#ff6600", background: "rgba(255,102,0,0.1)", border: "1px solid rgba(255,102,0,0.22)" }}>
+                <Flame size={8} color="#ff6600" /> {viralCount}
               </span>
             )}
           </div>
-          <div style={{ color: "#666", fontSize: 10, marginTop: 3, ...MONO }}>
+          <div style={{ color: "var(--text-dim)", fontSize: 10, marginTop: 2, fontFamily: "var(--font-mono), monospace" }}>
             {loading
               ? scanLog[scanLog.length - 1] || "Initializing..."
               : enriching
-                ? "Fetching real token names + images from DexScreener..."
+                ? "Fetching token names + images..."
                 : lastScan
-                  ? `${lastScan} · ${trends.length} signals · next scan ${countdownDisplay}`
-                  : "Elon · Trump · TikTok · YouTube · Reddit · Pump.fun · DexScreener"}
+                  ? `${lastScan} · ${trends.length} signals · ${countdownDisplay}`
+                  : "Elon · Trump · TikTok · YouTube · Reddit · Pump.fun"}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
           <button
+            type="button"
+            className="wx-btn"
             onClick={() => setAutoScan((v) => !v)}
-            style={{
-              background: autoScan ? "#001a08" : "#111",
-              border: `1px solid ${autoScan ? "#00c47a44" : "#222"}`,
-              color: autoScan ? "#00c47a" : "#555",
-              borderRadius: 4,
-              padding: "5px 9px",
-              fontSize: 9,
-              cursor: "pointer",
-              ...MONO,
-            }}
+            style={{ fontSize: 10, color: autoScan ? "var(--win)" : "var(--text-muted)" }}
           >
             AUTO {autoScan ? "ON" : "OFF"}
           </button>
           <button
+            type="button"
+            className="wx-btn primary"
             onClick={() => fetchTrends()}
             disabled={loading}
-            style={{
-              background: loading ? "#111" : "#e8490f",
-              color: loading ? "#555" : "#fff",
-              border: "none",
-              borderRadius: 4,
-              padding: "7px 16px",
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: loading ? "not-allowed" : "pointer",
-              ...MONO,
-            }}
           >
-            {loading ? "SCANNING..." : "SCAN NOW"}
+            {loading ? "SCANNING…" : "SCAN NOW"}
           </button>
         </div>
       </div>
 
-      {/* Progress bar */}
+      {/* ── Progress ────────────────────────────────────────────────────── */}
       {loading && (
-        <div
-          style={{
-            background: "#050505",
-            borderBottom: "1px solid #111",
-            padding: "10px 16px",
-          }}
-        >
-          <div
-            style={{
-              height: 2,
-              background: "#1a1a1a",
-              borderRadius: 1,
-              marginBottom: 8,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                height: "100%",
-                width: `${progress}%`,
-                background: "linear-gradient(90deg, #e8490f, #ff8800)",
-                transition: "width 0.35s ease",
-                boxShadow: "0 0 8px #e8490f88",
-              }}
-            />
+        <div className="wx-scan-progress">
+          <div className="wx-scan-progress-track">
+            <div className="wx-scan-progress-fill" style={{ width: `${progress}%` }} />
           </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" as const }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {SCAN_SOURCES.map((label, i) => {
               const step = Math.floor(progress / (100 / SCAN_SOURCES.length));
               return (
-                <span
-                  key={label}
-                  style={{
-                    fontSize: 9,
-                    ...MONO,
-                    color: step === i ? "#e8490f" : step > i ? "#444" : "#333",
-                  }}
-                >
+                <span key={label} style={{ fontSize: 9, fontFamily: "var(--font-mono), monospace", color: step === i ? "var(--accent-text)" : "var(--text-dim)", opacity: step > i ? 0.35 : 1 }}>
                   {step === i ? ">" : "·"} {label.toUpperCase()}
                 </span>
               );
             })}
           </div>
-          {scanLog.slice(-1).map((line, i) => (
-            <div
-              key={i}
-              style={{ color: "#666", fontSize: 10, ...MONO, marginTop: 4 }}
-            >
+          {scanLog.slice(-1).map((line, idx) => (
+            <div key={idx} style={{ color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono), monospace", marginTop: 4 }}>
               &gt; {line}
             </div>
           ))}
@@ -1393,530 +1195,252 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       )}
 
       {error && !loading && (
-        <div
-          style={{
-            padding: "8px 16px",
-            color: "#ff4444",
-            fontSize: 10,
-            ...MONO,
-            borderBottom: "1px solid #1a1a1a",
-          }}
-        >
+        <div style={{ padding: "8px 14px", color: "var(--loss)", fontSize: 10, fontFamily: "var(--font-mono), monospace", borderBottom: "1px solid var(--border)" }}>
           {error}
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div
-        style={{
-          padding: "5px 10px",
-          borderBottom: "1px solid #111",
-          display: "flex",
-          gap: 3,
-          background: "#040404",
-          flexShrink: 0,
-          flexWrap: "wrap" as const,
-        }}
-      >
-        {TABS.map(({ key, label, color }) => {
-          const active = filter === key;
-          const col = color || "#e8490f";
-          return (
-            <button
-              key={key}
-              onClick={() => setFilter(key)}
-              style={{
-                background: active ? `${col}14` : "#0a0a0a",
-                border: `1px solid ${active ? col + "55" : "#161616"}`,
-                color: active ? col : "#555",
-                borderRadius: 4,
-                padding: "4px 11px",
-                fontSize: 9,
-                fontWeight: active ? 700 : 400,
-                cursor: "pointer",
-                transition:
-                  "background .15s ease, border-color .15s ease, color .15s ease",
-                ...MONO,
-              }}
-              onMouseEnter={(e) => {
-                if (!active)
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "#2a2a2a";
-              }}
-              onMouseLeave={(e) => {
-                if (!active)
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    "#161616";
-              }}
-            >
-              {label}
-            </button>
-          );
-        })}
+      {/* ── Filter tabs ─────────────────────────────────────────────────── */}
+      <div className="wx-board-bar" style={{ padding: "6px 10px", flexWrap: "wrap" }}>
+        <div className="wx-seg sm" role="tablist">
+          {TABS.map(({ key, label, color, Icon }) => {
+            const active = filter === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={active ? "on" : ""}
+                onClick={() => setFilter(key)}
+                style={active && color ? { color, boxShadow: `inset 0 0 0 1px ${color}44`, background: `${color}12` } : undefined}
+              >
+                {Icon && <Icon size={9} />}
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {filtered.length === 0 && !loading && !error && (
-        <div
-          style={{
-            minHeight: 160,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-          }}
-        >
-          <div
-            style={{
-              color: "#222",
-              fontSize: 18,
-              ...MONO,
-              letterSpacing: "0.3em",
-            }}
-          >
-            WRAITH
-          </div>
-          <div style={{ color: "#444", fontSize: 10, ...MONO }}>
-            {filter === "celeb"
-              ? "NO CELEB SIGNALS"
-              : filter === "safe"
-                ? "NO SAFE TOKENS"
-                : filter === "fresh"
-                  ? "NO FRESH TOKENS YET — SCAN NOW"
-                  : filter === "ultra"
-                    ? "NO HIGH/ULTRA CONVICTION TOKENS YET"
-                    : "HUNTING..."}
-          </div>
+      {/* ── Empty state ─────────────────────────────────────────────────── */}
+      {filtered.length === 0 && !loading && (
+        <div className="wx-empty">
+          <span className="wx-kicker" style={{ fontSize: 16, opacity: 0.12, letterSpacing: "0.3em" }}>WRAITH</span>
+          <strong>
+            {error
+              ? "Scan interrupted"
+              : trends.length === 0
+                ? "No signals yet"
+                : filter === "celeb"
+                  ? "No celeb signals"
+                  : filter === "safe"
+                    ? "No safe tokens"
+                    : filter === "fresh"
+                      ? "No fresh tokens yet"
+                      : filter === "ultra"
+                        ? "No top setups yet"
+                        : "Hunting…"}
+          </strong>
+          {error ? (
+            <>
+              <span style={{ fontFamily: "var(--font-mono), monospace", fontSize: 11, opacity: 0.7 }}>{error}</span>
+              <button type="button" className="wx-btn primary" onClick={() => fetchTrends()}>Retry scan</button>
+            </>
+          ) : trends.length === 0 ? (
+            <>
+              <span>Run a scan to detect trending tokens from social feeds.</span>
+              <button type="button" className="wx-btn primary" onClick={() => fetchTrends()}>Start scan</button>
+            </>
+          ) : filter !== "all" ? (
+            <button type="button" className="wx-btn" onClick={() => setFilter("all")}>Show all tokens</button>
+          ) : null}
         </div>
       )}
 
-      {/* Token list */}
-      <div style={{ flex: 1, overflowY: "auto" as const, padding: "4px 0" }}>
-        {filtered.map((t, i) => {
-          const sig = getSignal(t);
-          const isSelected = selectedMeme?.keyword === t.keyword;
-          const p = t.platforms || [];
-          const isCeleb = t.onCeleb || p.includes("celebrity");
-          const isExpanded = expandedDecision === t.keyword;
-          const change1h =
-            t.priceChange1h !== undefined
-              ? {
-                  text: `${t.priceChange1h >= 0 ? "+" : ""}${t.priceChange1h.toFixed(0)}%`,
-                  color: t.priceChange1h >= 0 ? "#00c47a" : "#ff4444",
-                }
-              : null;
-          const ageDisplay = getAgeDisplay(t.ageMinutes);
-          const platformCount = p.length;
-          const qualityWarning = platformCount < 2 && !isCeleb && !t.hasTicker;
-          const displaySymbol = t.tokenSymbol || t.keyword.toUpperCase();
-          const displayName =
-            t.tokenName && t.tokenName.toLowerCase() !== t.keyword.toLowerCase()
-              ? t.tokenName
-              : null;
+      {/* ── Token list ──────────────────────────────────────────────────── */}
+      {filtered.length > 0 && (
+        <div className="wx-scan-list">
+          {(() => {
+            if (hoverPrefetchRef.current !== filtered) {
+              hoverPrefetchRef.current = filtered;
+              filtered.slice(0, 5).forEach((tk, i) => {
+                if (tk.contractAddress)
+                  setTimeout(() => prefetchCandles(tk.contractAddress!, "5m"), i * 800);
+              });
+            }
+            return null;
+          })()}
+          {filtered.map((t, i) => {
+            const sig = getSignal(t);
+            const isSelected = selectedMeme?.keyword === t.keyword;
+            const p = t.platforms || [];
+            const isCeleb = t.onCeleb || p.includes("celebrity");
+            const isExpanded = hoveredKeyword === t.keyword;
+            const change1h =
+              t.priceChange1h !== undefined
+                ? { text: `${t.priceChange1h >= 0 ? "+" : ""}${t.priceChange1h.toFixed(0)}%`, color: t.priceChange1h >= 0 ? C.green : C.red }
+                : null;
+            const ageDisplay = getAgeDisplay(t.ageMinutes);
+            const platformCount = p.length;
+            const qualityWarning = platformCount < 2 && !isCeleb && !t.hasTicker;
+            const displaySymbol = t.tokenSymbol || t.keyword.toUpperCase();
+            const displayName =
+              t.tokenName && t.tokenName.toLowerCase() !== t.keyword.toLowerCase()
+                ? t.tokenName
+                : null;
 
-          return (
-            <div key={t.keyword} style={{ padding: "3px 8px" }}>
-              <button
-                onClick={() => {
-                  onSelectMeme(t);
-                  setExpandedDecision(isExpanded ? null : t.keyword);
-                }}
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "12px 14px",
-                  background: isSelected
-                    ? isCeleb
-                      ? "#141000"
-                      : "#140800"
-                    : "#0a0a0a",
-                  border: `1px solid ${isSelected ? (isCeleb ? "#ffd70044" : "#e8490f44") : "#161616"}`,
-                  borderRadius: 4,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  cursor: "pointer",
-                  gap: 8,
-                  opacity: qualityWarning ? 0.6 : ageDisplay.isStale ? 0.4 : 1,
-                  transition:
-                    "background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease",
-                }}
-                onMouseEnter={(e) => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.transform = "translateY(-1px)";
-                  el.style.boxShadow = "0 6px 16px -8px rgba(0,0,0,0.6)";
-                  if (!isSelected) {
-                    el.style.background = "#0d0d0d";
-                    el.style.borderColor = "#242424";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.transform = "translateY(0)";
-                  el.style.boxShadow = "none";
-                  el.style.background = isSelected
-                    ? isCeleb
-                      ? "#141000"
-                      : "#140800"
-                    : "#0a0a0a";
-                  el.style.borderColor = isSelected
-                    ? isCeleb
-                      ? "#ffd70044"
-                      : "#e8490f44"
-                    : "#161616";
-                }}
-              >
+            return (
+              <div key={t.keyword} className="wx-scan-item">
                 <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 9,
-                    minWidth: 0,
-                    flex: 1,
-                  }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onSelectMeme(t)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectMeme(t); } }}
+                  className={`wx-scan-row${isSelected ? " selected" : ""}${isCeleb ? " celeb" : ""}`}
+                  style={{ opacity: qualityWarning ? 0.6 : ageDisplay.isStale ? 0.4 : 1 }}
+                  onMouseEnter={() => handleRowMouseEnter(t.keyword)}
+                  onMouseLeave={() => handleRowMouseLeave()}
                 >
+                  <span className="wx-scan-rank">{String(i + 1).padStart(2, "0")}</span>
+
                   <span
-                    style={{
-                      color: "#444",
-                      fontSize: 10,
-                      ...MONO,
-                      width: 18,
-                      flexShrink: 0,
-                      textAlign: "right" as const,
-                    }}
+                    style={{ flexShrink: 0, position: "relative", cursor: t.contractAddress ? "crosshair" : "default" }}
+                    onMouseEnter={(event) => handleTokenPreviewEnter(event, t)}
+                    onMouseLeave={handleTokenPreviewLeave}
                   >
-                    {String(i + 1).padStart(2, "0")}
+                    <TokenIcon contractAddress={t.contractAddress} imageUrl={t.tokenImageUrl} symbol={displaySymbol} size={32} />
                   </span>
 
-                  <TokenAvatar
-                    imageUrl={t.tokenImageUrl}
-                    symbol={displaySymbol}
-                    size={34}
-                  />
-
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        flexWrap: "wrap" as const,
-                        marginBottom: 3,
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: isCeleb
-                            ? "#ffd700"
-                            : ageDisplay.isStale
-                              ? "#666"
-                              : "#f0f0f0",
-                          fontSize: 13,
-                          fontWeight: 700,
-                          ...MONO,
-                        }}
-                      >
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginBottom: 2 }}>
+                      <strong style={{ fontSize: 13, color: isCeleb ? "#ffd700" : ageDisplay.isStale ? "var(--text-dim)" : "var(--text)", fontFamily: "var(--font-mono), monospace" }}>
                         ${displaySymbol}
-                      </span>
+                      </strong>
                       {displayName && (
-                        <span
-                          style={{
-                            color: "#555",
-                            fontSize: 9,
-                            ...MONO,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap" as const,
-                            maxWidth: 90,
-                          }}
-                        >
+                        <small style={{ color: "var(--text-dim)", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>
                           {displayName}
-                        </span>
+                        </small>
                       )}
                       <ConvictionBadge tier={t.twoXTier} score={t.twoXScore} />
                       {ageDisplay.label && (
-                        <span
-                          style={{
-                            fontSize: 8,
-                            ...MONO,
-                            color: ageDisplay.color,
-                            border: `1px solid ${ageDisplay.color}44`,
-                            padding: "1px 5px",
-                            borderRadius: 2,
-                            fontWeight: ageDisplay.isFresh ? 700 : 400,
-                          }}
-                        >
-                          {ageDisplay.isFresh
-                            ? "⚡ "
-                            : ageDisplay.isStale
-                              ? "⚠ "
-                              : ""}
+                        <span className="wx-badge" style={{ fontSize: 8, color: ageDisplay.color, background: `${ageDisplay.color}12`, border: `1px solid ${ageDisplay.color}30` }}>
+                          {ageDisplay.isFresh ? <Zap size={7} /> : ageDisplay.isStale ? <AlertTriangle size={7} /> : null}
                           {ageDisplay.label}
                         </span>
                       )}
                       {isCeleb && (
-                        <span
-                          style={{
-                            fontSize: 8,
-                            color: "#ffd700",
-                            border: "1px solid #ffd70044",
-                            padding: "1px 5px",
-                            borderRadius: 2,
-                            ...MONO,
-                            fontWeight: 700,
-                          }}
-                        >
-                          ⭐{" "}
-                          {t.celebMention
-                            ? t.celebMention.split(" ")[0].toUpperCase()
-                            : "CELEB"}
+                        <span className="wx-badge" style={{ fontSize: 8, color: "#ffd700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.22)" }}>
+                          <Star size={7} color="#ffd700" /> {t.celebMention ? t.celebMention.split(" ")[0].toUpperCase() : "CELEB"}
                         </span>
                       )}
                       {t.isNewCoin && (
-                        <span
-                          style={{
-                            fontSize: 8,
-                            color: "#a855f7",
-                            border: "1px solid #a855f744",
-                            padding: "1px 4px",
-                            borderRadius: 2,
-                            ...MONO,
-                          }}
-                        >
-                          NEW
-                        </span>
+                        <span className="wx-badge" style={{ fontSize: 8, color: "#a855f7", background: "rgba(168,85,247,0.1)", border: "1px solid rgba(168,85,247,0.25)" }}>NEW</span>
                       )}
                       {qualityWarning && (
-                        <span
-                          style={{
-                            fontSize: 8,
-                            color: "#555",
-                            border: "1px solid #33333344",
-                            padding: "1px 4px",
-                            borderRadius: 2,
-                            ...MONO,
-                          }}
-                        >
-                          WEAK
-                        </span>
+                        <span className="wx-badge muted" style={{ fontSize: 8 }}>WEAK</span>
                       )}
-                      {p
-                        .filter(
-                          (pl) =>
-                            ![
-                              "celebrity",
-                              "ai",
-                              "google-trends",
-                              "google-news",
-                              "hackernews",
-                            ].includes(pl),
-                        )
-                        .map((plat) => {
-                          const pi = PLATFORM_META[plat];
-                          return pi ? (
-                            <span
-                              key={plat}
-                              style={{
-                                fontSize: 8,
-                                color: pi.color,
-                                border: `1px solid ${pi.color}33`,
-                                padding: "1px 4px",
-                                borderRadius: 2,
-                                ...MONO,
-                              }}
-                            >
-                              {pi.label}
-                            </span>
-                          ) : null;
-                        })}
+                      {p.filter((pl) => !["celebrity", "ai", "google-trends", "google-news", "hackernews"].includes(pl)).map((plat) => {
+                        const pi = PLATFORM_META[plat];
+                        return pi ? (
+                          <span key={plat} className="wx-badge" style={{ fontSize: 8, color: pi.color, background: `${pi.color}10`, border: `1px solid ${pi.color}28` }}>{pi.label}</span>
+                        ) : null;
+                      })}
                       {t.rugRisk && t.rugRisk !== "unknown" && (
-                        <span
-                          style={{
-                            fontSize: 8,
-                            color: RUG_COLOR[t.rugRisk],
-                            border: `1px solid ${RUG_COLOR[t.rugRisk]}33`,
-                            padding: "1px 4px",
-                            borderRadius: 2,
-                            ...MONO,
-                          }}
-                        >
-                          {t.rugRisk === "low"
-                            ? "SAFE"
-                            : t.rugRisk === "medium"
-                              ? "MED"
-                              : "RUG"}
+                        <span className="wx-badge" style={{ fontSize: 8, color: RUG_COLOR[t.rugRisk], background: `${RUG_COLOR[t.rugRisk]}10`, border: `1px solid ${RUG_COLOR[t.rugRisk]}28` }}>
+                          {t.rugRisk === "low" ? "SAFE" : t.rugRisk === "medium" ? "MED" : "RUG"}
                         </span>
                       )}
                     </div>
 
-                    {isCeleb && t.aiContext && (
-                      <div
-                        style={{
-                          fontSize: 9,
-                          color: "#ffd70066",
-                          ...MONO,
-                          marginBottom: 2,
-                          maxWidth: 200,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap" as const,
-                        }}
-                      >
-                        ⭐ {t.aiContext.slice(0, 55)}
-                      </div>
-                    )}
-                    {!isCeleb && t.aiContext && (
-                      <div
-                        style={{
-                          fontSize: 9,
-                          color: "#555",
-                          ...MONO,
-                          maxWidth: 200,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap" as const,
-                          marginBottom: 2,
-                        }}
-                      >
-                        ✦ {t.aiContext.slice(0, 55)}
+                    {t.aiContext && (
+                      <div style={{ fontSize: 9, color: isCeleb ? "rgba(255,215,0,0.5)" : "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200, marginBottom: 2, fontFamily: "var(--font-mono), monospace" }}>
+                        · {t.aiContext.slice(0, 55)}
                       </div>
                     )}
 
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 6,
-                        alignItems: "center",
-                        flexWrap: "wrap" as const,
-                      }}
-                    >
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                       {change1h && (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: change1h.color,
-                            ...MONO,
-                            fontWeight: 600,
-                          }}
-                        >
-                          1h {change1h.text}
-                        </span>
+                        <span style={{ fontSize: 10, color: change1h.color, fontFamily: "var(--font-mono), monospace", fontWeight: 600 }}>1h {change1h.text}</span>
                       )}
                       {t.liquidity ? (
-                        <span
-                          style={{ fontSize: 9, color: "#3a8a60", ...MONO }}
-                        >
-                          ${(t.liquidity / 1000).toFixed(0)}K liq
-                        </span>
+                        <span style={{ fontSize: 9, color: "var(--win)", fontFamily: "var(--font-mono), monospace" }}>${(t.liquidity / 1000).toFixed(0)}K liq</span>
                       ) : null}
                       {t.mcap ? (
-                        <span style={{ fontSize: 9, color: "#555", ...MONO }}>
-                          mc $
-                          {t.mcap >= 1000
-                            ? (t.mcap / 1000).toFixed(0) + "K"
-                            : t.mcap}
-                        </span>
+                        <span style={{ fontSize: 9, color: "var(--text-dim)", fontFamily: "var(--font-mono), monospace" }}>mc ${t.mcap >= 1000 ? (t.mcap / 1000).toFixed(0) + "K" : t.mcap}</span>
                       ) : null}
-                      <span style={{ fontSize: 8, color: "#444", ...MONO }}>
-                        {platformCount}src
-                      </span>
+                      <span style={{ fontSize: 8, color: "var(--text-dim)", opacity: 0.5, fontFamily: "var(--font-mono), monospace" }}>{platformCount}src</span>
                     </div>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                    <span className="wx-scan-sig" style={{ color: sig.color, border: `1px solid ${sig.color}40`, background: `${sig.color}0d` }}>
+                      {sig.label}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ color: "var(--text-dim)", fontSize: 9, fontFamily: "var(--font-mono), monospace" }}>
+                        {t.mcap ? `$${t.mcap >= 1000 ? (t.mcap / 1000).toFixed(0) + "K" : t.mcap}` : "—"}
+                      </span>
+                      {t.contractAddress && (
+                        <span onClick={(e) => e.stopPropagation()} style={{ position: "relative", display: "inline-block", height: 26, width: 78, flexShrink: 0 }}>
+                          <QuickBuyButton contractAddress={t.contractAddress} symbol={displaySymbol} amountSol={0.1} size="compact" />
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ color: isExpanded ? "var(--accent-text)" : "var(--text-dim)", fontSize: 9, fontFamily: "var(--font-mono), monospace" }}>
+                      {isExpanded ? "▲ WHY" : "▼ WHY"}
+                    </span>
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-end",
-                    gap: 4,
-                    flexShrink: 0,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 8,
-                      fontWeight: 700,
-                      ...MONO,
-                      padding: "3px 7px",
-                      borderRadius: 3,
-                      color: sig.color,
-                      border: `1px solid ${sig.color}44`,
-                      background: `${sig.color}0d`,
-                      whiteSpace: "nowrap" as const,
-                    }}
-                  >
-                    {sig.label}
-                  </span>
-                  <span style={{ color: "#555", fontSize: 9, ...MONO }}>
-                    {t.mcap
-                      ? `$${t.mcap >= 1000 ? (t.mcap / 1000).toFixed(0) + "K" : t.mcap}`
-                      : "—"}
-                  </span>
-                  <span
-                    style={{
-                      color: isExpanded ? "#e8490f" : "#444",
-                      fontSize: 9,
-                      ...MONO,
-                    }}
-                  >
-                    {isExpanded ? "▲ WHY" : "▼ WHY"}
-                  </span>
-                </div>
-              </button>
+                {isExpanded && (
+                  <div style={{ marginTop: 3 }}>
+                    <DecisionChain item={t} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-              {isExpanded && (
-                <div style={{ marginTop: 2 }}>
-                  <DecisionChain item={t} />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Footer */}
+      {/* ── Footer ─────────────────────────────────────────────────────── */}
       {trends.length > 0 && (
-        <div
-          style={{
-            borderTop: "1px solid #111",
-            padding: "6px 16px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexShrink: 0,
-            flexWrap: "wrap" as const,
-            gap: 4,
-            background: "#040404",
-          }}
-        >
-          <div style={{ display: "flex", gap: 10 }}>
-            <span style={{ color: "#ffd70066", fontSize: 9, ...MONO }}>
-              🔥 {ultraCount} hot
-            </span>
-            <span style={{ color: "#ffd70066", fontSize: 9, ...MONO }}>
-              ⭐ {celebCount}
-            </span>
-            <span style={{ color: "#00c47a66", fontSize: 9, ...MONO }}>
-              ⚡ {freshCount} fresh
-            </span>
-            <span style={{ color: "#ff660066", fontSize: 9, ...MONO }}>
-              viral {viralCount}
-            </span>
-            <span style={{ color: "#00c47a55", fontSize: 9, ...MONO }}>
-              SAFE: {trends.filter((t) => t.rugRisk === "low").length}
-            </span>
+        <div className="wx-scan-footer">
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ color: "rgba(255,215,0,0.45)" }}>hot {ultraCount}</span>
+            <span style={{ color: "rgba(255,215,0,0.45)" }}>celeb {celebCount}</span>
+            <span style={{ color: "rgba(34,197,94,0.45)" }}>fresh {freshCount}</span>
+            <span style={{ color: "rgba(255,102,0,0.45)" }}>viral {viralCount}</span>
+            <span style={{ color: "rgba(34,197,94,0.4)" }}>safe {trends.filter((t) => t.rugRisk === "low").length}</span>
           </div>
-          <span
-            style={{
-              color: autoScan ? "#00c47a66" : "#333",
-              fontSize: 9,
-              ...MONO,
-            }}
-          >
+          <span style={{ color: autoScan ? "rgba(34,197,94,0.5)" : "var(--text-dim)" }}>
             {autoScan ? `AUTO ${countdownDisplay}` : "AUTO OFF"}
           </span>
         </div>
+      )}
+
+      {hoverPreview && typeof document !== "undefined" && createPortal(
+        <div
+          style={{ position: "fixed", top: hoverPreview.top, left: hoverPreview.left, zIndex: 1200 }}
+          onMouseEnter={() => { if (hoverPreviewCloseRef.current) clearTimeout(hoverPreviewCloseRef.current); }}
+          onMouseLeave={handleTokenPreviewLeave}
+        >
+          <TokenHoverPreview
+            contractAddress={hoverPreview.token.contractAddress!}
+            symbol={(hoverPreview.token.tokenSymbol || hoverPreview.token.keyword).toUpperCase()}
+            name={hoverPreview.token.tokenName || hoverPreview.token.keyword}
+            imageUrl={hoverPreview.token.tokenImageUrl}
+            onTwitter={hoverPreview.token.onTwitter}
+            onTelegram={hoverPreview.token.onTelegram}
+            mcap={hoverPreview.token.mcap}
+            liquidity={hoverPreview.token.liquidity}
+            volume24h={hoverPreview.token.volume}
+            priceChange24h={hoverPreview.token.priceChange24h}
+            showPaperQuickBuy={false}
+          />
+        </div>,
+        document.body,
       )}
     </div>
   );

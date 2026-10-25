@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAppSession } from "@/lib/session";
 import { scanLimiter, checkLimit } from "@/lib/ratelimit";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3197,7 +3196,7 @@ interface ScoreEntry {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function GET() {
   // ── AUTH ────────────────────────────────────────────────────────────────────
-  const session = await getServerSession(authOptions);
+  const session = await getAppSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

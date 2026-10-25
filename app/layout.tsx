@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import "./wraith-ui.css";
+import "./wraith-polish.css";
+import "./wraith-responsive.css";
 import WalletProvider from "@/components/WalletProvider";
-import AppSessionProvider from "@/components/SessionProvider";
 import { WraithTierProvider } from "@/hooks/useWraithTier";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 
 const mono = IBM_Plex_Mono({
   weight: ["400", "500", "700"],
@@ -19,21 +19,17 @@ export const metadata: Metadata = {
   description: "Scan viral memes, find Solana tokens, buy instantly.",
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await getServerSession(authOptions);
-
   return (
     <html lang="en" className={mono.variable}>
       <body>
-        <AppSessionProvider session={session}>
-          <WalletProvider>
-            <WraithTierProvider>{children}</WraithTierProvider>
-          </WalletProvider>
-        </AppSessionProvider>
+        <WalletProvider>
+          <WraithTierProvider>{children}</WraithTierProvider>
+        </WalletProvider>
       </body>
     </html>
   );

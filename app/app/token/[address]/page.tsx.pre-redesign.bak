@@ -1,0 +1,219 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
+import { Bell, Bookmark } from "lucide-react";
+import { ToastProvider } from "@/components/Toast";
+import { MemeTrend } from "@/app/app/page";
+import { readTokenNav, cacheTokenNav } from "@/lib/tokenNav";
+import { readTokenFavorites, TOKEN_FAVORITES_EVENT } from "@/lib/tokenFavorites";
+import FollowingSidebar from "@/components/FollowingSidebar";
+
+const Header = dynamic(() => import("@/components/Header"), { ssr: false });
+const TokenPanel = dynamic(() => import("@/components/TokenPanel"), {
+  ssr: false,
+});
+const LiveSignalsBar = dynamic(() => import("@/components/LiveSignalsBar"), {
+  ssr: false,
+});
+const TokenSidebarLeaderboard = dynamic(() => import("@/components/TokenSidebarLeaderboard"), {
+  ssr: false,
+});
+const TokenMarketList = dynamic(() => import("@/components/TokenMarketList"), {
+  ssr: false,
+});
+const TokenTradeDock = dynamic(() => import("@/components/TokenTradeDock"), {
+  ssr: false,
+});
+const TraderFypFeed = dynamic(() => import("@/components/TraderFypFeed"), {
+  ssr: false,
+});
+
+export default function TokenPage() {
+  const params = useParams();
+  const router = useRouter();
+  const address = (params?.address as string) ?? "";
+  const [meme, setMeme] = useState<MemeTrend | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<"following" | "saved" | "tokens" | "leaderboard" | "fyp">("tokens");
+  const [favorites, setFavorites] = useState<MemeTrend[]>([]);
+
+  useEffect(() => {
+    const load = () => setFavorites(readTokenFavorites());
+    load();
+    window.addEventListener(TOKEN_FAVORITES_EVENT, load);
+    window.addEventListener("storage", load);
+    return () => {
+      window.removeEventListener(TOKEN_FAVORITES_EVENT, load);
+      window.removeEventListener("storage", load);
+    };
+  }, []);
+
+  const handleSelectToken = useCallback((next: MemeTrend) => {
+    if (!next.contractAddress) return;
+    cacheTokenNav(next);
+    router.push(`/app/token/${encodeURIComponent(next.contractAddress)}`);
+  }, [router]);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
+    if (!address) return;
+    const cached = readTokenNav(address);
+    setMeme(
+      cached ?? {
+        keyword: address.slice(0, 4).toUpperCase(),
+        score: 0,
+        posts: 0,
+        source: "direct",
+        contractAddress: address,
+      },
+    );
+  }, [address]);
+
+  const handleHeaderSelectMeme = useCallback(
+    (next: MemeTrend) => {
+      if (!next.contractAddress) return;
+      cacheTokenNav(next);
+      router.push(`/app/token/${next.contractAddress}`);
+    },
+    [router],
+  );
+
+  if (!meme) return null;
+
+  return (
+    <ToastProvider>
+      <div
+        className="wraith-dashboard wraith-token-page"
+        style={{
+          minHeight: "100vh",
+          background: "var(--bg)",
+          color: "var(--text)",
+          fontFamily: "var(--font-sans)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <style>{`
+          html, body { margin: 0; padding: 0; box-sizing: border-box; }
+          *, *::before, *::after { box-sizing: border-box; }
+        `}</style>
+
+        <Header onSelectMeme={handleHeaderSelectMeme} />
+
+        {isMobile ? (
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", position: "relative" }}>
+              <div style={{ height: "min(78vh, 760px)", minHeight: 520 }}><TokenPanel selectedMeme={meme} /></div>
+              <div style={{ minHeight: 380 }}><TokenTradeDock meme={meme} /></div>
+          </div>
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: "flex",
+              overflow: "hidden",
+            }}
+          >
+            <aside
+              className="wraith-token-sidebar"
+              style={{
+                width: "clamp(250px, 20vw, 330px)",
+                flexShrink: 0,
+                minWidth: 250,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                borderRight: "1px solid var(--border)",
+                background: "var(--surface)",
+              }}
+            >
+              <nav
+                aria-label="Token sidebar"
+                style={{
+                  display: "flex",
+                  gap: 2,
+                  padding: "10px 10px 8px",
+                  borderBottom: "1px solid var(--border)",
+                  flexShrink: 0,
+                  overflowX: "auto",
+                  scrollbarWidth: "none",
+                }}
+              >
+                {(["following", "saved", "tokens", "leaderboard", "fyp"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setSidebarTab(tab)}
+                    aria-pressed={sidebarTab === tab}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 5,
+                      flex: "0 0 auto",
+                      minWidth: 0,
+                      padding: "10px 8px",
+                      border: "none",
+                      background: "transparent",
+                      color: sidebarTab === tab ? "var(--text)" : "var(--text-muted)",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: ".01em",
+                      textTransform: "uppercase",
+                      whiteSpace: "nowrap",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {tab === "saved" && <Bookmark size={12} />}
+                    {tab === "fyp" && <Bell size={12} />}
+                    {tab === "fyp" ? "FYP" : tab === "saved" ? "Saved" : tab === "leaderboard" ? "Leaderboard" : tab === "following" ? "Following" : "Tokens"}
+                  </button>
+                ))}
+              </nav>
+              <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+                {sidebarTab === "fyp" && (
+                  <div style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                    <TraderFypFeed onSelectMeme={handleSelectToken} />
+                    <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+                      <LiveSignalsBar layout="rail" onSelectMeme={handleSelectToken} />
+                    </div>
+                  </div>
+                )}
+                {sidebarTab === "leaderboard" && <TokenSidebarLeaderboard />}
+                {sidebarTab === "tokens" && <TokenMarketList onSelectMeme={handleSelectToken} selectedMeme={meme} />}
+                {sidebarTab === "saved" && (favorites.length ? favorites.map((favorite) => (
+                  <button key={favorite.contractAddress} type="button" onClick={() => handleSelectToken(favorite)} style={{ width: "100%", minHeight: 58, display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", border: 0, borderBottom: "1px solid var(--border)", background: "transparent", color: "var(--text)", textAlign: "left", cursor: "pointer" }}>
+                    {favorite.tokenImageUrl ? <img src={favorite.tokenImageUrl} alt="" width={34} height={34} style={{ borderRadius: "50%", objectFit: "cover" }} /> : <span style={{ width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: "50%", background: "var(--surface-raised)" }}>{favorite.keyword.slice(0, 1)}</span>}
+                    <strong style={{ flex: 1 }}>{favorite.keyword}</strong><Bookmark size={14} fill="currentColor" color="var(--orange-hot)" />
+                  </button>
+                )) : <div style={{ padding: "26px 16px", color: "var(--text-muted)", fontSize: 12 }}>Bookmark a token to keep it here.</div>)}
+                {sidebarTab === "following" && <FollowingSidebar />}
+              </div>
+            </aside>
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                position: "relative",
+              }}
+            >
+              <TokenPanel selectedMeme={meme} />
+            </div>
+            <div style={{ width: 350, flex: "0 0 350px", minWidth: 0, overflow: "hidden", borderLeft: "1px solid var(--border)" }}>
+              <TokenTradeDock meme={meme} />
+            </div>
+          </div>
+        )}
+      </div>
+    </ToastProvider>
+  );
+}

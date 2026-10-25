@@ -100,7 +100,7 @@ async function getParsedTransactionsWithRetry(
     const release = await acquireRpcSlot();
     try {
       return await connection.getParsedTransactions(sigs, {
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: 1,
       });
     } catch (e) {
       const is429 = String(e).includes("429");

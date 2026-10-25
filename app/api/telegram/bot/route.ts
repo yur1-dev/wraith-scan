@@ -72,9 +72,9 @@ ${rule}
 Telegram alerts are a <b>SPECTER</b> and <b>WRAITH</b> tier feature.
 
 ◌ <b>GHOST</b>  free · scanner only
-◈ <b>SHADE</b>  10,000 WRAITH · sniper &amp; hot wallet
-◆ <b>SPECTER</b>  100,000 WRAITH · AI score, live signals, <b>Telegram alerts</b>
-⬡ <b>WRAITH</b>  1,000,000 WRAITH · everything, 0% fees
+◈ <b>SHADE</b>  10,000 OMEN · sniper &amp; hot wallet
+◆ <b>SPECTER</b>  100,000 OMEN · AI score, live signals, <b>Telegram alerts</b>
+⬡ <b>WRAITH</b>  1,000,000 OMEN · everything, 0% fees
 
 Your tier updates automatically when you connect your wallet.
 
@@ -118,7 +118,7 @@ async function msgStatus(chatId: number) {
     const tier = String(u.tier ?? "GHOST");
     const eligible = tier === "SPECTER" || tier === "WRAITH";
     return {
-      text: `👻 <b>STATUS</b>\n${rule}\n🟢 <b>Linked</b>  ${esc(String(u.email ?? u.name ?? "your account"))}\n🎚 <b>Tier</b>  ${esc(tier)}\n${eligible ? "📡 <b>Alerts are ON</b>" : "⚠️ <b>Alerts are OFF</b>  needs SPECTER (100,000 WRAITH)"}\n\n${footer}`,
+      text: `👻 <b>STATUS</b>\n${rule}\n🟢 <b>Linked</b>  ${esc(String(u.email ?? u.name ?? "your account"))}\n🎚 <b>Tier</b>  ${esc(tier)}\n${eligible ? "📡 <b>Alerts are ON</b>" : "⚠️ <b>Alerts are OFF</b>  needs SPECTER (100,000 OMEN)"}\n\n${footer}`,
       markup: eligible ? scannerBtn : openApp,
     };
   } catch {
@@ -311,7 +311,7 @@ export async function POST(req: NextRequest) {
       const eligible = tier === "SPECTER" || tier === "WRAITH";
       await send(
         chatId,
-        `✅ <b>TELEGRAM CONNECTED</b>\n${rule}\nYou're linked, <b>${esc(name)}</b>.\n\n${eligible ? "📡 Signals and wins will land in this chat the moment they fire, across every chain." : "⚠️ Your tier is <b>" + esc(tier) + "</b>. Alerts start once you reach <b>SPECTER</b> (100,000 WRAITH)."}\n\n/top  ·  /wins  ·  /settings  ·  /status\n\n${footer}`,
+        `✅ <b>TELEGRAM CONNECTED</b>\n${rule}\nYou're linked, <b>${esc(name)}</b>.\n\n${eligible ? "📡 Signals and wins will land in this chat the moment they fire, across every chain." : "⚠️ Your tier is <b>" + esc(tier) + "</b>. Alerts start once you reach <b>SPECTER</b> (100,000 OMEN)."}\n\n/top  ·  /wins  ·  /settings  ·  /status\n\n${footer}`,
         scannerBtn,
       );
       break;

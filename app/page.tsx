@@ -42,14 +42,14 @@ function GhostIcon({ tier, lit }: { tier: TierKey; lit: boolean }) {
 
 const TIER_SUBTITLE: Record<TierKey, string> = {
   GHOST: "No tokens required",
-  SHADE: "Hold 10,000 WRAITH",
-  SPECTER: "Hold 100,000 WRAITH",
-  WRAITH: "Hold 1,000,000 WRAITH",
+  SHADE: "Hold 10,000 OMEN",
+  SPECTER: "Hold 100,000 OMEN",
+  WRAITH: "Hold 1,000,000 OMEN",
 };
 
 const TIER_PITCH: Record<TierKey, string> = {
   GHOST: "Get a feel for the scanner before you commit.",
-  SHADE: "Core trading tools unlocked for WRAITH holders.",
+  SHADE: "Core trading tools unlocked for OMEN holders.",
   SPECTER:
     "Full suite — AI scoring, sniper, no limits. Live signals at WRAITH.",
   WRAITH: "Maximum power. Zero fees. Live signals. For serious traders.",
@@ -567,9 +567,9 @@ export default function AccessPage() {
               <span key={rep} style={{ display: "inline-flex" }}>
                 {[
                   "GHOST · FREE · 1.5% FEE",
-                  "SHADE · 10K WRAITH · 1% FEE",
-                  "SPECTER · 100K WRAITH · 0.5% FEE",
-                  "WRAITH · 1M WRAITH · 0% FEE · LIVE SIGNALS",
+                  "SHADE · 10K OMEN · 1% FEE",
+                  "SPECTER · 100K OMEN · 0.5% FEE",
+                  "WRAITH · 1M OMEN · 0% FEE · LIVE SIGNALS",
                 ].map((item, i) => (
                   <span
                     key={`${rep}-${i}`}
@@ -650,7 +650,7 @@ export default function AccessPage() {
                 margin: "0 0 20px",
               }}
             >
-              HOLD WRAITH.
+              HOLD OMEN.
               <br />
               <span style={{ color: "#e8490f" }}>UNLOCK</span> THE MACHINE.
             </h1>
@@ -704,7 +704,7 @@ export default function AccessPage() {
                   e.currentTarget.style.background = "#e8490f";
                 }}
               >
-                BUY WRAITH <span style={{ opacity: 0.6 }}>↗</span>
+                BUY OMEN <span style={{ opacity: 0.6 }}>↗</span>
               </a>
               <Link
                 href="/app"
@@ -890,7 +890,7 @@ export default function AccessPage() {
                 {
                   n: "01",
                   title: "REACH SPECTER TIER",
-                  desc: "Hold at least 100,000 WRAITH in your connected wallet. Telegram alerts unlock at SPECTER.",
+                  desc: "Hold at least 100,000 OMEN in your connected wallet. Telegram alerts unlock at SPECTER.",
                   color: "#a855f7",
                 },
                 {
@@ -1003,7 +1003,7 @@ export default function AccessPage() {
                     letterSpacing: ".14em",
                   }}
                 >
-                  SPECTER TIER REQUIRED · 100,000 WRAITH
+                  SPECTER TIER REQUIRED · 100,000 OMEN
                 </span>
               </div>
             </div>
@@ -1319,7 +1319,7 @@ export default function AccessPage() {
                 margin: "0 auto",
               }}
             >
-              Hold WRAITH in your wallet. Your tier is detected automatically.
+              Hold OMEN in your wallet. Your tier is detected automatically.
               No staking, no locking — just hold and trade.
             </p>
           </div>
@@ -1548,7 +1548,7 @@ export default function AccessPage() {
                             } as React.CSSProperties
                           }
                         >
-                          BUY WRAITH ↗
+                          BUY OMEN ↗
                         </a>
                       );
                     })()}
@@ -1910,8 +1910,8 @@ export default function AccessPage() {
             {[
               {
                 n: "01",
-                title: "BUY WRAITH",
-                desc: "Get WRAITH on Pump.fun. Any amount moves you above GHOST tier.",
+                title: "BUY OMEN",
+                desc: "Get OMEN on Pump.fun. Any amount moves you above GHOST tier.",
                 color: "#e8490f",
               },
               {
@@ -1923,7 +1923,7 @@ export default function AccessPage() {
               {
                 n: "03",
                 title: "CONNECT WALLET",
-                desc: "Link the Solana wallet holding WRAITH — tier auto-detected instantly.",
+                desc: "Link the Solana wallet holding OMEN — tier auto-detected instantly.",
                 color: "#00b4d8",
               },
               {
@@ -2019,7 +2019,7 @@ export default function AccessPage() {
             letterSpacing: ".1em",
           }}
         >
-          GET WRAITH · CONNECT · TRADE
+          GET OMEN · CONNECT · TRADE
         </p>
         <div
           style={{
@@ -2056,7 +2056,7 @@ export default function AccessPage() {
               e.currentTarget.style.background = "#e8490f";
             }}
           >
-            BUY WRAITH ↗
+            BUY OMEN ↗
           </a>
           <Link
             href="/app"

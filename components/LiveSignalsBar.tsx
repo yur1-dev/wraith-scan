@@ -345,7 +345,7 @@ export default function LiveSignalsBar({
           <span style={{ color: "#a855f7", fontWeight: 700 }}>SPECTER</span>
         </span>
         <span style={{ fontSize: 8, color: "#1e1e1e", ...MONO }}>
-          100K WRAITH
+          100K OMEN
         </span>
       </div>
     );

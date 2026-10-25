@@ -6,7 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cacheTokenNav } from "@/lib/tokenNav";
-import {
+import { Lock as LockIcon,
   ArrowLeftRight,
   Bookmark,
   CheckCircle2,
@@ -2045,6 +2045,11 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
   const [checking, setChecking] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Phones get the on-screen keypad (and no system keyboard); desktops just type.
+  const [touch, setTouch] = useState(false);
+  useEffect(() => {
+    setTouch(window.matchMedia("(hover: none) and (pointer: coarse)").matches);
+  }, []);
 
   // Keep the hidden input focused so typing (or paste) works anywhere.
   useEffect(() => {
@@ -2075,117 +2080,104 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
     });
   }, [pin, checking, unlocked, onUnlock]);
 
-  const active = Math.min(pin.length, 5);
+  const press = (d: string) => {
+    if (checking || unlocked) return;
+    setPin((p) => (p.length < 6 ? p + d : p));
+  };
+  const back = () => {
+    if (checking || unlocked) return;
+    setPin((p) => p.slice(0, -1));
+  };
+  const tone = error ? "#ff5a5a" : unlocked ? "#55cf91" : "#ff7b3d";
 
   return createPortal(
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 99999,
-        background:
-          "radial-gradient(ellipse 60% 50% at 50% 38%, rgba(255,123,61,0.10), transparent 70%), var(--bg, #0a0605)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        userSelect: "none",
-      }}
-    >
+    <div className={`wpl${unlocked ? " wpl-open" : ""}`}>
       <style>{`
-        @keyframes wpin-shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(5px)} }
-        @keyframes wpin-pop { from{transform:scale(.5);opacity:0} to{transform:scale(1);opacity:1} }
-        @keyframes wpin-caret { 0%,100%{opacity:1} 50%{opacity:0} }
+        .wpl{position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;background:#060403;overflow:hidden;user-select:none;transition:opacity .5s ease,transform .6s ease,filter .5s ease}
+        .wpl.wpl-open{opacity:0;transform:translateY(-3%) scale(1.04);filter:blur(10px);pointer-events:none}
+        .wpl-mist{position:absolute;inset:-20%;pointer-events:none;background:radial-gradient(40% 35% at 25% 30%,rgba(255,123,61,.13),transparent 70%),radial-gradient(45% 40% at 78% 70%,rgba(255,80,20,.10),transparent 70%),radial-gradient(30% 30% at 60% 20%,rgba(255,170,110,.06),transparent 70%);animation:wpl-drift 18s ease-in-out infinite alternate}
+        .wpl-mist.b{animation-duration:26s;animation-direction:alternate-reverse;opacity:.7;transform:scaleX(-1)}
+        @keyframes wpl-drift{from{transform:translate3d(-4%,2%,0) scale(1)}to{transform:translate3d(5%,-3%,0) scale(1.12)}}
+        .wpl-logo{position:relative;width:96px;height:96px;display:grid;place-items:center;margin-bottom:22px;animation:wpl-float 5s ease-in-out infinite}
+        .wpl-logo::before,.wpl-logo::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:1px solid rgba(255,123,61,.35);animation:wpl-ring 3.2s ease-out infinite}
+        .wpl-logo::after{animation-delay:1.6s}
+        .wpl-logo>span{position:relative;width:46px;height:72px;display:block}
+        @keyframes wpl-float{50%{transform:translateY(-8px)}}
+        @keyframes wpl-ring{from{transform:scale(.7);opacity:.9}to{transform:scale(1.9);opacity:0}}
+        .wpl h1{margin:0;color:#fff;font-size:15px;font-weight:800;letter-spacing:.42em;text-indent:.42em;text-transform:uppercase}
+        .wpl-sub{margin-top:10px;min-height:18px;font-size:13px;color:#8c8077;letter-spacing:.04em}
+        .wpl-orbs{display:flex;gap:16px;margin:30px 0 32px}
+        .wpl-orbs.shake{animation:wpl-shake .45s}
+        @keyframes wpl-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(9px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+        .wpl-orb{width:14px;height:14px;border-radius:50%;border:1.5px solid #3a2a20;background:transparent;transition:all .16s ease}
+        .wpl-orb.on{border-color:var(--c);background:var(--c);box-shadow:0 0 14px var(--c),0 0 32px var(--c);transform:scale(1.18)}
+        .wpl-pad[hidden]{display:none}
+        .wpl-pad{display:grid;grid-template-columns:repeat(3,68px);gap:14px}
+        .wpl-key{height:68px;border-radius:50%;border:1px solid #2a1f18;background:rgba(255,255,255,.025);color:#f3ece6;font:600 22px/1 var(--font-sans,system-ui);cursor:pointer;transition:background .12s,border-color .12s,transform .08s,box-shadow .12s}
+        .wpl-key:hover{background:rgba(255,123,61,.10);border-color:rgba(255,123,61,.5)}
+        .wpl-key:active{transform:scale(.92);box-shadow:0 0 22px rgba(255,123,61,.4)}
+        .wpl-key.ghost{border-color:transparent;background:transparent;color:#8c8077;font-size:16px}
+        .wpl-key.ghost:hover{color:#fff;background:transparent;border-color:transparent}
+        .wpl-foot{margin-top:30px;font-size:12px;color:#6f655d}
+        .wpl-foot button,.wpl-out{background:none;border:0;padding:0;color:#ff9a5c;font-weight:700;cursor:pointer;font-size:12px}
+        .wpl-out{position:absolute;top:20px;right:22px;display:inline-flex;align-items:center;gap:7px;color:#9a8e85;font-weight:600;font-size:13px}
+        .wpl-out:hover{color:#fff}
+        @media (max-width:480px){.wpl-pad{grid-template-columns:repeat(3,64px);gap:12px}.wpl-key{height:64px}.wpl-orbs{gap:13px}}
+        @media (prefers-reduced-motion:reduce){.wpl-mist,.wpl-logo,.wpl-logo::before,.wpl-logo::after{animation:none}}
       `}</style>
+      <div className="wpl-mist" />
+      <div className="wpl-mist b" />
 
       {onLogout && (
-        <button
-          type="button"
-          onClick={onLogout}
-          style={{ position: "absolute", top: 20, right: 20, display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 14px", border: "1px solid #2a211b", borderRadius: 10, background: "rgba(255,255,255,0.03)", color: "#d9d2cc", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-        >
+        <button type="button" className="wpl-out" onClick={onLogout}>
           <LogOut size={14} /> Log out
         </button>
       )}
 
-      <div
-        style={{
-          width: "min(92vw, 440px)",
-          padding: "34px 30px 26px",
-          border: "1px solid #231a14",
-          borderRadius: 24,
-          background: "linear-gradient(180deg, rgba(255,123,61,0.05), rgba(255,255,255,0.01))",
-          boxShadow: unlocked ? "0 0 60px rgba(255,123,61,0.35)" : "0 20px 60px rgba(0,0,0,0.5)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 10,
-          transition: "box-shadow .25s",
+      <div className="wpl-logo">
+        <span>
+          <Image src="/logo.png" alt="" fill sizes="46px" style={{ objectFit: "contain", filter: "drop-shadow(0 0 16px rgba(255,123,61,0.6))" }} priority />
+        </span>
+      </div>
+      <h1>The veil is down</h1>
+      <div className="wpl-sub" style={{ color: error ? "#ff6b6b" : unlocked ? "#55cf91" : undefined }}>
+        {error ? "Wrong sigil. Try again." : unlocked ? "Welcome back." : touch ? "Speak your sigil to cross." : "Type your sigil to cross."}
+      </div>
+
+      <div className={`wpl-orbs${error ? " shake" : ""}`} style={{ ["--c" as string]: tone }}>
+        {Array.from({ length: 6 }, (_, i) => (
+          <span key={i} className={`wpl-orb${pin.length > i ? " on" : ""}`} />
+        ))}
+      </div>
+
+      <div className="wpl-pad" hidden={!touch}>
+        {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
+          <button key={d} type="button" className="wpl-key" onClick={() => press(d)}>{d}</button>
+        ))}
+        <span />
+        <button type="button" className="wpl-key" onClick={() => press("0")}>0</button>
+        <button type="button" className="wpl-key ghost" onClick={back} aria-label="Delete">⌫</button>
+      </div>
+
+      <input
+        ref={inputRef}
+        value={pin}
+        onChange={(e) => {
+          if (checking) return;
+          setPin(e.target.value.replace(/\D/g, "").slice(0, 6));
         }}
-      >
-        <div style={{ position: "relative", width: 44, height: 70, marginBottom: 6 }}>
-          <Image src="/logo.png" alt="" fill sizes="44px" style={{ objectFit: "contain", filter: "drop-shadow(0 0 14px rgba(255,123,61,0.5))" }} priority />
-        </div>
-        <span style={{ color: "#fff", fontWeight: 800, fontSize: 18, letterSpacing: 3 }}>WRAITH IS LOCKED</span>
-        <span style={{ color: error ? "#ff6b6b" : unlocked ? "#55cf91" : "#8c8077", fontSize: 13, minHeight: 18 }}>
-          {error ? "Incorrect PIN. Try again." : unlocked ? "Unlocked" : "Enter your PIN to continue."}
-        </span>
+        onKeyDown={(e) => { if (e.key === "Backspace") { e.preventDefault(); back(); } }}
+        inputMode={touch ? "none" : "numeric"}
+        autoComplete="off"
+        maxLength={6}
+        aria-label="PIN"
+        autoFocus
+        style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 1, height: 1 }}
+      />
 
-        <div
-          style={{ position: "relative", display: "flex", gap: 10, marginTop: 14, animation: error ? "wpin-shake .45s" : undefined }}
-          onClick={() => inputRef.current?.focus()}
-        >
-          {Array.from({ length: 6 }, (_, i) => {
-            const filled = pin.length > i;
-            const isActive = !checking && i === active && pin.length < 6;
-            return (
-              <div
-                key={i}
-                style={{
-                  width: 50,
-                  height: 62,
-                  borderRadius: 14,
-                  display: "grid",
-                  placeItems: "center",
-                  background: "#120d0a",
-                  border: `1px solid ${error ? "#ff5a5a" : unlocked ? "#55cf91" : isActive ? "#ff7b3d" : filled ? "#4a2a18" : "#261c16"}`,
-                  boxShadow: isActive ? "0 0 0 3px rgba(255,123,61,0.16)" : "none",
-                  transition: "border-color .12s, box-shadow .12s",
-                }}
-              >
-                {filled ? (
-                  <span style={{ width: 12, height: 12, borderRadius: "50%", background: error ? "#ff5a5a" : unlocked ? "#55cf91" : "#ff7b3d", animation: "wpin-pop .12s" }} />
-                ) : isActive ? (
-                  <span style={{ width: 2, height: 24, background: "#ff7b3d", animation: "wpin-caret 1s infinite" }} />
-                ) : null}
-              </div>
-            );
-          })}
-          <input
-            ref={inputRef}
-            value={pin}
-            onChange={(e) => {
-              if (checking) return;
-              setPin(e.target.value.replace(/\D/g, "").slice(0, 6));
-            }}
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={6}
-            aria-label="PIN"
-            autoFocus
-            style={{ position: "absolute", inset: 0, opacity: 0, cursor: "text", width: "100%", height: "100%" }}
-          />
-        </div>
-
-        <span style={{ color: "#6f655d", fontSize: 12, marginTop: 18 }}>
-          Forgot your PIN?{" "}
-          {onLogout ? (
-            <button type="button" onClick={onLogout} style={{ background: "none", border: 0, padding: 0, color: "#ff9a5c", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>
-              Log out and sign in again
-            </button>
-          ) : (
-            "Log out and sign in again."
-          )}
-        </span>
+      <div className="wpl-foot">
+        Lost your sigil?{" "}
+        {onLogout ? <button type="button" onClick={onLogout}>Log out and sign in again</button> : "Log out and sign in again."}
       </div>
     </div>,
     document.body,
@@ -3447,6 +3439,16 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                   setProfileDialog("currency");
                 }}
               />
+              {typeof window !== "undefined" && readPinEnabled() && !!localStorage.getItem(PIN_HASH_KEY) && (
+                <ProfileMenuItem
+                  icon={LockIcon}
+                  label="Lock now"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    setPinLocked(true);
+                  }}
+                />
+              )}
               <ProfileMenuItem
                 icon={ArrowLeftRight}
                 label="Transfers"

@@ -1,5 +1,6 @@
 "use client";
 
+import StatusBar from "@/components/StatusBar";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -141,6 +142,7 @@ export default function TokenPage() {
         <div className="wraith-dashboard wraith-token-page wx-page">
           <Header onSelectMeme={go} />
           <EvmTokenView address={address} sidebar={sidebar} />
+          <StatusBar />
         </div>
       </ToastProvider>
     );
@@ -206,6 +208,7 @@ export default function TokenPage() {
             </aside>
           </div>
         )}
+        {!isMobile && <StatusBar />}
       </div>
     </ToastProvider>
   );

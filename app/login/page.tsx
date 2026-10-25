@@ -26,14 +26,14 @@ const TIER_IMAGE: Record<TierKey, string> = {
 
 const TIER_SUBTITLE: Record<TierKey, string> = {
   GHOST: "No tokens required",
-  SHADE: "Hold 10,000 WRAITH",
-  SPECTER: "Hold 100,000 WRAITH",
-  WRAITH: "Hold 1,000,000 WRAITH",
+  SHADE: "Hold 10,000 OMEN",
+  SPECTER: "Hold 100,000 OMEN",
+  WRAITH: "Hold 1,000,000 OMEN",
 };
 
 const TIER_PITCH: Record<TierKey, string> = {
   GHOST: "Get a feel for the scanner before you commit.",
-  SHADE: "Core trading tools unlocked for WRAITH holders.",
+  SHADE: "Core trading tools unlocked for OMEN holders.",
   SPECTER: "Full suite — AI scoring, sniper, no limits.",
   WRAITH: "Maximum power. Zero fees. Live signals.",
 };
@@ -326,7 +326,7 @@ function LoginInner() {
                 marginBottom: 4,
               }}
             >
-              HOLD WRAITH. <span style={{ color: "#e8490f" }}>UNLOCK</span> THE
+              HOLD OMEN. <span style={{ color: "#e8490f" }}>UNLOCK</span> THE
               MACHINE.
             </h2>
             <p style={{ color: "#444", fontSize: 10, lineHeight: 1.6 }}>
@@ -566,7 +566,7 @@ function LoginInner() {
               onMouseEnter={() => setBuyHovered(true)}
               onMouseLeave={() => setBuyHovered(false)}
             >
-              BUY WRAITH <span style={{ opacity: 0.5 }}>↗</span>
+              BUY OMEN <span style={{ opacity: 0.5 }}>↗</span>
             </a>
           </div>
         </div>
@@ -639,7 +639,7 @@ function LoginInner() {
               </h1>
               <p style={{ color: "#525252", fontSize: 11, lineHeight: 1.8 }}>
                 Sign in once. Your wallets are created automatically, and your
-                WRAITH balance on your Solana address sets your tier.
+                OMEN balance on your Solana address sets your tier.
               </p>
             </div>
 
@@ -752,7 +752,7 @@ function LoginInner() {
                 },
                 {
                   n: "03",
-                  title: "HOLD WRAITH ON YOUR SOLANA ADDRESS",
+                  title: "HOLD OMEN ON YOUR SOLANA ADDRESS",
                   desc: "Your tier is auto-detected. Features and fee discounts activate in real time.",
                   color: "#00b4d8",
                 },

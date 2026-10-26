@@ -11,11 +11,11 @@ import { useCallback, useMemo } from "react";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import PrivyEmbeddedWallets from "@/components/PrivyEmbeddedWallets";
 
+// In the browser always use the page's own origin (a stale NEXT_PUBLIC_APP_URL such as localhost broke /api/rpc in production).
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ||
-  (typeof window !== "undefined"
+  typeof window !== "undefined"
     ? window.location.origin
-    : "http://localhost:3000");
+    : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 const RPC_HTTP = `${APP_URL}/api/rpc`;
 const RPC_WS = "wss://solana-rpc.publicnode.com";

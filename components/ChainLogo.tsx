@@ -31,7 +31,8 @@ function Mark({ k }: { k: string }) {
 
 export default function ChainLogo({ chain, size = 16, className = "" }: { chain?: string | null; size?: number; className?: string }) {
   const k = (chain || "").toLowerCase();
-  const [broken, setBroken] = useState(false);
+  // Built-in marks by default (no /chains/*.svg 404s). Set NEXT_PUBLIC_CHAIN_LOGO_FILES=1 after adding real files to /public/chains.
+  const [broken, setBroken] = useState(process.env.NEXT_PUBLIC_CHAIN_LOGO_FILES !== "1");
   const ref = useRef<HTMLImageElement>(null);
   // An <img> rendered on the server can fail before React attaches onError, so check once on mount.
   useEffect(() => {

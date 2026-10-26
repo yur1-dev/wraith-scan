@@ -9,10 +9,11 @@ const _inflight = new Map<string, Promise<string | null>>();
 
 async function fetchFromPumpApi(mint: string): Promise<string | null> {
   try {
-    const res = await fetch(`https://frontend-api.pump.fun/coins/${mint}`);
+    // via our own server: pump.fun's API has no CORS headers, so a browser call is always blocked
+    const res = await fetch(`/api/pump-image?mint=${encodeURIComponent(mint)}`);
     if (!res.ok) return null;
     const data = await res.json();
-    return data?.image_uri || null;
+    return data?.image || null;
   } catch {
     return null;
   }

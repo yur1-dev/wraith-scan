@@ -116,7 +116,7 @@ async function msgStatus(chatId: number) {
         markup: openApp,
       };
     }
-    const tier = effectiveTier(u);
+    const tier = effectiveTier(u as { tier?: unknown; tierSource?: unknown });
     const eligible = tier === "SPECTER" || tier === "WRAITH";
     return {
       text: `👻 <b>STATUS</b>\n${rule}\n🟢 <b>Linked</b>  ${esc(String(u.email ?? u.name ?? "your account"))}\n🎚 <b>Tier</b>  ${esc(tier)}\n${eligible ? "📡 <b>Alerts are ON</b>" : "⚠️ <b>Alerts are OFF</b>  needs SPECTER (100,000 OMEN)"}\n\n${footer}`,
@@ -308,7 +308,7 @@ export async function POST(req: NextRequest) {
       await db.collection("users").updateOne({ _id: link.userId }, { $set: { telegramChatId: String(chatId), telegramLinkedAt: new Date() } });
       await db.collection("telegram_links").deleteOne({ token: param });
       const u = await db.collection("users").findOne({ _id: link.userId }, { projection: { tier: 1, tierSource: 1 } });
-      const tier = effectiveTier(u);
+      const tier = effectiveTier(u as { tier?: unknown; tierSource?: unknown });
       const eligible = tier === "SPECTER" || tier === "WRAITH";
       await send(
         chatId,

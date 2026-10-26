@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   }
 
   const eligibleTiers = ["SPECTER", "WRAITH"];
-  if (!eligibleTiers.includes(effectiveTier(user))) {
+  if (!eligibleTiers.includes(effectiveTier(user as { tier?: unknown; tierSource?: unknown }))) {
     return NextResponse.json({ error: "Tier not eligible" }, { status: 403 });
   }
 

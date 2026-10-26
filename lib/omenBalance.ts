@@ -38,10 +38,10 @@ interface ParsedAccounts {
 
 /** Exact OMEN holding as raw base units (BigInt) plus decimals. Sums every token account the wallet owns for the mint. */
 export async function getOmenRaw(wallet: string): Promise<{ raw: bigint; decimals: number }> {
-  if (!omenConfigured()) return { raw: 0n, decimals: 0 };
+  if (!omenConfigured()) return { raw: BigInt(0), decimals: 0 };
   // jsonParsed + mint filter finds accounts under both the legacy Token program and Token-2022.
   const r = await rpc<ParsedAccounts>("getTokenAccountsByOwner", [wallet, { mint: WRAITH_MINT }, { encoding: "jsonParsed", commitment: "confirmed" }]);
-  let raw = 0n;
+  let raw = BigInt(0);
   let decimals = 0;
   for (const a of r.value) {
     const t = a.account.data.parsed.info.tokenAmount;
@@ -55,7 +55,7 @@ export async function getOmenRaw(wallet: string): Promise<{ raw: bigint; decimal
 export function tierForRaw(raw: bigint, decimals: number): TierKey {
   let best: TierKey = "GHOST";
   for (const k of TIER_ORDER) {
-    const need = BigInt(TIERS[k].minTokens) * 10n ** BigInt(decimals);
+    const need = BigInt(TIERS[k].minTokens) * BigInt(10) ** BigInt(decimals);
     if (raw >= need) best = k;
   }
   return best;

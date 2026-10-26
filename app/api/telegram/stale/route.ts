@@ -1,4 +1,5 @@
 // app/api/telegram/stale/route.ts
+import { effectiveTier } from "@/lib/effectiveTier";
 import { NextRequest, NextResponse } from "next/server";
 import { getAppSession } from "@/lib/session";
 import { getDb } from "@/lib/mongoClient";
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     .collection("users")
     .findOne(
       { _id: new (require("mongodb").ObjectId)(session.user.id) },
-      { projection: { telegramChatId: 1, tier: 1 } },
+      { projection: { telegramChatId: 1, tier: 1, tierSource: 1 } },
     );
 
   if (!user?.telegramChatId) {
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
   }
 
   const eligibleTiers = ["SPECTER", "WRAITH"];
-  if (!eligibleTiers.includes(user.tier)) {
+  if (!eligibleTiers.includes(effectiveTier(user))) {
     return NextResponse.json({ error: "Tier not eligible" }, { status: 403 });
   }
 

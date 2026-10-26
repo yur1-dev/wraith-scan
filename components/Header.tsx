@@ -39,6 +39,11 @@ import PrivyConfigurationNotice from "./PrivyConfigurationNotice";
 import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
 import { useTestMode } from "@/lib/testMode";
 import { useWraithTier } from "@/hooks/useWraithTier";
+import AutoExit from "@/components/AutoExit";
+import LiveAutoExit from "@/components/LiveAutoExit";
+import SniperEngine from "@/components/SniperEngine";
+import { PRIVY_WALLETS_ENABLED as LIVE_EXIT_WALLETS } from "@/lib/privyConfig";
+import TierCard from "@/components/TierCard";
 import { useWraithSession } from "@/components/SessionProvider";
 import { MemeTrend } from "@/app/app/page";
 import {
@@ -3296,10 +3301,8 @@ export default function Header({ onSelectMeme }: HeaderProps) {
   const handleProfileMouseEnter = () => {
     if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current);
     if (hoverOpenRef.current) clearTimeout(hoverOpenRef.current);
-    hoverOpenRef.current = setTimeout(() => {
-      positionMenu();
-      setUserMenuOpen(true);
-    }, 150);
+    positionMenu();
+    setUserMenuOpen(true);
   };
 
   const handleProfileMouseLeave = () => {
@@ -3398,6 +3401,16 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                 <span>{session.user?.email ?? "Signed in"}</span>
               </div>
             </div>
+            <TierCard />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setUserMenuOpen(false); window.dispatchEvent(new Event("wraith:open-sniper")); }}
+              style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", margin: "6px 0 0", padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 10, background: "transparent", color: "var(--text)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+            >
+              <span>Sniper · Auto-buy</span>
+              <span style={{ color: canUse("sniper") ? "var(--orange-hot)" : "var(--text-muted)", fontSize: 10 }}>{canUse("sniper") ? "OPEN" : "SHADE+"}</span>
+            </button>
 
             <div className="wraith-profile-menu-group">
               <ProfileMenuItem
@@ -3685,7 +3698,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
               }}
               disabled={!canUsePaper}
               title={
-                !canUsePaper ? "WRAITH tier required for paper mode" : undefined
+                !canUsePaper ? "Paper mode is unavailable" : undefined
               }
               style={{
                 width: "100%",
@@ -3812,6 +3825,9 @@ export default function Header({ onSelectMeme }: HeaderProps) {
 
   return (
     <>
+      <AutoExit enabled={canUse("auto_sell")} />
+      {LIVE_EXIT_WALLETS && <LiveAutoExit enabled={canUse("auto_sell")} />}
+      {LIVE_EXIT_WALLETS && <SniperEngine allowed={canUse("sniper")} />}
       {mounted && pinLocked && (
         <PinLockOverlay
           onUnlock={() => {

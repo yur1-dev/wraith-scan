@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyPrivyAccessToken } from "@/lib/privyServer";
 
 const PUBLIC_PATHS = new Set(["/login", "/"]);
-const PUBLIC_API_PATHS = new Set(["/api/native-prices"]);
+const PUBLIC_API_PATHS = new Set(["/api/native-prices", "/api/landing"]);
 const PUBLIC_API_PREFIXES = [
   "/api/auth/",
   "/api/telegram/bot",

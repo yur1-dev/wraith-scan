@@ -237,7 +237,7 @@ export default function EvmTokenView({ address, sidebar }: { address: string; si
           )}
 
           <section className="wx-chart-card" aria-label="Price chart">
-            <TokenChart mint={address} chain={snap.chain} livePrice={snap.priceUsd} supply={snap.supply} spottedMcap={spotted?.spottedMcap ?? null} />
+            <TokenChart mint={address} chain={snap.chain} livePrice={snap.priceUsd} supply={snap.supply} spottedMcap={spotted?.spottedMcap ?? null} spottedAt={spotted?.spottedAt ?? null} />
           </section>
 
           <EvmDetailTabs address={address} snap={snap} trades={trades} onHolderCount={setHolderCount} />

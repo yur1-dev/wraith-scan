@@ -133,7 +133,7 @@
 
 .wx-table { display: flex; flex-direction: column; gap: 2px; }
 .wx-trow {
-  display: grid; grid-template-columns: minmax(170px, 2.4fr) 0.6fr 1fr 1fr 1fr 0.8fr 0.8fr 0.8fr 0.7fr; align-items: center; gap: 10px;
+  display: grid; grid-template-columns: minmax(170px, 2.4fr) 0.6fr 1fr 1fr 1fr 0.8fr 0.8fr 0.8fr 0.7fr 84px; align-items: center; gap: 10px;
   width: 100%; padding: 9px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left;
   font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; transition: background 0.1s;
 }
@@ -271,7 +271,7 @@
   .wx-search { flex: 1 1 100%; order: 5; }
   .wx-scanner-layout { margin: 8px; border-radius: 12px; }
   .wx-scanner-rail { display: none; }
-  .wx-trow { grid-template-columns: minmax(130px, 2fr) 1fr 0.9fr 0.9fr; }
+  .wx-trow { grid-template-columns: minmax(130px, 2fr) 1fr 0.9fr 0.9fr 84px; }
   .wx-trow .c-age, .wx-trow .c-liq, .wx-trow .c-vol, .wx-trow .c-5m, .wx-trow .c-24h, .wx-trow .c-tx { display: none; }
 }
 @media (max-width: 480px) {
@@ -297,3 +297,16 @@
   .wx-chart-toolbar .wx-seg button { padding: 5px 8px; font-size: 11px; }
   .wx-legend { gap: 10px; padding: 0 10px 6px; font-size: 10px; }
 }
+
+/* list: quick buy cell + pagination */
+.wx-trow .wx-qb.c-buy { margin-left: 0; justify-self: end; }
+.wx-trow.head .c-buy { justify-self: end; padding-right: 22px; }
+.wx-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 4px 6px; flex-wrap: wrap; }
+.wx-pager-info { color: var(--text-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wx-pager-btns { display: flex; align-items: center; gap: 4px; }
+.wx-pager-btns button { min-width: 32px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border, rgba(255,255,255,.08)); border-radius: 8px; background: transparent; color: var(--text-muted); font: 600 12px/1 inherit; cursor: pointer; }
+.wx-pager-btns button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+.wx-pager-btns button.on { color: #fff; border-color: rgba(255,123,61,.6); background: rgba(255,123,61,.16); }
+.wx-pager-btns button:disabled { opacity: .35; cursor: default; }
+.wx-pager-btns .dots { color: var(--text-dim); padding: 0 2px; }
+.wx-age-chip { margin-left: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(255,123,61,.4); background: rgba(255,123,61,.1); color: #ff9a5c; font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: none; vertical-align: middle; }

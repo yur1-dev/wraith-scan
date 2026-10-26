@@ -94,7 +94,7 @@ function snapshotFrom(token: MarketToken, extra: { pair?: Json; txns?: ReturnTyp
 }
 
 async function fromDexScreener(mint: string, solUsd: number): Promise<Snapshot | null> {
-  const data = obj(await getJson(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(mint)}`, undefined, 6000));
+  const data = obj(await getJson(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(mint)}`, undefined, 4000));
   const pairs = arr(data.pairs)
     .map(obj)
     .filter((p) => p.chainId === "solana" && num(p.priceUsd) > 0 && obj(p.baseToken).address === mint)
@@ -103,6 +103,9 @@ async function fromDexScreener(mint: string, solUsd: number): Promise<Snapshot |
   if (!best) return null;
   const token = parseDexPair(best, solUsd);
   if (!token) return null;
+  // Age: a graduated token's best pool is newer than the token, so use the oldest pool we can see.
+  const created = pairs.map((p) => num(p.pairCreatedAt)).filter((n) => n > 0);
+  if (created.length) token.createdAt = Math.min(...created);
   // Aggregate volume across ALL pools of the token — otherwise a graduated
   // token only shows the volume of one pool.
   if (pairs.length > 1) {
@@ -123,7 +126,8 @@ async function fromGecko(mint: string, solUsd: number): Promise<Snapshot | null>
 }
 
 async function build(mint: string): Promise<Snapshot | null> {
-  const solUsd = await getSolUsd();
+  // SOL price only feeds the curve-progress estimate: never let it hold the snapshot up.
+  const solUsd = await Promise.race([getSolUsd(), new Promise<number>((r) => setTimeout(() => r(150), 1200))]);
   try {
     const snap = await fromDexScreener(mint, solUsd);
     if (snap) {
@@ -152,6 +156,12 @@ export async function GET(request: NextRequest) {
 
   const hit = cache.get(mint);
   if (hit && Date.now() - hit.ts < CACHE_MS) return NextResponse.json(hit.data);
+  // Stale-while-revalidate: answer instantly from the last good snapshot and refresh behind the scenes.
+  if (hit && Date.now() - hit.ts < 10 * 60_000 && !inflight.has(mint)) {
+    const bg = build(mint).then((d) => { if (d) cache.set(mint, { data: d, ts: Date.now() }); return d; }).catch(() => null).finally(() => inflight.delete(mint));
+    inflight.set(mint, bg);
+    return NextResponse.json({ ...hit.data, stale: true });
+  }
 
   let job = inflight.get(mint);
   if (!job) {

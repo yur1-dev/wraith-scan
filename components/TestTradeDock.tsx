@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Connection, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
@@ -8,6 +8,9 @@ import { FlaskConical, LoaderCircle } from "lucide-react";
 import { useToast } from "@/components/Toast";
 import { ataOf, TOKEN_PROGRAM_ID, transferCheckedIx } from "@/lib/splLite";
 import type { SandboxTok } from "@/lib/useSandboxTokens";
+import { useWraithTier } from "@/hooks/useWraithTier";
+import ExitBox from "@/components/ExitBox";
+import { armLiveExit, disarmLiveExit, EXIT_PREFS_KEY, LIVE_EXITS_EVENT, readRules, writeRules, type LiveExitRule } from "@/lib/liveExits";
 
 const DEVNET_RPC = process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com";
 const SELL_PRESETS = [25, 50, 100];
@@ -31,6 +34,20 @@ export default function TestTradeDock({ token }: { token: SandboxTok }) {
   const [sol, setSol] = useState<number | null>(null);
   const [raw, setRaw] = useState<bigint>(BigInt(0));
   const [busy, setBusy] = useState(false);
+  const { canUse } = useWraithTier();
+  const [exitOn, setExitOn] = useState(false);
+  const [exitPrefs, setExitPrefs] = useState({ tp: "100", sl: "30", trail: "0" });
+  const [armed, setArmed] = useState<LiveExitRule | null>(null);
+  useEffect(() => {
+    try { const p = JSON.parse(localStorage.getItem(EXIT_PREFS_KEY) || "null"); if (p && typeof p === "object") { setExitPrefs((c) => ({ ...c, ...p.prefs })); setExitOn(!!p.on); } } catch { /* none */ }
+  }, []);
+  useEffect(() => { try { localStorage.setItem(EXIT_PREFS_KEY, JSON.stringify({ on: exitOn, prefs: exitPrefs })); } catch { /* full */ } }, [exitOn, exitPrefs]);
+  useEffect(() => {
+    const sync = () => setArmed(readRules().find((r) => r.mint === token.mint && r.sandbox) ?? null);
+    sync();
+    window.addEventListener(LIVE_EXITS_EVENT, sync);
+    return () => window.removeEventListener(LIVE_EXITS_EVENT, sync);
+  }, [token.mint]);
 
   const refresh = useCallback(async () => {
     if (!owner) return;
@@ -53,6 +70,48 @@ export default function TestTradeDock({ token }: { token: SandboxTok }) {
     const t = window.setInterval(() => void refresh(), 6000);
     return () => window.clearInterval(t);
   }, [refresh]);
+
+  const sandboxPrice = useCallback(async (): Promise<number> => {
+    try {
+      const r = await fetch(`/api/token-price?mint=${encodeURIComponent(token.mint)}`, { cache: "no-store" });
+      const d = (await r.json()) as { priceUsd?: number };
+      return typeof d.priceUsd === "number" ? d.priceUsd : 0;
+    } catch { return 0; }
+  }, [token.mint]);
+
+  // Test-mode auto-exit: same TP / SL / trail logic as live, executed here against the devnet sandbox.
+  const sellingRef = useRef(false);
+  useEffect(() => {
+    if (!owner || !wallet || !canUse("auto_sell")) return;
+    const id = window.setInterval(async () => {
+      const rule = readRules().find((r) => r.mint === token.mint && r.sandbox);
+      if (!rule || sellingRef.current || document.hidden) return;
+      const px = await sandboxPrice();
+      if (!(px > 0)) return;
+      const peak = Math.max(rule.peakMcap, px);
+      const pnl = (px / rule.entryMcap - 1) * 100;
+      const kind = rule.tpPct > 0 && pnl >= rule.tpPct ? "Take-profit" : rule.slPct > 0 && pnl <= -rule.slPct ? "Stop-loss" : rule.trailPct > 0 && peak > rule.entryMcap && px <= peak * (1 - rule.trailPct / 100) ? "Trailing stop" : null;
+      if (!kind) { if (peak !== rule.peakMcap) writeRules(readRules().map((r) => (r.id === rule.id ? { ...r, peakMcap: peak } : r))); return; }
+      sellingRef.current = true;
+      try {
+        const mintKey = new PublicKey(token.mint);
+        const accs = await conn.getParsedTokenAccountsByOwner(owner, { mint: mintKey, programId: TOKEN_PROGRAM_ID });
+        const total = accs.value.reduce((s, a) => s + BigInt((a.account.data.parsed.info as { tokenAmount: { amount: string } }).tokenAmount.amount), BigInt(0));
+        if (total > BigInt(0)) {
+          const sig = await sendSigned([transferCheckedIx(ataOf(owner, mintKey), mintKey, new PublicKey(token.treasuryAta), owner, total, token.decimals)]);
+          const d = await settle("sell", sig);
+          push(`${kind} hit · sold ${token.symbol} for ${fmt(d.sol ?? 0, 4)} SOL (${pnl >= 0 ? "+" : ""}${pnl.toFixed(0)}%)`, kind === "Stop-loss" ? "warning" : "success", { timeoutMs: 9000 });
+        }
+        disarmLiveExit(token.mint);
+        await refresh();
+      } catch (e) {
+        push(`Auto-exit failed: ${e instanceof Error ? e.message : "error"}`, "error");
+        disarmLiveExit(token.mint);
+      } finally { sellingRef.current = false; }
+    }, 3000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, wallet, token.mint, canUse]);
 
   const sendSigned = async (ixs: TransactionMessage["instructions"]) => {
     if (!owner || !wallet) throw new Error("Wallet not ready");
@@ -100,6 +159,12 @@ export default function TestTradeDock({ token }: { token: SandboxTok }) {
         const d = await settle("sell", sig);
         push(`Sold ${token.symbol} for ${fmt(d.sol ?? 0, 4)} SOL`, "success", { actionLabel: "VIEW TX", onAction: () => window.open(`https://explorer.solana.com/tx/${sig}?cluster=devnet`, "_blank", "noopener,noreferrer"), timeoutMs: 7000 });
       }
+      if (mode === "buy" && exitOn) {
+        const tp = Math.max(0, Number(exitPrefs.tp) || 0), sl = Math.min(95, Math.max(0, Number(exitPrefs.sl) || 0)), trail = Math.min(95, Math.max(0, Number(exitPrefs.trail) || 0));
+        const px = await sandboxPrice();
+        if (px > 0 && (tp || sl || trail)) { armLiveExit({ mint: token.mint, symbol: token.symbol, entryMcap: px, tpPct: tp, slPct: sl, trailPct: trail, sandbox: true }); push("Auto-exit armed (test mode)", "info", { timeoutMs: 3500 }); }
+      }
+      if (mode === "sell" && pct >= 100) disarmLiveExit(token.mint);
       await refresh();
     } catch (e) {
       push(e instanceof Error ? e.message : "Trade failed.", "warning");
@@ -131,6 +196,7 @@ export default function TestTradeDock({ token }: { token: SandboxTok }) {
               <div className="ttd-chips">
                 {BUY_PRESETS.map((p) => <button key={p} type="button" className={Number(amount) === p ? "on" : ""} onClick={() => setAmount(String(p))}>{p} SOL</button>)}
               </div>
+              <ExitBox mint={token.mint} symbol={token.symbol} on={exitOn} setOn={setExitOn} prefs={exitPrefs} setPrefs={setExitPrefs} allowed={canUse("auto_sell")} armed={armed} />
             </>
           ) : (
             <>

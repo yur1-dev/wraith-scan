@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Connection } from "@solana/web3.js";
 import { fromPumpFunOnChain } from "@/lib/onchain-pumpfun";
 import { SOLANA_MINT_RE } from "@/lib/market";
+import { getDb } from "@/lib/mongoClient";
 import {
   arr,
   GECKO,
@@ -31,6 +32,7 @@ import {
   resolvePool,
 } from "@/lib/marketProviders";
 import { getSandboxToken, sandboxCandles } from "@/lib/devnetTokens";
+import { fetchTokenSwaps, swapsToCandles } from "@/lib/heliusSwaps";
 
 interface Candle {
   t: number; // bucket start, ms
@@ -68,7 +70,7 @@ const lastGood = new Map<string, { candles: Candle[]; source: string; ts: number
 const inflight = new Map<string, Promise<{ candles: Candle[]; source: string } | null>>();
 
 // ── circuit breaker (per provider) ──────────────────────────────────────
-const downUntil: Record<string, number> = { gecko: 0, birdeye: 0 };
+const downUntil: Record<string, number> = { gecko: 0, birdeye: 0, paprika: 0 };
 const isDown = (k: string) => Date.now() < (downUntil[k] ?? 0);
 const markDown = (k: string, ms = 60_000) => {
   downUntil[k] = Date.now() + ms;
@@ -111,6 +113,47 @@ async function fromGecko(mint: string, tf: Tf): Promise<Candle[] | null> {
   }
 }
 
+// DexPaprika: free, no key. Used when GeckoTerminal is rate-limited or has nothing. The response is parsed
+// defensively and anything unexpected simply returns null, so the other sources still apply.
+const PAPRIKA = "https://api.dexpaprika.com";
+const PAP_INT: Record<string, { i: string; mult: number }> = {
+  "1m": { i: "1m", mult: 1 }, "5m": { i: "5m", mult: 1 }, "15m": { i: "15m", mult: 1 },
+  "1h": { i: "1h", mult: 1 }, "4h": { i: "1h", mult: 4 }, "1d": { i: "24h", mult: 1 },
+};
+async function fromPaprika(mint: string, tf: Tf): Promise<Candle[] | null> {
+  if (isDown("paprika")) return null;
+  const key = Object.keys(TF).find((k) => TF[k] === tf) ?? "15m";
+  const m = PAP_INT[key];
+  const pool = await resolvePool(mint);
+  if (!pool) return null;
+  const baseSec = tf.sec / m.mult;
+  const limit = Math.min(360, tf.limit * m.mult);
+  const start = new Date(Date.now() - baseSec * 1000 * limit).toISOString();
+  try {
+    const payload = await getJson(
+      `${PAPRIKA}/networks/solana/pools/${pool}/ohlcv?start=${encodeURIComponent(start)}&limit=${limit}&interval=${m.i}`,
+      undefined,
+      6000,
+    );
+    const list = Array.isArray(payload) ? payload : arr(obj(payload).ohlcv ?? obj(payload).data ?? obj(payload).candles);
+    const rows: Candle[] = [];
+    for (const raw of list) {
+      const r = obj(raw);
+      const tv = r.time_open ?? r.time ?? r.timestamp;
+      const t = typeof tv === "string" ? Date.parse(tv) : num(tv) < 1e12 ? num(tv) * 1000 : num(tv);
+      const c: Candle = { t, o: num(r.open), h: num(r.high), l: num(r.low), c: num(r.close), v: num(r.volume) };
+      if (Number.isFinite(t) && c.o > 0 && c.c > 0) rows.push(c);
+    }
+    if (!rows.length) return null;
+    return m.mult > 1 ? resample(rows, tf.sec) : rows;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[token-chart] dexpaprika failed:", msg);
+    if (msg.startsWith("429")) markDown("paprika", 2 * 60_000);
+    return null;
+  }
+}
+
 async function fromBirdeye(mint: string, tf: Tf): Promise<Candle[] | null> {
   const key = process.env.BIRDEYE_API_KEY;
   if (!key || isDown("birdeye")) return null;
@@ -135,6 +178,14 @@ async function fromBirdeye(mint: string, tf: Tf): Promise<Candle[] | null> {
   }
 }
 
+// Helius parsed swaps -> candles. Independent of every candle indexer, so a rate-limited Gecko/Birdeye never blanks the chart.
+async function fromHelius(mint: string, tf: Tf): Promise<Candle[] | null> {
+  const swaps = await fetchTokenSwaps(mint, 3);
+  if (!swaps || swaps.length < 1) { console.warn("[token-chart] helius: no swaps for", mint.slice(0, 6)); return null; }
+  const rows = await swapsToCandles(swaps, tf.sec);
+  return rows.length ? rows : null;
+}
+
 async function fromOnChain(mint: string, tf: Tf): Promise<Candle[] | null> {
   if (!mint.endsWith("pump")) return null; // on-chain reconstruction only understands pump.fun curves/pools
   const work = fromPumpFunOnChain(mint, { pumpIntervalSec: tf.sec }, connection(), getSolUsd).then((rows) =>
@@ -142,6 +193,38 @@ async function fromOnChain(mint: string, tf: Tf): Promise<Candle[] | null> {
   );
   const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), ONCHAIN_BUDGET_MS));
   return Promise.race([work, timeout]).catch(() => null);
+}
+
+// ── resampling: build a coarser timeframe from finer candles we already hold ──
+function resample(rows: Candle[], sec: number): Candle[] {
+  const step = sec * 1000;
+  const out = new Map<number, Candle>();
+  for (const r of [...rows].sort((a, b) => a.t - b.t)) {
+    const t = Math.floor(r.t / step) * step;
+    const cur = out.get(t);
+    if (!cur) out.set(t, { ...r, t });
+    else {
+      cur.h = Math.max(cur.h, r.h);
+      cur.l = Math.min(cur.l, r.l);
+      cur.c = r.c;
+      cur.v += r.v;
+    }
+  }
+  return [...out.values()];
+}
+const FINER: Record<string, string[]> = {
+  "5m": ["1m"], "15m": ["5m", "1m"], "1h": ["15m", "5m", "1m"], "4h": ["1h", "15m", "5m"], "1d": ["4h", "1h", "15m"],
+};
+async function deriveFromFiner(mint: string, tfKey: string, sec: number): Promise<{ candles: Candle[]; source: string } | null> {
+  for (const fk of FINER[tfKey] ?? []) {
+    const k = `${mint}:${fk}`;
+    const src = cache.get(k) ?? lastGood.get(k) ?? (await readSaved(k));
+    if (src && src.candles.length >= 3) {
+      const candles = clean(resample(src.candles, sec), sec);
+      if (candles.length >= 3) return { candles, source: `derived-${fk}` };
+    }
+  }
+  return null;
 }
 
 // ── cleaning ────────────────────────────────────────────────────────────
@@ -189,6 +272,9 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
   // before we even look at the Birdeye result that was ready 6 s earlier.
   const geckoJob = fromGecko(mint, tf);
   const birdeyeJob = fromBirdeye(mint, tf);
+  // When Gecko is already known to be limited, start the fallback source immediately.
+  const papJob = isDown("gecko") ? fromPaprika(mint, tf) : null;
+  const helJob = fromHelius(mint, tf);
 
   type Tagged = { rows: Candle[]; source: string };
   const toTagged = (rows: Candle[] | null, src: string): Tagged | null =>
@@ -205,6 +291,19 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
       if (!t) throw new Error("birdeye: insufficient");
       return t;
     }),
+    (async () => {
+      // Give the indexers a head start (they carry longer history); Helius answers fast when they do not.
+      await new Promise((r) => setTimeout(r, isDown("gecko") ? 0 : 350));
+      const r = await helJob;
+      if (!r || r.length < 1) throw new Error("helius: insufficient");
+      return { rows: r, source: "helius" } as Tagged;
+    })(),
+    (async () => {
+      if (!papJob) throw new Error("paprika idle");
+      const r = await papJob;
+      if (!r || r.length < MIN_GOOD) throw new Error("paprika: insufficient");
+      return { rows: r, source: "dexpaprika" } as Tagged;
+    })(),
     // pump.fun tokens (esp. bonding curve) often have no indexer candles: start the on-chain rebuild
     // in parallel after a short head start instead of only after both providers finish/time out.
     (async () => {
@@ -220,6 +319,13 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
   if (winner) {
     const candles = clean(winner.rows, tf.sec);
     if (candles.length) return { candles, source: winner.source };
+  }
+
+  // Gecko answered nothing usable: try DexPaprika before the slow on-chain rebuild.
+  const pap = papJob ? await papJob : await fromPaprika(mint, tf);
+  if (pap && pap.length >= MIN_GOOD) {
+    const candles = clean(pap, tf.sec);
+    if (candles.length) return { candles, source: "dexpaprika" };
   }
 
   // On-chain fallback (pump.fun tokens only, capped to ONCHAIN_BUDGET_MS).
@@ -239,6 +345,38 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
   return null;
 }
 
+// ── persistent history (MongoDB) ────────────────────────────────────────
+// Every good provider result is merged into Mongo. After a restart / on a cold instance / when a provider is
+// rate-limited, the chart opens instantly from here and refreshes in the background.
+const SAVED_MAX_AGE_MS = 24 * 3600_000;
+const SAVED_KEEP = 1500;
+async function readSaved(key: string): Promise<{ candles: Candle[]; source: string; ts: number } | null> {
+  try {
+    const db = await Promise.race([getDb(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("db timeout")), 1500))]);
+    const doc = await db.collection("chart_candles").findOne({ _id: key as never });
+    if (!doc || !Array.isArray(doc.candles) || !doc.candles.length) return null;
+    const ts = typeof doc.ts === "number" ? doc.ts : 0;
+    if (Date.now() - ts > SAVED_MAX_AGE_MS) return null;
+    return { candles: doc.candles as Candle[], source: String(doc.source ?? "saved"), ts };
+  } catch {
+    return null;
+  }
+}
+function persist(key: string, fresh: Candle[], source: string) {
+  void (async () => {
+    try {
+      const db = await getDb();
+      const col = db.collection("chart_candles");
+      const prev = await col.findOne({ _id: key as never });
+      const byT = new Map<number, Candle>();
+      if (prev && Array.isArray(prev.candles)) for (const c of prev.candles as Candle[]) byT.set(c.t, c);
+      for (const c of fresh) byT.set(c.t, c);
+      const merged = [...byT.values()].sort((a, b) => a.t - b.t).slice(-SAVED_KEEP);
+      await col.updateOne({ _id: key as never }, { $set: { candles: merged, source, ts: Date.now() } }, { upsert: true });
+    } catch { /* optional */ }
+  })();
+}
+
 export async function GET(req: NextRequest) {
   const mint = req.nextUrl.searchParams.get("address") ?? req.nextUrl.searchParams.get("mint") ?? "";
   const tfKey = req.nextUrl.searchParams.get("tf") ?? "15m";
@@ -253,17 +391,22 @@ export async function GET(req: NextRequest) {
   }
   const key = `${mint}:${tfKey in TF ? tfKey : "15m"}`;
 
-  const hit = cache.get(key);
+  let hit = cache.get(key);
+  let fromSaved = false;
+  if (!hit) {
+    const saved = await readSaved(key);
+    if (saved) { hit = saved; fromSaved = true; }
+  }
   if (hit && Date.now() - hit.ts < CACHE_MS) {
     return NextResponse.json({ candles: hit.candles, source: hit.source, intervalSec: tf.sec, updatedAt: hit.ts });
   }
 
   // Stale-while-revalidate: anything we've seen in the last 30 min is served instantly, refreshed in the background.
-  if (hit && Date.now() - hit.ts < STALE_MS) {
+  if (hit && (fromSaved || Date.now() - hit.ts < STALE_MS)) {
     if (!inflight.has(key)) {
       const bg = load(mint, tf, req.nextUrl.searchParams.get("curve") === "1")
         .then((r) => {
-          if (r) cache.set(key, { ...r, ts: Date.now() });
+          if (r) { cache.set(key, { ...r, ts: Date.now() }); persist(key, r.candles, r.source); }
           return r;
         })
         .catch(() => null)
@@ -290,6 +433,7 @@ export async function GET(req: NextRequest) {
   if (result) {
     const entry = { ...result, ts: Date.now() };
     cache.set(key, entry);
+    if (result.source !== "sparse" || !lastGood.has(key)) persist(key, result.candles, result.source);
     // Never let a thin result overwrite a richer one we already served.
     const prev = lastGood.get(key);
     if (!prev || result.candles.length >= prev.candles.length * 0.5 || result.source !== "sparse") {
@@ -304,6 +448,12 @@ export async function GET(req: NextRequest) {
   const stale = lastGood.get(key);
   if (stale && Date.now() - stale.ts < STALE_MS) {
     return NextResponse.json({ candles: stale.candles, source: stale.source, stale: true, intervalSec: tf.sec, updatedAt: stale.ts });
+  }
+  // Every provider failed: build this timeframe from a finer one we already have, so the chart never opens empty.
+  const derived = await deriveFromFiner(mint, tfKey in TF ? tfKey : "15m", tf.sec);
+  if (derived) {
+    cache.set(key, { ...derived, ts: Date.now() - CACHE_MS + 3000 });
+    return NextResponse.json({ candles: derived.candles, source: derived.source, derived: true, stale: true, intervalSec: tf.sec, updatedAt: Date.now() });
   }
   return NextResponse.json({ candles: [], source: "none", intervalSec: tf.sec });
 }

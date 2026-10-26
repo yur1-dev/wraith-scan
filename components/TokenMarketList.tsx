@@ -12,6 +12,7 @@ import { changeColor, fmtAge, fmtPct, fmtUsd, type MarketCategory } from "@/lib/
 import { toMeme } from "@/lib/tokenMeme";
 import { prefetchChart } from "@/lib/prefetchChart";
 import { TokenIcon } from "@/components/TokenIcon";
+import BookmarkBtn from "@/components/BookmarkBtn";
 
 const TABS: { key: MarketCategory; label: string }[] = [
   { key: "trending", label: "Hot" },
@@ -59,7 +60,7 @@ export default function TokenMarketList({
           tokens.map((t) => {
             const active = selectedMeme?.contractAddress === t.address;
             return (
-              <button key={t.address} type="button" className={`wx-side-row${active ? " active" : ""}`} onClick={() => onSelectMeme(toMeme(t))} onMouseEnter={() => prefetchChart(t.address, t.onCurve)}>
+              <div key={t.address} role="button" tabIndex={0} className={`wx-side-row${active ? " active" : ""}`} onClick={() => onSelectMeme(toMeme(t))} onKeyDown={(e) => { if (e.key === "Enter") onSelectMeme(toMeme(t)); }} onMouseEnter={() => prefetchChart(t.address, t.onCurve)}>
                 <TokenIcon contractAddress={t.address} imageUrl={t.imageUrl} symbol={t.symbol} size={36} />
                 <span className="mid">
                   <strong>{t.symbol}</strong>
@@ -69,7 +70,8 @@ export default function TokenMarketList({
                   <strong>{fmtUsd(t.mcap)}</strong>
                   <small style={{ color: changeColor(t.change.h1) }}>{fmtPct(t.change.h1)}</small>
                 </span>
-              </button>
+                <BookmarkBtn meme={toMeme(t)} />
+              </div>
             );
           })
         )}

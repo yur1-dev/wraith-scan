@@ -4,7 +4,8 @@ import StatusBar from "@/components/StatusBar";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Activity, Bookmark, Flame, Users, Wallet } from "lucide-react";
+import BookmarkBtn from "@/components/BookmarkBtn";
+import { Activity, Bookmark, Flame, Radar, Users, Wallet } from "lucide-react";
 import { ToastProvider } from "@/components/Toast";
 import type { MemeTrend } from "@/app/app/page";
 import { readTokenNav, cacheTokenNav } from "@/lib/tokenNav";
@@ -18,13 +19,15 @@ const Header = dynamic(() => import("@/components/Header"), { ssr: false });
 const TokenPanel = dynamic(() => import("@/components/TokenPanel"), { ssr: false });
 const TokenMarketList = dynamic(() => import("@/components/TokenMarketList"), { ssr: false });
 const EvmTokenView = dynamic(() => import("@/components/EvmTokenView"), { ssr: false });
+const SignalsSidebar = dynamic(() => import("@/components/SignalsSidebar"), { ssr: false });
 const TokenTradeDock = dynamic(() => import("@/components/TokenTradeDock"), { ssr: false });
 
-type SideTab = "tokens" | "saved" | "following";
+type SideTab = "tokens" | "signals" | "saved" | "following";
 type MobileTab = "chart" | "trade" | "market";
 
 const SIDE_TABS: { key: SideTab; label: string; icon: React.ReactNode }[] = [
   { key: "tokens", label: "Market", icon: <Flame size={13} /> },
+  { key: "signals", label: "Signals", icon: <Radar size={13} /> },
   { key: "saved", label: "Saved", icon: <Bookmark size={13} /> },
   { key: "following", label: "Following", icon: <Users size={13} /> },
 ];
@@ -32,7 +35,10 @@ const SIDE_TABS: { key: SideTab; label: string; icon: React.ReactNode }[] = [
 export default function TokenPage() {
   const params = useParams();
   const router = useRouter();
-  const address = decodeURIComponent((params?.address as string) ?? "");
+  const routeAddress = decodeURIComponent((params?.address as string) ?? "");
+  // Local copy of the address: switching tokens updates this + the URL (history.pushState) instead of a router navigation.
+  // A router.push to /token/<other> remounts the entire page (header, sidebar, chart, dock): that was the "hard reload" feel.
+  const [address, setAddress] = useState(routeAddress);
   const [meme, setMeme] = useState<MemeTrend | null>(null);
   const [isMobile, setIsMobile] = useState<boolean | null>(null);
   const [sideTab, setSideTab] = useState<SideTab>("tokens");
@@ -59,15 +65,29 @@ export default function TokenPage() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
+  useEffect(() => { setAddress((cur) => (cur === routeAddress ? cur : routeAddress)); }, [routeAddress]);
+  useEffect(() => {
+    const onPop = () => {
+      const m = window.location.pathname.match(/\/app\/token\/([^/?#]+)/);
+      if (m) setAddress(decodeURIComponent(m[1]));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const go = useCallback(
     (next: MemeTrend) => {
-      if (!next.contractAddress) return;
+      if (!next.contractAddress || next.contractAddress === address) return;
       cacheTokenNav(next);
       setMobileTab("chart");
       const evm = EVM_ADDR_RE.test(next.contractAddress) ? chainOf(next.source) : null;
-      router.push(`/app/token/${encodeURIComponent(next.contractAddress)}${evm ? `?chain=${evm.key}` : ""}`);
+      const url = `/app/token/${encodeURIComponent(next.contractAddress)}${evm ? `?chain=${evm.key}` : ""}`;
+      if (evm) { router.push(url); return; } // EVM view lives in a different branch: a real navigation is fine there
+      window.history.pushState(null, "", url);
+      setMeme(next);
+      setAddress(next.contractAddress);
     },
-    [router],
+    [router, address],
   );
 
   // Resolve the token identity: sessionStorage handoff first, API for direct links.
@@ -115,18 +135,19 @@ export default function TokenPage() {
       </nav>
       <div className="wx-side-body">
         {sideTab === "tokens" && <TokenMarketList onSelectMeme={go} selectedMeme={meme} />}
+        {sideTab === "signals" && <SignalsSidebar onSelectMeme={go} selectedMeme={meme} />}
         {sideTab === "following" && <FollowingSidebar />}
         {sideTab === "saved" &&
           (favorites.length ? (
             <div className="wx-side-scroll">
               {favorites.map((f) => (
-                <button key={f.contractAddress} type="button" className="wx-side-row" onClick={() => go(f)}>
+                <div key={f.contractAddress} role="button" tabIndex={0} className="wx-side-row" onClick={() => go(f)} onKeyDown={(e) => { if (e.key === "Enter") go(f); }}>
                   <TokenIcon contractAddress={f.contractAddress} imageUrl={f.tokenImageUrl} symbol={f.keyword} size={36} />
                   <span className="mid">
                     <strong>{f.keyword}</strong>
                   </span>
-                  <Bookmark size={14} fill="currentColor" color="var(--accent)" />
-                </button>
+                  <BookmarkBtn meme={f} />
+                </div>
               ))}
             </div>
           ) : (

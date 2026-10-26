@@ -1,65 +1,17 @@
 "use client";
 
+import "../site.css";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { TIERS, TIER_ORDER, type TierKey } from "@/lib/tiers";
-import { useWraithTier } from "@/hooks/useWraithTier";
+import ChainLogo from "@/components/ChainLogo";
+import { CallsTable, ChartReal, Coin, LiveBoard, fmtUsd, useLandingData, xf } from "@/components/landing/Mocks";
+import "@/components/landing/landing.css";
 import { useWraithSession } from "@/components/SessionProvider";
 
-const MONO = {
-  fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" as const,
-};
-
-const TIER_ACCENT: Record<TierKey, string> = {
-  GHOST: "#8888aa",
-  SHADE: "#00b4d8",
-  SPECTER: "#a855f7",
-  WRAITH: "#e8490f",
-};
-
-const TIER_IMAGE: Record<TierKey, string> = {
-  GHOST: "/ghost.png",
-  SHADE: "/shade.png",
-  SPECTER: "/specter.png",
-  WRAITH: "/tier-wraith.png",
-};
-
-const TIER_SUBTITLE: Record<TierKey, string> = {
-  GHOST: "No tokens required",
-  SHADE: "Hold 10,000 OMEN",
-  SPECTER: "Hold 100,000 OMEN",
-  WRAITH: "Hold 1,000,000 OMEN",
-};
-
-const TIER_PITCH: Record<TierKey, string> = {
-  GHOST: "Get a feel for the scanner before you commit.",
-  SHADE: "Core trading tools unlocked for OMEN holders.",
-  SPECTER: "Full suite — AI scoring, sniper, no limits.",
-  WRAITH: "Maximum power. Zero fees. Live signals.",
-};
-
-const ALL_FEATURES: { id: string; label: string }[] = [
-  { id: "scanner_view", label: "View Scanner" },
-  { id: "sniper", label: "Sniper / Auto-buy" },
-  { id: "auto_sell", label: "Auto TP / SL / Trail" },
-  { id: "telegram_alerts", label: "Telegram Alerts" },
-  { id: "ai_score", label: "AI Score" },
-  { id: "live_signals_view", label: "Live Signals" },
-];
-
-function patchTier(key: TierKey) {
-  if (key === "WRAITH") return TIERS[key];
-  return {
-    ...TIERS[key],
-    features: TIERS[key].features.map((f) =>
-      f.id === "live_signals_view" ? { ...f, unlocked: false } : f,
-    ),
-  };
-}
-
-const DISPLAY_TIERS = Object.fromEntries(
-  TIER_ORDER.map((k) => [k, patchTier(k)]),
-) as typeof TIERS;
+const CHAINS = [
+  ["solana", "Solana"], ["base", "Base"], ["ethereum", "Ethereum"], ["bsc", "BNB"], ["monad", "Monad"], ["arc", "Arc"], ["robinhood", "Robinhood"],
+] as const;
 
 function safeCallback(raw: string | null): string {
   if (!raw) return "/app";
@@ -76,23 +28,6 @@ function safeCallback(raw: string | null): string {
   if (!raw.startsWith("/") || raw.startsWith("//")) return "/app";
   if (raw === "/") return "/app";
   return raw;
-}
-
-function GhostIcon({ tier, lit }: { tier: TierKey; lit: boolean }) {
-  return (
-    <img
-      src={TIER_IMAGE[tier]}
-      alt={tier}
-      width={32}
-      height={32}
-      style={{
-        objectFit: "contain",
-        flexShrink: 0,
-        opacity: lit ? 1 : 0.45,
-        transition: "opacity .2s",
-      }}
-    />
-  );
 }
 
 function GoogleIcon() {
@@ -126,24 +61,15 @@ function GoogleIcon() {
 
 function LoginInner() {
   const { status, login, syncAppSession } = useWraithSession();
-  const { tier: currentTier, loading: tierLoading } = useWraithTier();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [hovered, setHovered] = useState<TierKey | null>(null);
-  const [mounted, setMounted] = useState(false);
-  const [buyHovered, setBuyHovered] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const redirected = useRef(false);
-
   const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const data = useLandingData();
 
   // Once Privy says authenticated, create the app session cookie, then go.
-  // Re-runs when syncAppSession changes (identity token arriving late).
   useEffect(() => {
     if (status !== "authenticated" || redirected.current) return;
     let cancelled = false;
@@ -157,9 +83,7 @@ function LoginInner() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setSyncError(
-          err instanceof Error ? err.message : "Could not start your session.",
-        );
+        setSyncError(err instanceof Error ? err.message : "Could not start your session.");
         setSyncing(false);
       });
     return () => {
@@ -169,664 +93,64 @@ function LoginInner() {
 
   if (status === "loading") return null;
 
-  const activeTier = mounted && !tierLoading ? currentTier.key : null;
-  const busy = syncing;
-
   return (
-    <div
-      style={{
-        height: "100vh",
-        overflow: "hidden",
-        background: "#080808",
-        ...MONO,
-      }}
-    >
-      <style>{`
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        @keyframes dotpulse { 0%,100%{box-shadow:0 0 4px #00c47a55} 50%{box-shadow:0 0 12px #00c47a} }
-        @keyframes scan { 0%{top:-1px;opacity:0} 5%{opacity:1} 95%{opacity:1} 100%{top:100%;opacity:0} }
-        @keyframes flicker { 0%,89%,91%,93%,100%{opacity:1} 90%,92%{opacity:.65} }
-        @keyframes fadein { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-
-        .brand { animation: flicker 9s ease-in-out infinite; }
-        .scan-line {
-          position:absolute;left:0;right:0;height:1px;
-          background:linear-gradient(to right,transparent,#e8490f18,transparent);
-          animation:scan 6s ease-in-out infinite;pointer-events:none;
-        }
-
-        .pc {
-          background:#0d0d0d;
-          border:1px solid #1e1e1e;
-          border-radius:6px;
-          position:relative;
-          overflow:hidden;
-          transition:border-color .2s, box-shadow .2s;
-          cursor:default;
-          display:flex;
-          flex-direction:column;
-          flex:1;
-          min-height:0;
-        }
-        .pc:hover { border-color:#333; }
-        .pc.pc-lit {
-          border-color:var(--tc) !important;
-          box-shadow:0 0 20px var(--tc-glow);
-        }
-        .pc.pc-recommended { border-color:#a855f740; }
-        .pc-bar { height:2px;background:var(--tc);opacity:.3;transition:opacity .2s;flex-shrink:0; }
-        .pc:hover .pc-bar, .pc.pc-lit .pc-bar { opacity:1; }
-        .pc-ambient {
-          position:absolute;inset:0;pointer-events:none;
-          background:radial-gradient(ellipse at 50% -10%, var(--tc-soft) 0%, transparent 60%);
-          opacity:0;transition:opacity .25s;
-        }
-        .pc:hover .pc-ambient, .pc.pc-lit .pc-ambient { opacity:1; }
-
-        .sign-btn {
-          width:100%;background:#e8490f;border:none;
-          color:#fff;font-size:11px;font-weight:800;
-          letter-spacing:.12em;padding:13px 20px;border-radius:4px;
-          cursor:pointer;display:flex;align-items:center;
-          justify-content:center;gap:9px;
-          transition:background .15s, box-shadow .15s, transform .1s;
-          font-family:var(--font-mono),'IBM Plex Mono',monospace;
-          box-shadow:0 0 24px #e8490f44, 0 2px 6px #0008;
-          flex-shrink:0;
-        }
-        .sign-btn:hover:not(:disabled) {
-          background:#ff5c22;
-          box-shadow:0 0 36px #e8490f66, 0 4px 12px #0008;
-          transform:translateY(-1px);
-        }
-        .sign-btn:disabled { background:#181818;color:#444;cursor:not-allowed;box-shadow:none; }
-
-        .step-row {
-          display:flex;align-items:flex-start;gap:12px;
-          padding:8px 0;border-bottom:1px solid #0f0f0f;flex-shrink:0;
-        }
-        .step-row:last-child { border-bottom:none; }
-
-        .login-layout { display:flex; flex-direction:row; height:100vh; overflow:hidden; }
-        .login-left {
-          width:52%; border-right:1px solid #111; display:flex; flex-direction:column;
-          padding:24px 28px 20px; position:relative; height:100vh; overflow:hidden;
-        }
-        .login-right {
-          width:48%; display:flex; flex-direction:column; align-items:center;
-          justify-content:center; position:relative; padding:48px 48px;
-          height:100vh; overflow:hidden;
-        }
-
-        @media (max-width: 768px) {
-          .login-layout { height:100vh; overflow:hidden; }
-          .login-left { display:none; }
-          .login-right { width:100%; padding:0 24px; justify-content:center; height:100vh; overflow:hidden; }
-          .login-right-inner { width:100% !important; max-width:400px !important; }
-        }
-        @media (max-width: 480px) {
-          .login-right { padding:0 20px; }
-        }
-      `}</style>
-
-      <div className="login-layout">
-        {/* LEFT — Tier cards */}
-        <div className="login-left">
-          <div className="scan-line" />
-          <div
-            style={{
-              position: "absolute",
-              bottom: -100,
-              left: -80,
-              width: 400,
-              height: 400,
-              borderRadius: "50%",
-              background:
-                "radial-gradient(circle,#e8490f07 0%,transparent 65%)",
-              pointerEvents: "none",
-            }}
-          />
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 14,
-              flexShrink: 0,
-            }}
-          >
-            <img
-              src="/wraith.png"
-              alt="WRAITH"
-              style={{ width: 26, height: 26, objectFit: "contain" }}
-            />
-            <span
-              className="brand"
-              style={{
-                color: "#e8490f",
-                fontSize: 11,
-                fontWeight: 900,
-                letterSpacing: ".34em",
-              }}
-            >
-              WRAITH
-            </span>
-          </div>
-
-          <div style={{ marginBottom: 14, flexShrink: 0 }}>
-            <h2
-              style={{
-                color: "#eaeaea",
-                fontSize: 17,
-                fontWeight: 900,
-                letterSpacing: ".02em",
-                lineHeight: 1.25,
-                marginBottom: 4,
-              }}
-            >
-              HOLD OMEN. <span style={{ color: "#e8490f" }}>UNLOCK</span> THE
-              MACHINE.
-            </h2>
-            <p style={{ color: "#444", fontSize: 10, lineHeight: 1.6 }}>
-              Four token-gated tiers. Balance auto-detected on your Solana
-              address.
-            </p>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              flex: 1,
-              minHeight: 0,
-            }}
-          >
-            {TIER_ORDER.map((key) => {
-              const t = DISPLAY_TIERS[key];
-              const tc = TIER_ACCENT[key];
-              const isActive = activeTier === key;
-              const lit = isActive || hovered === key;
-              const isRecommended = key === "SPECTER";
-
-              return (
-                <div
-                  key={key}
-                  className={`pc${lit ? " pc-lit" : ""}${isRecommended && !lit ? " pc-recommended" : ""}`}
-                  style={
-                    {
-                      "--tc": tc,
-                      "--tc-glow": `${tc}44`,
-                      "--tc-soft": `${tc}0e`,
-                    } as React.CSSProperties
-                  }
-                  onMouseEnter={() => setHovered(key)}
-                  onMouseLeave={() => setHovered(null)}
-                >
-                  <div className="pc-bar" />
-                  <div className="pc-ambient" />
-
-                  <div
-                    style={{
-                      padding: "10px 14px",
-                      display: "flex",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 12,
-                      position: "relative",
-                      flex: 1,
-                      minHeight: 0,
-                    }}
-                  >
-                    {(isRecommended || isActive) && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          right: 8,
-                          fontSize: 7,
-                          fontWeight: 900,
-                          letterSpacing: ".1em",
-                          color: isActive ? tc : "#a855f7",
-                          background: isActive ? `${tc}18` : "#a855f714",
-                          border: `1px solid ${isActive ? tc + "44" : "#a855f740"}`,
-                          padding: "2px 6px",
-                          borderRadius: 2,
-                        }}
-                      >
-                        {isActive ? "YOUR TIER" : "POPULAR"}
-                      </div>
-                    )}
-
-                    <GhostIcon tier={key} lit={lit} />
-
-                    <div style={{ flexShrink: 0, minWidth: 90 }}>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 900,
-                          letterSpacing: ".14em",
-                          color: lit ? tc : "#c0c0c0",
-                          transition: "color .2s",
-                        }}
-                      >
-                        {key}
-                      </div>
-                      <div style={{ fontSize: 8, color: "#444", marginTop: 1 }}>
-                        {TIER_SUBTITLE[key]}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        width: 1,
-                        height: 24,
-                        background: "#1e1e1e",
-                        flexShrink: 0,
-                      }}
-                    />
-
-                    <div style={{ flexShrink: 0, minWidth: 70 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "baseline",
-                          gap: 3,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 20,
-                            fontWeight: 900,
-                            letterSpacing: "-.02em",
-                            lineHeight: 1,
-                            color:
-                              t.feeBps === 0 ? "#00c47a" : lit ? tc : "#e0e0e0",
-                            transition: "color .2s",
-                          }}
-                        >
-                          {t.feeBps === 0
-                            ? "0%"
-                            : `${(t.feeBps / 100).toFixed(1)}%`}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 8,
-                            color: "#444",
-                            letterSpacing: ".06em",
-                          }}
-                        >
-                          /trade
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 8, color: "#555", marginTop: 1 }}>
-                        {TIER_PITCH[key]}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        width: 1,
-                        height: 24,
-                        background: "#1e1e1e",
-                        flexShrink: 0,
-                      }}
-                    />
-
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap" as const,
-                        gap: "2px 8px",
-                        flex: 1,
-                        minWidth: 0,
-                        alignContent: "center",
-                      }}
-                    >
-                      {ALL_FEATURES.map((f) => {
-                        const has =
-                          t.features.find((x) => x.id === f.id)?.unlocked ??
-                          false;
-                        return (
-                          <div
-                            key={f.id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 3,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 9,
-                                color: has ? (lit ? tc : "#00c47a") : "#252525",
-                                fontWeight: 900,
-                              }}
-                            >
-                              {has ? "✓" : "—"}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: 8,
-                                color: has ? "#888" : "#2a2a2a",
-                                textDecoration: has ? "none" : "line-through",
-                                whiteSpace: "nowrap" as const,
-                              }}
-                            >
-                              {f.label}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div
-            style={{
-              marginTop: 12,
-              paddingTop: 12,
-              borderTop: "1px solid #111",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexShrink: 0,
-            }}
-          >
-            <span
-              style={{ color: "#2a2a2a", fontSize: 9, letterSpacing: ".1em" }}
-            >
-              UPGRADE ON PUMP.FUN
-            </span>
-            <a
-              href="https://pump.fun"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                color: "#e8490f",
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: ".12em",
-                textDecoration: "none",
-                border: `1px solid ${buyHovered ? "#e8490f55" : "#e8490f28"}`,
-                background: buyHovered ? "#e8490f12" : "transparent",
-                padding: "5px 10px",
-                borderRadius: 3,
-                transition: "all .15s",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                ...MONO,
-              }}
-              onMouseEnter={() => setBuyHovered(true)}
-              onMouseLeave={() => setBuyHovered(false)}
-            >
-              BUY OMEN <span style={{ opacity: 0.5 }}>↗</span>
-            </a>
-          </div>
+    <div className="wl2">
+      {/* The app, blurred behind the card. Real, public call data only. */}
+      <div className="wl2-bg" aria-hidden="true">
+        <div className="wl2-top">
+          <span className="ws-brand"><img src="/logo.svg" alt="" />WRAITH</span>
+          <span className="wl2-search">Search tokens &amp; traders…</span>
+          <span className="wl2-cash"><small>CASH BALANCE</small><b>$0.00</b></span>
         </div>
-
-        {/* RIGHT — Sign in panel */}
-        <div className="login-right">
-          <div
-            style={{
-              position: "absolute",
-              top: -80,
-              right: -80,
-              width: 320,
-              height: 320,
-              borderRadius: "50%",
-              background:
-                "radial-gradient(circle,#e8490f0a 0%,transparent 70%)",
-              pointerEvents: "none",
-            }}
-          />
-
-          <div
-            className="login-right-inner"
-            style={{ width: "100%", maxWidth: 360 }}
-          >
-            <div style={{ textAlign: "center" as const, marginBottom: 28 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  marginBottom: 6,
-                }}
-              >
-                <img
-                  src="/wraith.png"
-                  alt="WRAITH"
-                  style={{ width: 22, height: 22, objectFit: "contain" }}
-                />
-                <div
-                  style={{
-                    color: "#e8490f",
-                    fontSize: 10,
-                    fontWeight: 900,
-                    letterSpacing: ".36em",
-                  }}
-                >
-                  WRAITH
-                </div>
-              </div>
-              <div
-                style={{ color: "#222", fontSize: 8, letterSpacing: ".22em" }}
-              >
-                MEME TOKEN SNIPER · SOLANA
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <h1
-                style={{
-                  color: "#e8e8e8",
-                  fontSize: 20,
-                  fontWeight: 900,
-                  letterSpacing: ".04em",
-                  lineHeight: 1.2,
-                  marginBottom: 8,
-                }}
-              >
-                SIGN IN TO ACCESS
-              </h1>
-              <p style={{ color: "#525252", fontSize: 11, lineHeight: 1.8 }}>
-                Sign in once. Your wallets are created automatically, and your
-                OMEN balance on your Solana address sets your tier.
-              </p>
-            </div>
-
-            {syncError && (
-              <div
-                style={{
-                  background: "#120500",
-                  border: "1px solid #e8490f30",
-                  borderRadius: 4,
-                  padding: "10px 14px",
-                  color: "#ff7b3d",
-                  fontSize: 10,
-                  lineHeight: 1.7,
-                  marginBottom: 16,
-                }}
-              >
-                {syncError}
-              </div>
-            )}
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                marginBottom: 10,
-              }}
-            >
-              <div
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: 3,
-                  border: "1px solid #e8490f33",
-                  background: "#e8490f10",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                  color: "#e8490f",
-                  fontSize: 8,
-                  fontWeight: 900,
-                  letterSpacing: ".06em",
-                }}
-              >
-                01
-              </div>
-              <span
-                style={{
-                  color: "#c0c0c0",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: ".1em",
-                }}
-              >
-                SIGN IN WITH GOOGLE
-              </span>
-            </div>
-
-            <button
-              className="sign-btn"
-              onClick={() => {
-                setSyncError(null);
-                if (status === "authenticated") {
-                  window.location.reload();
-                  return;
-                }
-                login();
-              }}
-              disabled={busy}
-            >
-              {busy ? (
-                "SIGNING IN..."
-              ) : (
-                <>
-                  <GoogleIcon />
-                  CONTINUE WITH GOOGLE
-                </>
-              )}
-            </button>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                margin: "18px 0",
-              }}
-            >
-              <div style={{ flex: 1, height: 1, background: "#111" }} />
-              <span
-                style={{
-                  color: "#242424",
-                  fontSize: 8,
-                  letterSpacing: ".24em",
-                }}
-              >
-                THEN
-              </span>
-              <div style={{ flex: 1, height: 1, background: "#111" }} />
-            </div>
-
-            <div style={{ marginBottom: 20 }}>
-              {[
-                {
-                  n: "02",
-                  title: "WALLETS CREATED AUTOMATICALLY",
-                  desc: "Solana, Base, Ethereum, BNB Chain and Monad addresses, tied to your Google account.",
-                  color: "#a855f7",
-                },
-                {
-                  n: "03",
-                  title: "HOLD OMEN ON YOUR SOLANA ADDRESS",
-                  desc: "Your tier is auto-detected. Features and fee discounts activate in real time.",
-                  color: "#00b4d8",
-                },
-                {
-                  n: "04",
-                  title: "START SNIPING",
-                  desc: "Scanner, AI signals, sniper — all tier-gated.",
-                  color: "#00c47a",
-                },
-              ].map((s) => (
-                <div key={s.n} className="step-row">
-                  <div
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 3,
-                      border: `1px solid ${s.color}33`,
-                      background: `${s.color}10`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      color: s.color,
-                      fontSize: 8,
-                      fontWeight: 900,
-                      letterSpacing: ".06em",
-                    }}
-                  >
-                    {s.n}
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        color: "#c0c0c0",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: ".1em",
-                        marginBottom: 3,
-                      }}
-                    >
-                      {s.title}
-                    </div>
-                    <div
-                      style={{
-                        color: "#4a4a4a",
-                        fontSize: 10,
-                        lineHeight: 1.7,
-                      }}
-                    >
-                      {s.desc}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div
-              style={{
-                paddingTop: 14,
-                borderTop: "1px solid #0e0e0e",
-                color: "#1e1e1e",
-                fontSize: 8,
-                letterSpacing: ".16em",
-                lineHeight: 2.2,
-                textAlign: "center" as const,
-              }}
-            >
-              DATA SYNCS ACROSS DEVICES · NOTHING STORED IN BROWSER
-              <br />
-              WRAITH © {new Date().getFullYear()} · NOT FINANCIAL ADVICE
-            </div>
+        <div className="wl2-shell">
+          <div className="wl2-col"><CallsTable data={data} /></div>
+          <div className="wl2-mid">
+            <div className="wl2-mcap"><small>MARKET CAP</small><b>$—</b></div>
+            <ChartReal data={data} />
           </div>
+          <div className="wl2-col"><LiveBoard data={data} loading={!data} /></div>
         </div>
       </div>
+      <div className="wl2-veil" />
+
+      <main className="wl2-main">
+        {data?.wins[0] && (<div className="wl2-float l"><Coin c={data.wins[0]} /><div><b>${data.wins[0].symbol.toUpperCase()} reached {xf(data.wins[0].x)}</b><span>called at {fmtUsd(data.wins[0].spottedMcap)} · peak {fmtUsd(data.wins[0].peakMcap)}</span></div></div>)}
+        {data?.wins[1] && (<div className="wl2-float r"><Coin c={data.wins[1]} /><div><b>${data.wins[1].symbol.toUpperCase()} reached {xf(data.wins[1].x)}</b><span>called at {fmtUsd(data.wins[1].spottedMcap)} · peak {fmtUsd(data.wins[1].peakMcap)}</span></div></div>)}
+        <div className="wl2-card">
+          <div className="logo"><i className="ring" /><i className="ring r2" /><img src="/logo.svg" alt="Wraith" /></div>
+          <h1>Sign in to Wraith</h1>
+          <p className="lead">One tap with Google. Wallets are created for you on every chain, and your OMEN balance sets your tier.</p>
+
+          {syncError && <div className="wl-err">{syncError}</div>}
+
+          <button
+            className="ws-btn primary wl-g"
+            disabled={syncing}
+            onClick={() => {
+              setSyncError(null);
+              if (status === "authenticated") {
+                window.location.reload();
+                return;
+              }
+              login();
+            }}
+          >
+            {syncing ? "Signing you in…" : (<><GoogleIcon />Continue with Google</>)}
+          </button>
+
+          {data && data.stats.calls > 0 && (
+            <div className="wl2-stats">
+              <div><b>{data.stats.calls.toLocaleString()}</b><small>calls tracked</small></div>
+              <div><b>{data.stats.hit2.toLocaleString()}</b><small>reached 2x</small></div>
+              <div><b>7</b><small>networks</small></div>
+            </div>
+          )}
+          <div className="wl2-chains">
+            {CHAINS.map(([k, n]) => (<span key={k} title={n}><ChainLogo chain={k} size={20} /></span>))}
+          </div>
+          <p className="wl-legal">Wallets are secured by Privy and locked behind your PIN. Not financial advice, meme tokens are high risk.</p>
+        </div>
+      </main>
     </div>
   );
 }

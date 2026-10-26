@@ -7,6 +7,7 @@ import { SOLANA_MINT_RE } from "@/lib/market";
 import { arr, GECKO, GECKO_HEADERS, getJson, getSolUsd, num, obj, resolvePool } from "@/lib/marketProviders";
 import { getSandboxToken } from "@/lib/devnetTokens";
 import { getDb } from "@/lib/mongoClient";
+import { fetchTokenSwaps } from "@/lib/heliusSwaps";
 
 export interface ApiTrade {
   id: string;
@@ -23,7 +24,41 @@ const CACHE_MS = 25_000;
 const cache = new Map<string, { trades: ApiTrade[]; ts: number }>();
 const inflight = new Map<string, Promise<ApiTrade[] | null>>();
 
+// Fallback when GeckoTerminal is rate-limiting: DexPaprika pool transactions (parsed defensively; response shape unverified).
+async function fromPaprika(mint: string, pool: string): Promise<ApiTrade[] | null> {
+  try {
+    const payload = obj(await getJson(`https://api.dexpaprika.com/networks/solana/pools/${pool}/transactions?limit=50`, undefined, 6000));
+    const rows = arr(payload.transactions ?? payload.data ?? payload).map(obj);
+    const idOf = (v: unknown) => (typeof v === "string" ? v : String(obj(v).id ?? obj(v).address ?? ""));
+    const out: ApiTrade[] = [];
+    for (const r of rows) {
+      const t0 = idOf(r.token_0), t1 = idOf(r.token_1);
+      const idx = t0 === mint ? 0 : t1 === mint ? 1 : -1;
+      if (idx < 0) continue;
+      const amt = num(r[idx === 0 ? "amount_0" : "amount_1"]);
+      if (!amt) continue;
+      const side: "buy" | "sell" = amt > 0 ? "sell" : "buy"; // pool received the token = user sold it
+      const px = num(r[idx === 0 ? "price_0_usd" : "price_1_usd"]);
+      const ts = Date.parse(String(r.created_at ?? r.block_timestamp ?? ""));
+      if (!Number.isFinite(ts)) continue;
+      out.push({ id: String(r.id ?? `${r.transaction_id}-${ts}`), ts, side, usd: Math.abs(amt) * px, tokens: Math.abs(amt), priceUsd: px, wallet: String(r.sender ?? r.recipient ?? ""), tx: String(r.transaction_id ?? r.id ?? "") });
+    }
+    return out.length ? out.sort((a, b) => b.ts - a.ts).slice(0, 60) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadHelius(mint: string): Promise<ApiTrade[] | null> {
+  const swaps = await fetchTokenSwaps(mint, 1);
+  if (!swaps || !swaps.length) return null;
+  const solUsd = await getSolUsd();
+  return swaps.slice(0, 60).map((s) => ({ id: s.sig, ts: s.ts, side: s.side, usd: s.sol * solUsd, tokens: s.tokens, priceUsd: s.priceSol * solUsd, wallet: s.wallet, tx: s.sig }));
+}
+
 async function load(mint: string): Promise<ApiTrade[] | null> {
+  const fast = await loadHelius(mint);
+  if (fast) return fast;
   const pool = await resolvePool(mint);
   if (!pool) return null;
   try {
@@ -51,7 +86,7 @@ async function load(mint: string): Promise<ApiTrade[] | null> {
     return out.sort((a, b) => b.ts - a.ts).slice(0, 60);
   } catch (e) {
     console.warn("[token-trades]", e instanceof Error ? e.message : e);
-    return null;
+    return fromPaprika(mint, pool);
   }
 }
 

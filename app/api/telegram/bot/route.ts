@@ -4,6 +4,7 @@ import clientPromise from "@/lib/mongoClient";
 import { APP_URL, chainName, esc, fmtUsd, footer, rule, scoreBar, tokenKeyboard } from "@/lib/telegramUi";
 import { DEFAULT_PREFS, prefsOf, tg, type TgPrefs } from "@/lib/telegramBot";
 import { fmtAge, fmtPct } from "@/lib/market";
+import { effectiveTier } from "@/lib/effectiveTier";
 import { CHAINS } from "@/lib/chains";
 import type { Signal } from "@/app/api/signals/route";
 import type { SignalCall } from "@/lib/signalCalls";
@@ -108,14 +109,14 @@ ${footer}`;
 async function msgStatus(chatId: number) {
   try {
     const db = (await clientPromise).db();
-    const u = await db.collection("users").findOne({ telegramChatId: String(chatId) }, { projection: { email: 1, name: 1, tier: 1 } });
+    const u = await db.collection("users").findOne({ telegramChatId: String(chatId) }, { projection: { email: 1, name: 1, tier: 1, tierSource: 1 } });
     if (!u) {
       return {
         text: `👻 <b>STATUS</b>\n${rule}\n🔴 <b>Not linked</b>\n\nThis chat isn't connected to a Wraith account yet. In Wraith open the profile menu and choose <b>Connect Telegram</b>.\n\n${footer}`,
         markup: openApp,
       };
     }
-    const tier = String(u.tier ?? "GHOST");
+    const tier = effectiveTier(u);
     const eligible = tier === "SPECTER" || tier === "WRAITH";
     return {
       text: `👻 <b>STATUS</b>\n${rule}\n🟢 <b>Linked</b>  ${esc(String(u.email ?? u.name ?? "your account"))}\n🎚 <b>Tier</b>  ${esc(tier)}\n${eligible ? "📡 <b>Alerts are ON</b>" : "⚠️ <b>Alerts are OFF</b>  needs SPECTER (100,000 OMEN)"}\n\n${footer}`,
@@ -306,8 +307,8 @@ export async function POST(req: NextRequest) {
       }
       await db.collection("users").updateOne({ _id: link.userId }, { $set: { telegramChatId: String(chatId), telegramLinkedAt: new Date() } });
       await db.collection("telegram_links").deleteOne({ token: param });
-      const u = await db.collection("users").findOne({ _id: link.userId }, { projection: { tier: 1 } });
-      const tier = String(u?.tier ?? "GHOST");
+      const u = await db.collection("users").findOne({ _id: link.userId }, { projection: { tier: 1, tierSource: 1 } });
+      const tier = effectiveTier(u);
       const eligible = tier === "SPECTER" || tier === "WRAITH";
       await send(
         chatId,

@@ -15,6 +15,7 @@ import { useWraithSession } from "@/components/SessionProvider";
 import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
 import {
   WRAITH_MINT,
+  EARLY_ACCESS,
   getTierFromBalance,
   canUse,
   TIERS,
@@ -153,7 +154,7 @@ function EmbeddedWalletTierProvider({
   const walletStr = publicKey?.toString() ?? null;
   const tierOverride = getTierOverride(walletStr);
   const isWhitelistMember =
-    isWalletWhitelistMember || isEmailWhitelisted(session?.user?.email);
+    EARLY_ACCESS || isWalletWhitelistMember || isEmailWhitelisted(session?.user?.email);
 
   const tier = isWhitelistMember
     ? TIERS.WRAITH

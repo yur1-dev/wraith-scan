@@ -20,6 +20,7 @@ import { scanLimiter, checkLimit } from "@/lib/ratelimit";
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { env } from "@/lib/env";
+import { aiText, aiAvailable } from "@/lib/ai";
 import { getSmartMoneyIntel, type SmartWallet } from "@/lib/getWalletStats";
 import {
   recordWalletObservations,
@@ -48,9 +49,7 @@ const PUMP_HEADERS = {
 };
 
 // ─── ENV VARS (sourced from validated lib/env.ts) ─────────────────────────
-const GEMINI_API_KEY = env.GEMINI_API_KEY;
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
 
 // FIX 5.5: safe decode — never throws URIError on bad encoding
 function safeDecodeBearer(raw: string): string {
@@ -2057,37 +2056,10 @@ interface GeminiStory {
 async function geminiRequest(
   prompt: string,
   maxTokens: number,
-  retries = 3,
+  _retries = 3,
 ): Promise<string | null> {
-  if (!GEMINI_API_KEY) return null;
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.05, maxOutputTokens: maxTokens },
-        }),
-        signal: AbortSignal.timeout(40000),
-      });
-      if (!res.ok) {
-        if (res.status === 429) {
-          const waitMs = Math.pow(2, attempt + 1) * 2000;
-          await new Promise((r) => setTimeout(r, waitMs));
-          continue;
-        }
-        return null;
-      }
-      const data = await res.json();
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
-    } catch {
-      if (attempt < retries - 1) {
-        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-      }
-    }
-  }
-  return null;
+  void _retries;
+  return aiText(prompt, { maxTokens, temperature: 0.05, timeoutMs: 40000 });
 }
 
 async function analyzeWithGemini(rawData: {
@@ -2104,8 +2076,8 @@ async function analyzeWithGemini(rawData: {
     ageMinutes: number;
   }[];
 }): Promise<{ stories: GeminiStory[]; success: boolean; error?: string }> {
-  if (!GEMINI_API_KEY)
-    return { stories: [], success: false, error: "No GEMINI_API_KEY" };
+  if (!aiAvailable())
+    return { stories: [], success: false, error: "No AI key (set GEMINI_API_KEY or GROQ_API_KEY)" };
   const today = new Date().toUTCString();
 
   // Sanitize all user-controlled strings before embedding in Gemini prompt
@@ -2211,7 +2183,7 @@ RULES: MAX 15. coinabilityScore = 2x probability. Skip 300%+ pumped. coinMcap un
 async function scanGeminiCelebStories(
   rawTexts: string[],
 ): Promise<{ stories: GeminiStory[]; success: boolean }> {
-  if (!GEMINI_API_KEY || rawTexts.length === 0)
+  if (!aiAvailable() || rawTexts.length === 0)
     return { stories: [], success: false };
   const relevantTexts = rawTexts
     .filter((t) =>

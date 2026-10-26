@@ -41,7 +41,7 @@ export async function broadcast(kind: "signal" | "win", text: string, opts: { ch
   const db = await getDb();
   const users = await db
     .collection("users")
-    .find({ telegramChatId: { $exists: true, $ne: null }, tier: { $in: ["SPECTER", "WRAITH"] } }, { projection: { telegramChatId: 1, tgPrefs: 1 } })
+    .find({ telegramChatId: { $exists: true, $ne: null }, tier: { $in: ["SPECTER", "WRAITH"] }, tierSource: { $in: ["chain", "whitelist"] } }, { projection: { telegramChatId: 1, tgPrefs: 1 } })
     .toArray();
   const chain = opts.chain ?? "solana";
   let sent = 0;

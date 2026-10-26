@@ -151,6 +151,7 @@ export default function PrivyEmbeddedWallets({
         supportedChains: evmChains,
         solana: { rpcs: solanaRpcs },
         embeddedWallets: {
+          showWalletUIs: false, // no Privy confirm popup: Wraith shows its own themed confirmation / toasts
           ethereum: { createOnLogin: "off" },
           solana: { createOnLogin: "off" },
         },

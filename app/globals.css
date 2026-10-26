@@ -361,7 +361,7 @@ select {
     0 22px 65px rgba(0, 0, 0, 0.58),
     0 0 0 1px rgba(255, 255, 255, 0.025);
   color: var(--text);
-  animation: wraith-profile-menu-in 140ms ease-out;
+  animation: wraith-profile-menu-in 70ms ease-out;
   overscroll-behavior: contain;
 }
 
@@ -4530,3 +4530,33 @@ input[type="number"] {
   font-size: 12px;
   text-align: center;
 }
+
+/* Facebook-style composer */
+.fb-compose{position:relative;margin:12px 16px;padding:10px 12px 8px;border-radius:22px;background:var(--surface-2);border:1px solid var(--border);transition:border-color .15s}
+.fb-compose:focus-within{border-color:rgba(var(--accent-rgb),.45)}
+.fb-input{width:100%;resize:none;border:0;outline:0;background:transparent;color:var(--text);font:14px/1.45 var(--font-sans,system-ui),sans-serif;padding:4px 2px;max-height:140px;overflow-y:auto}
+.fb-input::placeholder{color:var(--text-dim)}
+.fb-bar{display:flex;align-items:center;gap:8px;margin-top:4px}
+.fb-tools{position:relative;display:flex;gap:2px;flex:1}
+.fb-tools button{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:50%;background:transparent;color:var(--text-muted);cursor:pointer;transition:background .12s,color .12s}
+.fb-tools button:hover{background:rgba(255,255,255,.07);color:var(--orange-hot)}
+.fb-send{width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:50%;background:var(--orange);color:#fff;cursor:pointer;transition:transform .12s,opacity .12s}
+.fb-send:disabled{background:transparent;color:var(--text-dim);cursor:default}
+.fb-send:not(:disabled):hover{transform:scale(1.08)}
+.fb-count{font-size:10px;color:var(--text-muted)}
+.fb-spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;animation:fbspin .7s linear infinite}
+@keyframes fbspin{to{transform:rotate(360deg)}}
+.fb-img{position:relative;display:inline-block;margin:0 0 8px}
+.fb-img img{max-height:120px;border-radius:12px;display:block}
+.fb-img button{position:absolute;top:4px;right:4px;width:22px;height:22px;border:0;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;cursor:pointer;font-size:11px}
+.fb-emoji{position:absolute;left:0;bottom:40px;z-index:20;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:8px;border-radius:14px;background:var(--surface);border:1px solid var(--border-strong);box-shadow:0 14px 40px rgba(0,0,0,.6)}
+.fb-emoji button{width:32px;height:32px;font-size:18px;border-radius:8px}
+
+/* one-click bookmark on every token row */
+.wx-side-row .bm{flex:0 0 auto;width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--text-dim);cursor:pointer;opacity:0;transition:opacity .12s,background .12s,color .12s}
+.wx-side-row:hover .bm,.wx-side-row .bm.on,.wx-side-row .bm:focus-visible{opacity:1}
+.wx-side-row .bm:hover{background:rgba(255,255,255,.08);color:var(--orange-hot)}
+.wx-side-row .bm.on{color:var(--orange)}
+@media (hover:none){.wx-side-row .bm{opacity:1}}
+.sg-tier{font-style:normal;margin-left:6px;padding:1px 6px;border-radius:5px;font-size:8.5px;letter-spacing:.06em;background:rgba(255,255,255,.07);color:var(--text-muted);vertical-align:1px}
+.sg-tier.hot{background:rgba(255,123,61,.16);color:var(--orange-hot)}

@@ -1,7 +1,7 @@
 "use client";
 // Chain logo. Drop a real logo at /public/chains/<key>.svg (solana, ethereum, base, bsc, monad, arc, robinhood)
 // and it is used automatically; otherwise the built-in mark below shows.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const BG: Record<string, string> = {
   solana: "#14141c", ethereum: "#627eea", base: "#0052ff", bsc: "#f3ba2f", monad: "#836ef9", arc: "#1fb5a8", robinhood: "#c3f53c",
@@ -32,12 +32,18 @@ function Mark({ k }: { k: string }) {
 export default function ChainLogo({ chain, size = 16, className = "" }: { chain?: string | null; size?: number; className?: string }) {
   const k = (chain || "").toLowerCase();
   const [broken, setBroken] = useState(false);
+  const ref = useRef<HTMLImageElement>(null);
+  // An <img> rendered on the server can fail before React attaches onError, so check once on mount.
+  useEffect(() => {
+    const el = ref.current;
+    if (el && el.complete && el.naturalWidth === 0) setBroken(true);
+  }, []);
   if (!k) return null;
   const style = { width: size, height: size, flex: `0 0 ${size}px` } as const;
   if (!broken) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={`/chains/${k}.svg`} alt="" width={size} height={size} className={`wx-chain-logo ${className}`} style={{ ...style, borderRadius: "50%" }} onError={() => setBroken(true)} />
+      <img ref={ref} src={`/chains/${k}.svg`} alt="" width={size} height={size} className={`wx-chain-logo ${className}`} style={{ ...style, borderRadius: "50%" }} onError={() => setBroken(true)} />
     );
   }
   return (

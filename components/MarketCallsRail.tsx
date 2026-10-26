@@ -13,6 +13,9 @@ import { TokenIcon } from "@/components/TokenIcon";
 import ChainLogo from "@/components/ChainLogo";
 import { useTokenMeta } from "@/lib/useTokenMeta";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { useWraithTier } from "@/hooks/useWraithTier";
+import TierGlyph from "@/components/TierGlyph";
+import { TIERS } from "@/lib/tiers";
 
 interface Callout {
   id: string;
@@ -52,6 +55,9 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [signedOut, setSignedOut] = useState(false);
   const [signals, setSignals] = useState<SigLite[]>([]);
+  const { canUse: can } = useWraithTier();
+  const canSignals = can("live_signals_view");
+  const canScore = can("ai_score");
   const meta = useTokenMeta(callouts.map((c) => c.mint ?? ""));
 
   const loadCallouts = useCallback(async () => {
@@ -74,6 +80,7 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
   }, []);
 
   useEffect(() => {
+    if (!canSignals) { setSignals([]); return; }
     let alive = true;
     const load = async () => {
       try {
@@ -86,7 +93,7 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
     void load();
     const t = setInterval(() => { if (!document.hidden) void load(); }, 30_000);
     return () => { alive = false; clearInterval(t); };
-  }, []);
+  }, [canSignals]);
 
   const open = (mint: string, symbol: string, imageUrl?: string, mcap?: number, chain?: string) =>
     onSelectMeme({ keyword: symbol, score: 0, posts: 0, source: chain && chain !== "solana" ? chain : "calls", contractAddress: mint, tokenImageUrl: imageUrl, mcap });
@@ -136,7 +143,14 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
 
       <section className="mc-sec">
         <header><Flame size={14} /><strong>Top signals now</strong></header>
-        {signals.length === 0 ? (
+        {!canSignals ? (
+          <div style={{ margin: "6px 14px 10px", padding: "16px 14px", borderRadius: 14, border: "1px dashed rgba(255,123,61,.4)", background: "linear-gradient(160deg, rgba(255,123,61,.10), rgba(255,123,61,.02))", textAlign: "center", display: "grid", gap: 8, justifyItems: "center" }}>
+            <TierGlyph tier="WRAITH" size={40} />
+            <strong style={{ fontSize: 13 }}>Live signals are a WRAITH feature</strong>
+            <small style={{ color: "var(--text-dim, #8d8d99)", lineHeight: 1.5 }}>Hold {TIERS.WRAITH.minTokens.toLocaleString("en-US")} OMEN to unlock the scored live feed. The scanner stays open to everyone.</small>
+            <a href="/#omen" style={{ color: "var(--accent-text, #ffad7b)", fontSize: 12, fontWeight: 700 }}>See tiers →</a>
+          </div>
+        ) : signals.length === 0 ? (
           <p className="mc-empty">Scoring live markets…</p>
         ) : (
           signals.map((s) => (
@@ -148,7 +162,7 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
               </span>
               <span className="end">
                 <b className={(s.token.change.h1 ?? 0) >= 0 ? "up" : "down"}>{(s.token.change.h1 ?? 0) >= 0 ? "+" : ""}{(s.token.change.h1 ?? 0).toFixed(0)}%</b>
-                <small>score {s.score}</small>
+                {canScore && <small>score {s.score}</small>}
               </span>
             </button>
           ))

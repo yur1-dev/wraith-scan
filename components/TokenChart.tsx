@@ -5,7 +5,7 @@
 // MCap/Price toggle, live tick merged into the current candle, proper
 // loading / empty / error states. Data comes from /api/token-chart.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AreaSeries,
   CandlestickSeries,
@@ -48,8 +48,28 @@ type Style = "candles" | "line";
 const ACCENT = "#ff7b3d";
 const UP = "#22c55e";
 const DOWN = "#ef4444";
-const POLL_MS = 15_000;
-const EMPTY_POLL_MS = 5_000;
+const POLL_MS = 10_000;
+const rowCache = new Map<string, ChartCandle[]>(); // last good series per token+timeframe: instant repaint on switch/revisit
+const EMPTY_POLL_MS = 2_500;
+const FINER_TF: Record<string, string[]> = { "5m": ["1m"], "15m": ["5m", "1m"], "1h": ["15m", "5m", "1m"], "4h": ["1h", "15m", "5m"], "1d": ["4h", "1h", "15m"] };
+/** Build `tf` from any finer series already cached for this token, so switching timeframe never starts from blank. */
+function deriveLocal(mint: string, chain: string | undefined, tf: string, sec: number): ChartCandle[] {
+  for (const fk of FINER_TF[tf] ?? []) {
+    const src = rowCache.get(`${mint}:${chain ?? ""}:${fk}`);
+    if (!src || src.length < 3) continue;
+    const step = sec * 1000;
+    const out = new Map<number, ChartCandle>();
+    for (const r of src) {
+      const t = Math.floor(r.t / step) * step;
+      const cur = out.get(t);
+      if (!cur) out.set(t, { ...r, t });
+      else { cur.h = Math.max(cur.h, r.h); cur.l = Math.min(cur.l, r.l); cur.c = r.c; cur.v += r.v; }
+    }
+    const list = [...out.values()].sort((a, b) => a.t - b.t);
+    if (list.length >= 3) return list;
+  }
+  return [];
+}
 
 function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -79,6 +99,9 @@ export default function TokenChart({
   livePrice,
   supply,
   spottedMcap,
+  spottedAt,
+  spotCard,
+  trades,
   onCurve,
   chain,
 }: {
@@ -93,6 +116,12 @@ export default function TokenChart({
   supply?: number | null;
   /** market cap when Wraith flagged this token: drawn as a "Spotted" line */
   spottedMcap?: number | null;
+  /** when Wraith flagged it (ms epoch): draws the Wraith marker on that candle in every timeframe */
+  spottedAt?: number | null;
+  /** hover card for the Wraith marker */
+  spotCard?: ReactNode;
+  /** recent swaps, drawn as buy/sell dots on their candles */
+  trades?: { id: string; ts: number; side: "buy" | "sell"; usd: number; priceUsd: number; wallet: string }[];
 }) {
   const onCurveRef = useRef(Boolean(onCurve));
   onCurveRef.current = Boolean(onCurve);
@@ -104,6 +133,8 @@ export default function TokenChart({
   const [source, setSource] = useState<string>("");
   const [stale, setStale] = useState(false);
   const [legend, setLegend] = useState<ChartCandle | null>(null);
+  const [away, setAway] = useState(false);
+  const pushedRef = useRef<{ key: string; first: number; len: number } | null>(null);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -120,6 +151,11 @@ export default function TokenChart({
   const [measure, setMeasure] = useState<Measure | null>(null);
   const [measureMode, setMeasureMode] = useState(false);
   const [, setViewTick] = useState(0);
+  const [spotTick, setSpotTick] = useState(0);
+  const [spotHover, setSpotHover] = useState(false);
+  const [showTrades, setShowTrades] = useState(true);
+  const [dots, setDots] = useState<{ key: string; x: number; y: number; side: "buy" | "sell"; usd: number; n: number }[]>([]);
+  const [spotPos, setSpotPos] = useState<{ x: number; y: number } | null>(null);
   const measureRef = useRef<Measure | null>(null);
   measureRef.current = measure;
   const measureModeRef = useRef(false);
@@ -168,14 +204,18 @@ export default function TokenChart({
         secondsVisible: false,
         rightOffset: 6,
         barSpacing: 9,
-        minBarSpacing: 2,
+        minBarSpacing: 1.5,
+        rightBarStaysOnScroll: true,
+        lockVisibleTimeRangeOnResize: true,
+        shiftVisibleRangeOnNewBar: true,
       },
+      kineticScroll: { mouse: true, touch: true },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
     });
     chartRef.current = chart;
 
-    const onMove = (param: MouseEventParams<Time>) => {
+    const applyMove = (param: MouseEventParams<Time>) => {
       if (!param.time || !mainRef.current) {
         setLegend(null);
         return;
@@ -199,9 +239,28 @@ export default function TokenChart({
         v: vol?.value ?? 0,
       });
     };
+    // one legend update per frame: React no longer re-renders on every mouse-move event
+    let raf = 0;
+    let pending: MouseEventParams<Time> | null = null;
+    const onMove = (param: MouseEventParams<Time>) => {
+      pending = param;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (pending) applyMove(pending);
+      });
+    };
     chart.subscribeCrosshairMove(onMove);
+    // "Latest" button appears when you've scrolled into history
+    const onRange = () => {
+      const away = chart.timeScale().scrollPosition() < -2;
+      setAway((prev) => (prev === away ? prev : away));
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
 
     return () => {
+      if (raf) cancelAnimationFrame(raf);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
       chartRef.current = null;
@@ -322,6 +381,7 @@ export default function TokenChart({
       priceLineVisible: false,
     });
     volRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    pushedRef.current = null;
     needFitRef.current = true;
   }, [style, effectiveMetric]);
 
@@ -344,6 +404,56 @@ export default function TokenChart({
     };
   }, [style, effectiveMetric, spottedMcap, supplyKey]);
 
+  // ── Wraith marker: where it spotted the token, on whatever timeframe is showing ──
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const bump = () => setSpotTick((t) => t + 1);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(bump);
+    chart.timeScale().subscribeSizeChange(bump);
+    return () => {
+      try { chart.timeScale().unsubscribeVisibleLogicalRangeChange(bump); chart.timeScale().unsubscribeSizeChange(bump); } catch { /* chart gone */ }
+    };
+  }, []);
+  useEffect(() => {
+    const chart = chartRef.current;
+    const main = mainRef.current;
+    if (!chart || !main || !spottedAt || !candles.length) { setSpotPos(null); return; }
+    const step = tfSec * 1000;
+    const bucket = Math.floor(spottedAt / step) * step;
+    const c = candles.find((k) => k.t === bucket);
+    if (!c) { setSpotPos(null); return; } // spotted before the first candle we have
+    const x = chart.timeScale().timeToCoordinate(chartTime(bucket));
+    const y = main.priceToCoordinate(c.h * mult);
+    setSpotPos(x == null || y == null ? null : { x, y });
+  }, [spottedAt, candles, tfSec, mult, spotTick, style, effectiveMetric]);
+
+  // ── buy / sell dots from recent swaps ──
+  useEffect(() => {
+    const chart = chartRef.current;
+    const main = mainRef.current;
+    if (!chart || !main || !showTrades || !trades?.length || !candles.length) { setDots([]); return; }
+    const step = tfSec * 1000;
+    const first = candles[0].t;
+    const groups = new Map<string, { bucket: number; side: "buy" | "sell"; usd: number; n: number; px: number }>();
+    for (const t of trades) {
+      const bucket = Math.floor(t.ts / step) * step;
+      if (bucket < first || !(t.priceUsd > 0)) continue;
+      const k = `${bucket}:${t.side}`;
+      const g = groups.get(k) ?? { bucket, side: t.side, usd: 0, n: 0, px: 0 };
+      g.usd += t.usd; g.n += 1; g.px += t.priceUsd;
+      groups.set(k, g);
+    }
+    const out: typeof dots = [];
+    for (const [key, g] of groups) {
+      const x = chart.timeScale().timeToCoordinate(chartTime(g.bucket));
+      const y = main.priceToCoordinate((g.px / g.n) * mult);
+      if (x == null || y == null) continue;
+      out.push({ key, x, y, side: g.side, usd: g.usd, n: g.n });
+    }
+    setDots(out.slice(0, 80));
+  }, [trades, candles, tfSec, mult, spotTick, showTrades, style]);
+
   // ── push candles into series ──────────────────────────────────────────
   useEffect(() => {
     const main = mainRef.current;
@@ -355,7 +465,31 @@ export default function TokenChart({
     if (!candles.length) {
       main.setData([]);
       vol.setData([]);
+      pushedRef.current = null;
       return;
+    }
+
+    const mkMain = (c: ChartCandle) =>
+      style === "candles"
+        ? { time: chartTime(c.t), open: c.o * mult, high: c.h * mult, low: c.l * mult, close: c.c * mult }
+        : { time: chartTime(c.t), value: c.c * mult };
+    const mkVol = (c: ChartCandle) => ({ time: chartTime(c.t), value: c.v, color: c.c >= c.o ? "rgba(34,197,94,0.38)" : "rgba(239,68,68,0.38)" });
+
+    // Same series, only the tail changed (the 10s poll): update the last bars in place.
+    // No full redraw, no flicker, and the viewport and any measure box stay put.
+    const key = `${mint}|${chain ?? ""}|${tf}|${style}|${mult}`;
+    const prev = pushedRef.current;
+    if (prev && prev.key === key && prev.first === candles[0].t && candles.length >= prev.len && candles.length - prev.len <= 4) {
+      try {
+        for (let i = Math.max(0, prev.len - 2); i < candles.length; i++) {
+          (main as ISeriesApi<"Candlestick">).update(mkMain(candles[i]) as never);
+          vol.update(mkVol(candles[i]));
+        }
+        pushedRef.current = { key, first: candles[0].t, len: candles.length };
+        return;
+      } catch {
+        // chart already holds a newer live bar than this poll (or similar): fall through to a full redraw
+      }
     }
 
     const seen = new Set<number>();
@@ -365,23 +499,22 @@ export default function TokenChart({
       const time = chartTime(c.t);
       if (seen.has(time)) continue;
       seen.add(time);
-      if (style === "candles") {
-        mainData.push({ time, open: c.o * mult, high: c.h * mult, low: c.l * mult, close: c.c * mult });
-      } else {
-        mainData.push({ time, value: c.c * mult });
-      }
-      volData.push({ time, value: c.v, color: c.c >= c.o ? "rgba(34,197,94,0.38)" : "rgba(239,68,68,0.38)" });
+      mainData.push(mkMain(c));
+      volData.push(mkVol(c));
     }
     (main as ISeriesApi<"Candlestick">).setData(mainData as never);
     vol.setData(volData);
+    pushedRef.current = { key, first: candles[0].t, len: candles.length };
 
     if (needFitRef.current) {
       needFitRef.current = false;
       const n = mainData.length;
-      if (n > 90) chart.timeScale().setVisibleLogicalRange({ from: n - 90, to: n + 6 });
-      else chart.timeScale().fitContent();
+      // Always the same comfortable framing: ~60-90 bars across, newest bar near the right edge.
+      // A young token with 8 candles therefore sits at the right with normal-width candles, not stretched wide.
+      const span = Math.max(60, Math.min(n, 90));
+      chart.timeScale().setVisibleLogicalRange({ from: n - span, to: n + 6 });
     }
-  }, [candles, style, mult]);
+  }, [candles, style, mult, mint, chain, tf]);
 
   // ── merge live price into the running candle ──────────────────────────
   useEffect(() => {
@@ -409,7 +542,7 @@ export default function TokenChart({
       last.l = Math.min(last.l, livePrice);
     }
     const time = chartTime(last.t);
-    if (statusRef.current !== "ready") setStatus("ready"); // live trades are enough to show the chart now
+    if (statusRef.current !== "ready" && list.length >= 3) setStatus("ready"); // a lone live bar is not a chart: wait for history (or 3+ live bars)
     if (style === "candles") {
       (main as ISeriesApi<"Candlestick">).update({
         time,
@@ -442,6 +575,7 @@ export default function TokenChart({
         setSource(data.source ?? "");
         setStale(Boolean(data.stale));
         if (rows.length) {
+          rowCache.set(`${mint}:${chain ?? ""}:${tf}`, rows);
           setCandles(rows);
           setStatus("ready");
         } else if (initial || candlesRef.current.length === 0) {
@@ -469,9 +603,11 @@ export default function TokenChart({
     // Instant first paint from the client cache (populated by MemeScanner
     // hover-prefetch or a prior visit). Falls back to the shimmer overlay if
     // the cache is cold — the background load() below fills it either way.
-    const cached = peekCandles(mint, tf);
+    const mem = rowCache.get(`${mint}:${chain ?? ""}:${tf}`);
+    let cached: Partial<ChartCandle>[] = mem ?? peekCandles(mint, tf);
+    if (!cached.length) cached = deriveLocal(mint, chain, tf, TIMEFRAMES.find((x) => x.key === tf)?.sec ?? 900);
     if (cached.length) {
-      const withVol: ChartCandle[] = cached.map((c) => ({ v: 0, ...c } as ChartCandle));
+      const withVol: ChartCandle[] = (cached as Partial<ChartCandle>[]).map((c) => ({ v: 0, ...c } as ChartCandle));
       candlesRef.current = withVol.map((c) => ({ ...c }));
       setCandles(withVol);
       setStatus("ready");
@@ -598,6 +734,11 @@ export default function TokenChart({
         >
           <Ruler size={13} />
         </button>
+        {trades && (
+          <button type="button" className={`wx-icon-btn${showTrades ? " on" : ""}`} onClick={() => setShowTrades((v) => !v)} aria-pressed={showTrades} aria-label="Show buys and sells" title="Buys / sells on the chart" style={{ width: "auto", padding: "0 9px", fontSize: 10, fontWeight: 700 }}>
+            B/S
+          </button>
+        )}
         <button type="button" className="wx-icon-btn" onClick={() => void load(true)} aria-label="Refresh chart" title="Refresh">
           <RefreshCw size={13} />
         </button>
@@ -632,6 +773,31 @@ export default function TokenChart({
       <div style={{ position: "relative", flex: 1, minHeight: 260 }}>
         <div ref={hostRef} style={{ position: "absolute", inset: 0, cursor: measureMode || (measure && !measure.locked) ? "crosshair" : undefined }} />
 
+        {status === "ready" && dots.map((d) => (
+          <span
+            key={d.key}
+            title={`${d.n} ${d.side}${d.n > 1 ? "s" : ""} · ${fmtUsd(d.usd)}`}
+            style={{ position: "absolute", left: d.x, top: d.y, width: Math.min(16, 7 + Math.log10(Math.max(10, d.usd)) * 1.6), height: Math.min(16, 7 + Math.log10(Math.max(10, d.usd)) * 1.6), transform: "translate(-50%,-50%)", borderRadius: "50%", background: d.side === "buy" ? "rgba(34,197,94,.85)" : "rgba(239,68,68,.85)", border: "1px solid rgba(255,255,255,.55)", pointerEvents: "auto", zIndex: 2, display: "grid", placeItems: "center", color: "#fff", fontSize: 7, fontWeight: 800 }}
+          >{d.n > 1 ? d.n : d.side === "buy" ? "B" : "S"}</span>
+        ))}
+
+        {spotPos && status === "ready" && (
+          <div
+            onMouseEnter={() => setSpotHover(true)}
+            onMouseLeave={() => setSpotHover(false)}
+            style={{ position: "absolute", left: spotPos.x, top: Math.max(4, spotPos.y - 34), transform: "translateX(-50%)", pointerEvents: "auto", cursor: "help", display: "flex", flexDirection: "column", alignItems: "center", zIndex: 5 }}
+          >
+            {spotHover && spotCard && (
+              <div style={{ position: "absolute", bottom: "100%", marginBottom: 8, left: "50%", transform: `translateX(${spotPos.x < 190 ? "-12%" : spotPos.x > ((hostRef.current?.clientWidth ?? 0) - 190) ? "-88%" : "-50%"})`, zIndex: 10 }}>{spotCard}</div>
+            )}
+            <span style={{ width: 26, height: 26, borderRadius: "50%", background: "#0c0c10", border: "1.5px solid #ff7b3d", boxShadow: "0 0 12px rgba(255,123,61,.65)", display: "grid", placeItems: "center", overflow: "hidden" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="" width={15} height={17} style={{ objectFit: "contain" }} />
+            </span>
+            <span style={{ width: 0, height: 0, borderLeft: "4px solid transparent", borderRight: "4px solid transparent", borderTop: "6px solid #ff7b3d", marginTop: -1 }} />
+          </div>
+        )}
+
         {measureView && (
           <div className="wx-measure" aria-hidden="true">
             <div
@@ -659,6 +825,12 @@ export default function TokenChart({
               <span>{measureView.line2}</span>
             </div>
           </div>
+        )}
+
+        {away && status === "ready" && (
+          <button type="button" className="wx-chart-latest" onClick={() => chartRef.current?.timeScale().scrollToRealTime()} aria-label="Jump to latest candle">
+            Latest ›
+          </button>
         )}
 
         {status === "loading" && (

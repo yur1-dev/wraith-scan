@@ -7,13 +7,16 @@
 // available behind "Deep scan".
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Flame, LayoutGrid, List, Radar, RefreshCw, Sparkles, Zap } from "lucide-react";
+import { Flame, LayoutGrid, List, Lock, Radar, RefreshCw, Sparkles, Zap } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
 import { changeColor, fmtAge, fmtPct, fmtUsd, type MarketToken } from "@/lib/market";
 import { toMeme } from "@/lib/tokenMeme";
 import { TokenIcon } from "@/components/TokenIcon";
 import ChainLogo from "@/components/ChainLogo";
 import { CHAINS } from "@/lib/chains";
+import { useWraithTier } from "@/hooks/useWraithTier";
+import TierGlyph from "@/components/TierGlyph";
+import { TIERS } from "@/lib/tiers";
 
 const chainName = (k?: string) => (!k || k === "solana" ? "Solana" : CHAINS[k]?.name ?? k);
 
@@ -79,7 +82,16 @@ function useSignals() {
   return { signals, loading, error, updatedAt, reload: load };
 }
 
-function ScoreRing({ score, tier }: { score: number; tier: "HOT" | "WATCH" }) {
+const LOCK_TIP = `AI score unlocks at SPECTER (${TIERS.SPECTER.minTokens.toLocaleString("en-US")} OMEN)`;
+
+function ScoreRing({ score, tier, locked }: { score: number; tier: "HOT" | "WATCH"; locked?: boolean }) {
+  if (locked) {
+    return (
+      <div className="sg-ring watch" title={LOCK_TIP} style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: "50%", border: "1.5px dashed rgba(255,255,255,.18)", color: "var(--text-dim)" }}>
+        <Lock size={14} />
+      </div>
+    );
+  }
   const r = 15;
   const c = 2 * Math.PI * r;
   return (
@@ -93,7 +105,7 @@ function ScoreRing({ score, tier }: { score: number; tier: "HOT" | "WATCH" }) {
   );
 }
 
-function Card({ s, onOpen }: { s: Signal; onOpen: () => void }) {
+function Card({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; showScore: boolean }) {
   const t = s.token;
   return (
     <div className="sg-card" role="link" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}>
@@ -103,7 +115,7 @@ function Card({ s, onOpen }: { s: Signal; onOpen: () => void }) {
           <strong>{t.symbol}</strong>
           <span><ChainLogo chain={t.chain ?? "solana"} size={13} /> {t.name && t.name !== t.symbol ? t.name : t.dex ?? chainName(t.chain)}</span>
         </div>
-        <ScoreRing score={s.score} tier={s.tier} />
+        <ScoreRing score={s.score} tier={s.tier} locked={!showScore} />
       </div>
       <div className="sg-metrics">
         <div><small>MCap</small><b>{fmtUsd(t.mcap)}</b></div>
@@ -120,7 +132,7 @@ function Card({ s, onOpen }: { s: Signal; onOpen: () => void }) {
   );
 }
 
-function ListRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
+function ListRow({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; showScore: boolean }) {
   const t = s.token;
   return (
     <div className="wx-trow sg-trow" role="link" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}>
@@ -131,7 +143,7 @@ function ListRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
           <small><ChainLogo chain={t.chain ?? "solana"} size={12} /> {s.tags[0] ?? (t.name && t.name !== t.symbol ? t.name : chainName(t.chain))}</small>
         </span>
       </span>
-      <b className={s.tier === "HOT" ? "sg-score hot" : "sg-score"}>{s.score}</b>
+      {showScore ? <b className={s.tier === "HOT" ? "sg-score hot" : "sg-score"}>{s.score}</b> : <b className="sg-score" title={LOCK_TIP} style={{ opacity: .6 }}><Lock size={13} /></b>}
       <span>{fmtUsd(t.mcap)}</span>
       <span style={{ color: changeColor(t.change.h1) }}>{fmtPct(t.change.h1)}</span>
       <span className="c-vol">{fmtUsd(t.volume.h1)}</span>
@@ -166,6 +178,9 @@ export default function SignalScanner({
   deepScan: ReactNode;
 }) {
   const { signals, loading, error, updatedAt, reload } = useSignals();
+  const { canUse: can } = useWraithTier();
+  const showScore = can("ai_score");
+  const showRail = can("live_signals_view");
   const [filter, setFilter] = useState<Filter>("all");
   const [railTab, setRailTab] = useState<RailTab>("top");
   const [chainFilter, setChainFilter] = useState<string>("all");
@@ -223,8 +238,16 @@ export default function SignalScanner({
       <aside className="wx-scanner-rail sg-rail">
         <header className="sg-rail-head">
           <div className="sg-rail-title"><span className="sg-dot" />Live signals</div>
-          <span className="sg-count">{signals.length}</span>
+          {showRail && <span className="sg-count">{signals.length}</span>}
         </header>
+        {!showRail ? (
+          <div style={{ margin: "14px 16px", padding: "22px 16px", borderRadius: 16, border: "1px dashed rgba(255,123,61,.4)", background: "linear-gradient(160deg, rgba(255,123,61,.10), rgba(255,123,61,.02))", textAlign: "center", display: "grid", gap: 10, justifyItems: "center" }}>
+            <TierGlyph tier="WRAITH" size={54} />
+            <strong style={{ fontSize: 14 }}>Live signals are a WRAITH feature</strong>
+            <small style={{ color: "var(--text-dim)", lineHeight: 1.55, fontSize: 12 }}>The ranked live feed unlocks when you hold {TIERS.WRAITH.minTokens.toLocaleString("en-US")} OMEN. The Discover scanner stays open to everyone.</small>
+            <a href="/#omen" style={{ color: "var(--accent-text)", fontSize: 12, fontWeight: 700 }}>See tiers →</a>
+          </div>
+        ) : (<>
         <div className="sg-rail-tabs" role="tablist">
           {([["top", "For you"], ["traction", "Traction"], ["early", "Early"]] as const).map(([k, label]) => (
             <button key={k} type="button" role="tab" aria-selected={railTab === k} className={railTab === k ? "on" : ""} onClick={() => setRailTab(k)}>{label}</button>
@@ -238,6 +261,7 @@ export default function SignalScanner({
               ? railList.map((s) => <RailRow key={s.token.address} s={s} onOpen={() => open(s)} />)
               : <div className="wx-empty small"><span>{error || "Nothing matches this view right now."}</span></div>}
         </div>
+        </>)}
       </aside>
 
       <div className="wx-scanner-main sg-main">
@@ -284,13 +308,13 @@ export default function SignalScanner({
                 <div className="sg-grid">{Array.from({ length: 9 }).map((_, i) => <div key={i} className="wx-skel" style={{ height: 176, borderRadius: 16 }} />)}</div>
               ) : shown.length ? (
                 view === "grid" ? (
-                  <div className="sg-grid">{shown.map((s) => <Card key={s.token.address} s={s} onOpen={() => open(s)} />)}</div>
+                  <div className="sg-grid">{shown.map((s) => <Card key={s.token.address} s={s} onOpen={() => open(s)} showScore={showScore} />)}</div>
                 ) : (
                   <div className="wx-table sg-table" role="table">
                     <div className="wx-trow sg-trow head" role="row">
                       <span>Token</span><span>Score</span><span>MCap</span><span>1h</span><span className="c-vol">Vol 1h</span><span className="c-liq">Liq</span><span className="c-age">Age</span>
                     </div>
-                    {shown.map((s) => <ListRow key={s.token.address} s={s} onOpen={() => open(s)} />)}
+                    {shown.map((s) => <ListRow key={s.token.address} s={s} onOpen={() => open(s)} showScore={showScore} />)}
                   </div>
                 )
               ) : (

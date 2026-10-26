@@ -15,7 +15,7 @@ const TF: Record<string, { tf: "minute" | "hour" | "day"; agg: number; sec: numb
 };
 interface Candle { t: number; o: number; h: number; l: number; c: number; v: number }
 const cache = new Map<string, { ts: number; candles: Candle[] }>();
-const CACHE_MS = 30_000;
+const CACHE_MS = 8_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function geckoOhlcv(url: string): Promise<unknown> {

@@ -78,6 +78,7 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
   const [commentText, setCommentText] = useState("");
   const [repostingId, setRepostingId] = useState<string | null>(null);
   const [canPost, setCanPost] = useState<boolean | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const TEXT_MAX = 280;
@@ -143,6 +144,8 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
       if (!r.ok) { setPostErr(d.error ?? "Could not post."); return; }
       setText("");
       setImagePreview(null);
+      setEmojiOpen(false);
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
       await load();
       window.dispatchEvent(new Event(CALLOUT_POSTED_EVENT));
     } catch {
@@ -219,58 +222,54 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
       {/* Compose */}
       {authenticated && canPost === false ? (
         <div className="callouts-compose callouts-locked">
-          <b>Trade it to post intel</b>
+          <b>Trade it to join the conversation</b>
           <span>Buy or sell this token on Wraith and you can share your take here.</span>
         </div>
       ) : authenticated ? (
-        <div className="callouts-compose">
-          <textarea
-            ref={textareaRef}
-            className="callouts-textarea"
-            placeholder="What's your take? Your open position on this token will be attached automatically."
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            maxLength={TEXT_MAX}
-            rows={3}
-          />
+        <div className="fb-compose">
           {imagePreview && (
-            <div className="callouts-img-preview">
+            <div className="fb-img">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imagePreview} alt="preview" />
               <button type="button" onClick={() => setImagePreview(null)} aria-label="Remove image">✕</button>
             </div>
           )}
-          <div className="callouts-compose-foot">
+          <textarea
+            ref={textareaRef}
+            className="fb-input"
+            placeholder="Write a comment…"
+            value={text}
+            maxLength={TEXT_MAX}
+            rows={1}
+            onChange={(e) => { setText(e.target.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = `${Math.min(140, e.currentTarget.scrollHeight)}px`; }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void post(); } }}
+            onPaste={(e) => { const f = Array.from(e.clipboardData.files).find((x) => x.type.startsWith("image/")); if (f) { e.preventDefault(); handleImage(f); } }}
+          />
+          <div className="fb-bar">
+            <div className="fb-tools">
+              <button type="button" onClick={() => setEmojiOpen((v) => !v)} title="Emoji" aria-label="Emoji" aria-expanded={emojiOpen}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="9.5"/><path d="M8 14.5c1 1.4 2.4 2 4 2s3-.6 4-2"/><circle cx="9" cy="10" r=".8" fill="currentColor"/><circle cx="15" cy="10" r=".8" fill="currentColor"/></svg>
+              </button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} title="Attach a photo" aria-label="Attach a photo"><ImageIcon size={18} /></button>
+              <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={(e) => { handleImage(e.target.files?.[0]); e.target.value = ""; }} />
+              {emojiOpen && (
+                <div className="fb-emoji" role="menu">
+                  {["🚀","🔥","💎","🙌","📈","📉","😂","😭","🤡","👀","💀","🫡","🤝","⚠️","✅","❌","🐋","🦍","🌕","💰","🧠","🎯","😎","🤑"].map((em) => (
+                    <button key={em} type="button" onClick={() => { setText((t) => (t + em).slice(0, TEXT_MAX)); setEmojiOpen(false); textareaRef.current?.focus(); }}>{em}</button>
+                  ))}
+                </div>
+              )}
+            </div>
             {postErr && <span className="callouts-err">{postErr}</span>}
-            <button
-              type="button"
-              className="callouts-img-btn"
-              onClick={() => fileInputRef.current?.click()}
-              title="Attach image"
-            >
-              <ImageIcon size={14} />
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(e) => handleImage(e.target.files?.[0])}
-            />
-            <span className="callouts-charcount">{text.length}/{TEXT_MAX}</span>
-            <button
-              type="button"
-              className="callouts-post-btn"
-              onClick={() => void post()}
-              disabled={posting || !text.trim()}
-            >
-              {posting ? "Posting…" : "Post callout"}
+            {text.length > TEXT_MAX - 40 && <span className="fb-count">{text.length}/{TEXT_MAX}</span>}
+            <button type="button" className="fb-send" onClick={() => void post()} disabled={posting || !text.trim()} aria-label="Send" title="Send (Enter)">
+              {posting ? <span className="fb-spin" /> : <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l-.01 6.5L15 12 3.39 13.9z"/></svg>}
             </button>
           </div>
         </div>
       ) : (
         <div className="callouts-auth-prompt">
-          <span>Sign in to post callouts</span>
+          <span>Sign in to join the conversation</span>
         </div>
       )}
 

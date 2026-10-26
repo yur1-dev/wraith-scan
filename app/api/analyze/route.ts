@@ -1,10 +1,9 @@
+import { aiText, aiAvailable, aiCanSearch } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { getAppSession } from "@/lib/session";
 import { analyzeLimiter, checkLimit } from "@/lib/ratelimit";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
 
 // ─── INPUT VALIDATION CONSTANTS ───────────────────────────────────────────────
 const KEYWORD_RE = /^[a-zA-Z0-9]{1,20}$/;
@@ -417,13 +416,14 @@ export async function GET(req: Request) {
   }
 
   let aiAnalysis = "";
-  if (GEMINI_API_KEY && safeKeyword) {
+  if (aiAvailable() && safeKeyword) {
+    const canSearch = aiCanSearch();
     try {
       const celebContext = safeCeleb
         ? `\nKEY FACT: ${safeCeleb} is connected to this trend. Find EXACTLY what they said/did and when.`
         : "";
 
-      const prompt = `You are a Solana meme coin analyst. Search the web for current information about "$${safeKeyword.toUpperCase()}" RIGHT NOW.
+      const prompt = `You are a Solana meme coin analyst. ${canSearch ? `Search the web for current information about "$${safeKeyword.toUpperCase()}" RIGHT NOW.` : "You have NO web access. Use ONLY the data given below. Never invent tweets, dates, accounts, view counts or news you were not given; if something is unknown, say it is unverified."}
 
 Known data:
 - Token: $${safeKeyword.toUpperCase()}
@@ -436,7 +436,7 @@ Known data:
 
 Write 3 paragraphs of ORIGINAL analysis:
 
-PARAGRAPH 1 — VIRAL ORIGIN: What is the EXACT viral moment, tweet, TikTok, news event, or meme that created buzz around "$${safeKeyword.toUpperCase()}"? Name dates, accounts, view counts.
+${canSearch ? `PARAGRAPH 1 — VIRAL ORIGIN: What is the EXACT viral moment, tweet, TikTok, news event, or meme that created buzz around "$${safeKeyword.toUpperCase()}"? Name dates, accounts, view counts.` : `PARAGRAPH 1 — WHAT IT IS: From the ticker and the data given, what is this coin most likely themed on? State plainly that its viral origin is unverified here.`}
 
 PARAGRAPH 2 — RISK REALITY CHECK: Look at the on-chain data. Is the liquidity real? What does the price action tell you? Is this coin already 10x'd (too late) or early (opportunity)? Any red flags?
 
@@ -445,22 +445,8 @@ PARAGRAPH 3 — TRADER VERDICT: Based on market cap ($${mcap ? `${(mcap / 1000).
 Max 220 words. Be direct. No hedging. No fluff.
 ${safeContext ? `\nAdditional context: ${safeContext}` : ""}`;
 
-      const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          tools: [{ googleSearch: {} }],
-          generationConfig: { temperature: 0.25, maxOutputTokens: 700 },
-        }),
-        signal: AbortSignal.timeout(22000),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (raw.length > 100) aiAnalysis = raw;
-      }
+      const raw = (await aiText(prompt, { maxTokens: 700, temperature: 0.25, timeoutMs: 22000, search: true })) ?? "";
+      if (raw.length > 100) aiAnalysis = raw;
     } catch {
       /* silent */
     }
@@ -483,7 +469,7 @@ ${safeContext ? `\nAdditional context: ${safeContext}` : ""}`;
           : "unknown";
 
     aiAnalysis =
-      `$${safeKeyword.toUpperCase()} was detected across ${crossPlatforms} platform(s)${safePlatforms.length ? `: ${safePlatforms.join(", ")}` : ""}. No AI analysis available — Gemini key may be missing or quota exceeded.\n\n` +
+      `$${safeKeyword.toUpperCase()} was detected across ${crossPlatforms} platform(s)${safePlatforms.length ? `: ${safePlatforms.join(", ")}` : ""}. No AI analysis available — AI key missing or quota exceeded.\n\n` +
       `On-chain snapshot: market cap ${mcapLabel}, liquidity ${liqLabel}, rug risk ${rawRugRisk}. ` +
       `${liquidity < 10000 && liquidity > 0 ? "⚠ Liquidity is very low — this can be drained in seconds. " : ""}` +
       `${priceChange1h > 200 ? `⚠ Already up ${priceChange1h.toFixed(0)}% in 1h — may be late. ` : ""}` +

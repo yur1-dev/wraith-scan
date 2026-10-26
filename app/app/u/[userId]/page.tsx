@@ -8,6 +8,9 @@ import Header from "@/components/Header";
 import TraderFollowButton from "@/components/TraderFollowButton";
 import FollowListModal from "@/components/FollowListModal";
 import PnlChart from "@/components/PnlChart";
+import TierGlyph from "@/components/TierGlyph";
+import { GLYPH_PALETTE } from "@/lib/tierGlyph";
+import { TIERS, type TierKey } from "@/lib/tiers";
 
 type PublicPosition = {
   id?: string;
@@ -44,6 +47,7 @@ type TraderDetails = {
     coverDataUrl?: string;
     followerCount: number;
     followingCount: number;
+    tier?: TierKey;
   };
   openPositions: PublicPosition[];
   closedTrades: PublicTrade[];
@@ -174,7 +178,31 @@ export default function PublicTraderPage() {
             </div>
 
             <div className="pub-id-name">
-              <h1 className="pub-name">{trader.displayName}</h1>
+              <h1 className="pub-name" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                {trader.displayName}
+                {trader.tier && trader.tier !== "GHOST" && (
+                  <span
+                    title={`${trader.tier} tier (${TIERS[trader.tier].minTokens.toLocaleString("en-US")}+ OMEN)`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 10px 3px 6px",
+                      borderRadius: 999,
+                      border: `1px solid ${GLYPH_PALETTE[trader.tier].mid}66`,
+                      background: `${GLYPH_PALETTE[trader.tier].mid}1a`,
+                      color: GLYPH_PALETTE[trader.tier].mid,
+                      fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: ".12em",
+                    }}
+                  >
+                    <TierGlyph tier={trader.tier} size={20} />
+                    {trader.tier}
+                  </span>
+                )}
+              </h1>
               {trader.username && <p className="pub-handle">@{trader.username}</p>}
             </div>
 

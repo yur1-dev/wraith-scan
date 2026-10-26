@@ -5,6 +5,25 @@ import { rpcLimiter } from "@/lib/ratelimit";
 import { getSandboxToken } from "@/lib/devnetTokens";
 import { devnetConnection } from "@/lib/devnet";
 import { PublicKey } from "@solana/web3.js";
+import { heliusRpcUrl } from "@/lib/heliusSwaps";
+
+// Exact-ish holder count from Helius DAS (paged, unique owners with a balance). Caps at 10 pages = 10,000.
+async function heliusCount(mint: string): Promise<number | null> {
+  const url = heliusRpcUrl();
+  if (!url) return null;
+  const owners = new Set<string>();
+  for (let page = 1; page <= 10; page++) {
+    try {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "h", method: "getTokenAccounts", params: { mint, page, limit: 1000, displayOptions: {} } }), signal: AbortSignal.timeout(7000), cache: "no-store" });
+      const j = (await res.json()) as { result?: { token_accounts?: { owner?: string; amount?: number }[] } };
+      const rows = j.result?.token_accounts;
+      if (!rows) return owners.size ? owners.size : null;
+      for (const r of rows) if (r.owner && (r.amount ?? 0) > 0) owners.add(r.owner);
+      if (rows.length < 1000) return owners.size;
+    } catch { return owners.size ? owners.size : null; }
+  }
+  return owners.size;
+}
 
 const CACHE_MS = 60_000;
 const holderCache = new Map<string, { count: number; expiresAt: number }>();
@@ -28,10 +47,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ mint, holderCount: 0, source: "devnet" });
     }
   }
-  if (!env.BIRDEYE_API_KEY) {
-    return NextResponse.json({ error: "Holder count provider is not configured" }, { status: 503 });
-  }
-
   const cached = holderCache.get(mint);
   if (cached && cached.expiresAt > Date.now()) {
     return NextResponse.json(
@@ -48,6 +63,15 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[token holder count] Rate limiter unavailable", error);
     return NextResponse.json({ error: "Holder count temporarily unavailable" }, { status: 503 });
+  }
+
+  const viaHelius = await heliusCount(mint);
+  if (viaHelius != null) {
+    holderCache.set(mint, { count: viaHelius, expiresAt: Date.now() + CACHE_MS });
+    return NextResponse.json({ mint, holderCount: viaHelius, source: "Helius" }, { headers: { "Cache-Control": "private, max-age=60" } });
+  }
+  if (!env.BIRDEYE_API_KEY) {
+    return NextResponse.json({ error: "Holder count unavailable" }, { status: 503 });
   }
 
   try {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongoClient";
 
 type Trade = {
@@ -103,6 +104,19 @@ export async function GET(
       db.collection("trader_follows").countDocuments({ traderId: userId }),
       db.collection("trader_follows").countDocuments({ followerId: userId }),
     ]);
+    // Public tier badge: only tiers the server verified (on-chain balance or whitelist).
+    let tier = "GHOST";
+    try {
+      const u = ObjectId.isValid(userId)
+        ? await db.collection("users").findOne(
+            { _id: new ObjectId(userId) },
+            { projection: { _id: 0, tier: 1, tierSource: 1 } },
+          )
+        : null;
+      if (u && (u.tierSource === "chain" || u.tierSource === "whitelist") && ["SHADE", "SPECTER", "WRAITH"].includes(u.tier)) {
+        tier = u.tier;
+      }
+    } catch { /* badge is optional */ }
     const allTrades: Trade[] = Array.isArray(tradeDoc?.trades)
       ? tradeDoc.trades
       : [];
@@ -132,6 +146,7 @@ export async function GET(
         coverDataUrl: profile.coverDataUrl || "",
         followerCount,
         followingCount,
+        tier,
       },
       openPositions,
       closedTrades,

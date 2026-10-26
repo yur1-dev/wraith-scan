@@ -121,3 +121,9 @@ export async function getCandles(
 export function peekCandles(address: string, tf: string = "5m"): Candle[] {
   return _candleCache.get(cacheKey(address, tf))?.candles ?? [];
 }
+
+/** Seed the cache from a response someone else already fetched (hover prefetch) so the chart paints instantly. */
+export function seedCandles(address: string, tf: string, candles: Candle[]) {
+  if (!address || !candles.length) return;
+  _candleCache.set(cacheKey(address, tf), { candles, ts: Date.now() });
+}

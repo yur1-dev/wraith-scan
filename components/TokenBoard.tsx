@@ -4,8 +4,9 @@
 // Discover board — pump.fun-style cards or Fomo-style dense table.
 // Click a token to open its workspace (chart + trade dock).
 
-import { useEffect, useMemo, useState } from "react";
-import { LayoutGrid, List, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ChevronLeft, ChevronRight, LayoutGrid, List, RefreshCw, Search } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
 import { useMarket } from "@/hooks/useMarket";
 import {
@@ -23,6 +24,9 @@ import { prefetchChart } from "@/lib/prefetchChart";
 import { TokenIcon } from "@/components/TokenIcon";
 import { QuickBuyButton } from "@/components/QuickBuyButton";
 import { getActivePreset } from "@/lib/quickBuyPresets";
+import { HOVER_DELAY_MS, TokenHoverPreview } from "@/components/TokenHoverChart";
+
+type HoverFns = { enter: (e: React.MouseEvent, t: MarketToken) => void; leave: () => void };
 
 type View = "grid" | "list";
 
@@ -122,10 +126,17 @@ function Card({ token, onOpen, quickSol }: { token: MarketToken; onOpen: () => v
   );
 }
 
-function Row({ token, onOpen }: { token: MarketToken; onOpen: () => void }) {
+function Row({ token, onOpen, quickSol, hover }: { token: MarketToken; onOpen: () => void; quickSol: number; hover: HoverFns }) {
   return (
-    <button type="button" className="wx-trow" onClick={onOpen} onMouseEnter={() => prefetchChart(token.address, token.onCurve)}>
-      <span className="wx-trow-id">
+    <div
+      role="button"
+      tabIndex={0}
+      className="wx-trow"
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
+      onMouseEnter={() => prefetchChart(token.address, token.onCurve)}
+    >
+      <span className="wx-trow-id" onMouseEnter={(e) => hover.enter(e, token)} onMouseLeave={hover.leave}>
         <TokenIcon contractAddress={token.address} imageUrl={token.imageUrl} symbol={token.symbol} size={34} />
         <span>
           <strong>{token.symbol}</strong>
@@ -140,7 +151,33 @@ function Row({ token, onOpen }: { token: MarketToken; onOpen: () => void }) {
       <span><Change v={token.change.h1} /></span>
       <span className="c-24h"><Change v={token.change.h24} /></span>
       <span className="c-tx">{fmtCount(token.txns.buys + token.txns.sells)}</span>
-    </button>
+      <span className="wx-qb c-buy" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        <QuickBuyButton contractAddress={token.address} symbol={token.symbol} amountSol={quickSol} size="compact" />
+      </span>
+    </div>
+  );
+}
+
+const PAGE_SIZE = { grid: 24, list: 25 } as const;
+
+function Pager({ page, pages, total, size, onPage }: { page: number; pages: number; total: number; size: number; onPage: (p: number) => void }) {
+  if (pages <= 1) return null;
+  const nums: (number | "…")[] = [];
+  for (let i = 0; i < pages; i++) {
+    if (i === 0 || i === pages - 1 || Math.abs(i - page) <= 1) nums.push(i);
+    else if (nums[nums.length - 1] !== "…") nums.push("…");
+  }
+  return (
+    <nav className="wx-pager" aria-label="Pagination">
+      <span className="wx-pager-info">{page * size + 1}–{Math.min(total, (page + 1) * size)} of {total}</span>
+      <div className="wx-pager-btns">
+        <button type="button" disabled={page === 0} onClick={() => onPage(page - 1)} aria-label="Previous page"><ChevronLeft size={14} /></button>
+        {nums.map((n, i) => n === "…" ? <span key={`d${i}`} className="dots">…</span> : (
+          <button key={n} type="button" className={n === page ? "on" : ""} onClick={() => onPage(n)}>{n + 1}</button>
+        ))}
+        <button type="button" disabled={page >= pages - 1} onClick={() => onPage(page + 1)} aria-label="Next page"><ChevronRight size={14} /></button>
+      </div>
+    </nav>
   );
 }
 
@@ -152,6 +189,26 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
   const { tokens, loading, error, stale, updatedAt, refresh } = useMarket(category);
   const [, setNow] = useState(0);
   const [quickSol, setQuickSol] = useState(0.1);
+  const [page, setPage] = useState(0);
+  const [hoverPreview, setHoverPreview] = useState<{ token: MarketToken; top: number; left: number } | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverEnter = useCallback((e: React.MouseEvent, token: MarketToken) => {
+    if (window.matchMedia("(hover: none)").matches) return;
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (openTimer.current) clearTimeout(openTimer.current);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    openTimer.current = setTimeout(() => {
+      const left = rect.right + 14 + 340 < window.innerWidth ? rect.right + 14 : Math.max(8, rect.left - 354);
+      setHoverPreview({ token, top: Math.max(8, Math.min(rect.top - 20, window.innerHeight - 400)), left });
+    }, HOVER_DELAY_MS);
+  }, []);
+  const hoverLeave = useCallback(() => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setHoverPreview(null), 180);
+  }, []);
+  const hover = useMemo<HoverFns>(() => ({ enter: hoverEnter, leave: hoverLeave }), [hoverEnter, hoverLeave]);
 
   useEffect(() => {
     setCategory(readPref("wraith_board_cat", MARKET_CATEGORIES.map((c) => c.key), "trending"));
@@ -182,6 +239,12 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
       return t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || t.address.toLowerCase() === q;
     });
   }, [tokens, query, hideThin]);
+
+  useEffect(() => { setPage(0); }, [category, query, hideThin, view]);
+  const size = PAGE_SIZE[view];
+  const pages = Math.max(1, Math.ceil(shown.length / size));
+  const curPage = Math.min(page, pages - 1);
+  const pageRows = shown.slice(curPage * size, (curPage + 1) * size);
 
   const secondsAgo = updatedAt ? Math.max(0, Math.round((Date.now() - updatedAt) / 1000)) : null;
 
@@ -264,7 +327,7 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
           </div>
         ) : view === "grid" ? (
           <div className="wx-grid">
-            {shown.map((t) => (
+            {pageRows.map((t) => (
               <Card key={t.address} token={t} quickSol={quickSol} onOpen={() => onSelectMeme(toMeme(t))} />
             ))}
           </div>
@@ -280,11 +343,33 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
               <span>1h</span>
               <span className="c-24h">24h</span>
               <span className="c-tx">Txns</span>
+              <span className="c-buy">Buy</span>
             </div>
-            {shown.map((t) => (
-              <Row key={t.address} token={t} onOpen={() => onSelectMeme(toMeme(t))} />
+            {pageRows.map((t) => (
+              <Row key={t.address} token={t} quickSol={quickSol} hover={hover} onOpen={() => onSelectMeme(toMeme(t))} />
             ))}
           </div>
+        )}
+        {shown.length > 0 && <Pager page={curPage} pages={pages} total={shown.length} size={size} onPage={(p) => { setPage(p); document.querySelector(".wx-board-body")?.scrollTo({ top: 0 }); }} />}
+        {hoverPreview && typeof document !== "undefined" && createPortal(
+          <div
+            style={{ position: "fixed", top: hoverPreview.top, left: hoverPreview.left, zIndex: 1200 }}
+            onMouseEnter={() => { if (closeTimer.current) clearTimeout(closeTimer.current); }}
+            onMouseLeave={hoverLeave}
+          >
+            <TokenHoverPreview
+              contractAddress={hoverPreview.token.address}
+              symbol={hoverPreview.token.symbol}
+              name={safeName(hoverPreview.token.name, hoverPreview.token.symbol)}
+              imageUrl={hoverPreview.token.imageUrl}
+              mcap={hoverPreview.token.mcap}
+              liquidity={hoverPreview.token.liquidity}
+              volume24h={hoverPreview.token.volume.h24}
+              priceChange24h={hoverPreview.token.change.h24 ?? undefined}
+              showPaperQuickBuy={false}
+            />
+          </div>,
+          document.body,
         )}
       </div>
     </section>

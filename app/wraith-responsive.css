@@ -343,3 +343,7 @@ select.ewt-network-badge option{background:#14141a;color:#fff}
 .wx-tp-tg:hover{background:rgba(39,167,231,.2)}
 @media (max-width:720px){.wx-statusbar{height:34px;gap:8px;padding:0 8px}.wx-tp-record,.wx-tp-tg span{display:none}.wx-tp-tg{padding:3px}}
 @media (prefers-reduced-motion:reduce){.wx-tp-track{animation:none}.wx-tp-viewport{overflow-x:auto}}
+
+/* chart: jump-to-latest */
+.wx-chart-latest{position:absolute;right:72px;bottom:38px;z-index:4;padding:6px 12px;border:1px solid rgba(255,123,61,.5);border-radius:999px;background:rgba(10,8,6,.88);color:#ff9a5c;font:700 12px/1 var(--font-sans,system-ui);cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 6px 20px rgba(0,0,0,.5)}
+.wx-chart-latest:hover{background:rgba(255,123,61,.18);color:#fff}

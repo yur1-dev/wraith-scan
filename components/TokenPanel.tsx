@@ -10,8 +10,10 @@ import { createPortal } from "react-dom";
 import { Bookmark, Check, Copy, ExternalLink, Globe, Link2, Send } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
 import TokenChart from "@/components/TokenChart";
+import { snapCache } from "@/lib/prefetchChart";
 import { TokenDetailTabs, type IntelLink, type TradeRow } from "@/components/TokenDetailTabs";
 import { TokenIcon } from "@/components/TokenIcon";
+import SpotCard from "@/components/SpotCard";
 import { readTokenFavorites, toggleTokenFavorite, TOKEN_FAVORITES_EVENT } from "@/lib/tokenFavorites";
 import { changeColor, fmtAge, fmtCount, fmtPct, fmtPrice, fmtUsd, shortAddr } from "@/lib/market";
 import { useLiveTrades } from "@/lib/useLiveTrades";
@@ -77,6 +79,7 @@ type SnapState = "loading" | "ready" | "missing" | "error";
 export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend | null }) {
   const mint = selectedMeme?.contractAddress ?? "";
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [birth, setBirth] = useState<{ mint: string; createdAt: number } | null>(null);
   const [snapState, setSnapState] = useState<SnapState>("loading");
   const [trades, setTrades] = useState<ApiTrade[]>([]);
   const [holders, setHolders] = useState<number | null>(null);
@@ -106,11 +109,28 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
     return () => clearInterval(t);
   }, []);
 
+  // ── exact launch time (first on-chain transaction of the mint, cached server-side) ──
+  useEffect(() => {
+    if (!mint) return;
+    let alive = true;
+    fetch(`/api/token-age?mint=${encodeURIComponent(mint)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { createdAt?: number } | null) => { if (alive && d && typeof d.createdAt === "number") setBirth({ mint, createdAt: d.createdAt }); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [mint]);
+
   // ── live snapshot (price, mcap, volume, txns, socials) ────────────────
   useEffect(() => {
     if (!mint) return;
-    setSnap(null);
-    setSnapState("loading");
+    const warm = snapCache.get(mint);
+    if (warm && Date.now() - warm.ts < 300_000) {
+      setSnap(warm.data as Snapshot);
+      setSnapState("ready");
+    } else {
+      setSnap(null);
+      setSnapState("loading");
+    }
     setFlash(null);
     prevPrice.current = null;
     let alive = true;
@@ -125,6 +145,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
         if (res.ok) {
           const data: Snapshot = await res.json();
           if (!alive) return;
+          snapCache.set(mint, { data, ts: Date.now() });
           // keep the websocket-driven price/mcap if a live trade landed recently (APIs lag a few seconds)
           setSnap((cur) =>
             cur && Date.now() - lastLive.current < 20_000
@@ -502,6 +523,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
         tokens: Math.round(t.tokens),
         mcapAtTrade: snap?.supply ? t.priceUsd * snap.supply : 0,
         traderShort: shortAddr(t.wallet, 4, 4),
+        wallet: t.wallet,
       })),
     [trades, snap?.supply],
   );
@@ -541,12 +563,14 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
   const pumpMint = mint.endsWith("pump");
   const loadingSnap = snapState === "loading" && !snap;
 
+  const birthMs = birth && birth.mint === mint ? birth.createdAt : null;
+  const ageText = birthMs ? fmtAge(birthMs) : snap?.pairCreatedAt ? fmtAge(snap.pairCreatedAt) : (selectedMeme?.ageLabel ?? null);
   const stats: { label: string; value: string; sub?: string }[] = [
     { label: "Liquidity", value: fmtUsd(snap?.liquidity) },
     { label: "Volume 24h", value: fmtUsd(snap?.volume.h24 ?? snap?.volume24h), sub: `1h ${fmtUsd(snap?.volume.h1)}` },
     { label: "Holders", value: holders != null ? fmtCount(holders) : "—" },
     { label: "Txns 24h", value: fmtCount(buys + sells), sub: `${fmtCount(buys)} buys · ${fmtCount(sells)} sells` },
-    { label: "Age", value: fmtAge(snap?.pairCreatedAt) },
+    { label: "Age", value: ageText ?? "—" },
     { label: "Price", value: fmtPrice(snap?.priceUsd) },
   ];
 
@@ -643,7 +667,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
       {/* ── price strip ── */}
       <div className="wx-pricebar">
         <div>
-          <div className="wx-kicker">Market cap{isLive && <span title="Live price feed connected" style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#22c55e", marginLeft: 8, verticalAlign: "middle", boxShadow: "0 0 6px #22c55e" }} />}</div>
+          <div className="wx-kicker">Market cap{ageText ? <span className="wx-age-chip" title="Time since this token launched">{ageText} old</span> : null}{isLive && <span title="Live price feed connected" style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#22c55e", marginLeft: 8, verticalAlign: "middle", boxShadow: "0 0 6px #22c55e" }} />}</div>
           {loadingSnap ? (
             <div className="wx-skel" style={{ width: 150, height: 34 }} />
           ) : (
@@ -685,7 +709,9 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
 
       {/* ── chart ── */}
       <section className="wx-chart-card" aria-label="Price chart">
-        <TokenChart mint={mint} onCurve={snap?.onCurve ?? false} livePrice={snap?.priceUsd ?? null} supply={snap?.supply ?? null} spottedMcap={spotted?.spottedMcap ?? null} />
+        <TokenChart mint={mint} onCurve={snap?.onCurve ?? false} livePrice={snap?.priceUsd ?? null} supply={snap?.supply ?? null} spottedMcap={spotted?.spottedMcap ?? null} spottedAt={spotted?.spottedAt ?? null}
+          trades={trades}
+          spotCard={spotted ? <SpotCard info={{ mint, spottedMcap: spotted.spottedMcap, spottedAt: spotted.spottedAt, nowMcap: mcap, liquidity: snap?.liquidity ?? null, vol24: snap?.volume24h ?? null, buys, sells, change: ch ?? null, ageText, safetyScore: analysis?.safetyScore, safetyBreakdown: analysis?.safetyBreakdown, reason: analysis?.predictionReason }} /> : undefined} />
       </section>
 
       {/* ── bonding curve ── */}
@@ -706,7 +732,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
 
       {/* ── activity ── */}
       <div style={{ padding: "0 0 20px" }}>
-        <TokenDetailTabs trades={tradeRows} mint={mint} intelLinks={analysis?.links} intelSummary={analysis?.predictionReason} currentMcap={snap?.marketCap} />
+        <TokenDetailTabs trades={tradeRows} mint={mint} intelLinks={analysis?.links} intelSummary={analysis?.predictionReason} safetyScore={analysis?.safetyScore} safetyBreakdown={analysis?.safetyBreakdown} currentMcap={snap?.marketCap} />
       </div>
     </div>
   );

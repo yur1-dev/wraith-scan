@@ -4,7 +4,7 @@ import { rpcLimiter } from "@/lib/ratelimit";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const RPC_URLS = [
-  ...(process.env.NEXT_PUBLIC_SOLANA_RPC ? [process.env.NEXT_PUBLIC_SOLANA_RPC] : []),
+  ...[process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC].filter((u): u is string => !!u),
   "https://solana-rpc.publicnode.com",
   "https://solana.drpc.org",
   "https://api.mainnet-beta.solana.com",

@@ -17,7 +17,7 @@ function b58(buf: Buffer): string {
 }
 
 const RPCS = () =>
-  [process.env.NEXT_PUBLIC_SOLANA_RPC, "https://solana-rpc.publicnode.com", "https://api.mainnet-beta.solana.com"].filter(Boolean) as string[];
+  [process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC, "https://solana-rpc.publicnode.com", "https://api.mainnet-beta.solana.com"].filter(Boolean) as string[];
 
 async function rpc(method: string, params: unknown[]): Promise<any> {
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });

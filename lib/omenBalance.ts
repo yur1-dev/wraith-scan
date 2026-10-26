@@ -4,7 +4,7 @@ import { SOLANA_MINT_RE } from "@/lib/market";
 
 const RPCS = [
   ...(process.env.SOLANA_RPC_URL ? [process.env.SOLANA_RPC_URL] : []),
-  ...(process.env.NEXT_PUBLIC_SOLANA_RPC ? [process.env.NEXT_PUBLIC_SOLANA_RPC] : []),
+  ...[process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC].filter((u): u is string => !!u),
   "https://solana-rpc.publicnode.com",
   "https://api.mainnet-beta.solana.com",
 ];

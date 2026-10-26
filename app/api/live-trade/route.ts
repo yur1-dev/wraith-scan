@@ -6,7 +6,7 @@ const WSOL = "So11111111111111111111111111111111111111112";
 const cache = new Map<string, unknown>();
 
 function heliusKey(): string | null {
-  const raw = process.env.NEXT_PUBLIC_SOLANA_RPC || process.env.SOLANA_RPC || "";
+  const raw = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC || process.env.SOLANA_RPC || "";
   try {
     return new URL(raw).searchParams.get("api-key");
   } catch {

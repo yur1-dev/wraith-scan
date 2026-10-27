@@ -5,6 +5,7 @@
 // MCap/Price toggle, live tick merged into the current candle, proper
 // loading / empty / error states. Data comes from /api/token-chart.
 
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AreaSeries,
@@ -156,6 +157,7 @@ export default function TokenChart({
   const [showTrades, setShowTrades] = useState(true);
   const [dots, setDots] = useState<{ key: string; x: number; y: number; side: "buy" | "sell"; usd: number; n: number }[]>([]);
   const [spotPos, setSpotPos] = useState<{ x: number; y: number } | null>(null);
+  const [spotRect, setSpotRect] = useState<DOMRect | null>(null);
   const measureRef = useRef<Measure | null>(null);
   measureRef.current = measure;
   const measureModeRef = useRef(false);
@@ -783,12 +785,22 @@ export default function TokenChart({
 
         {spotPos && status === "ready" && (
           <div
-            onMouseEnter={() => setSpotHover(true)}
+            onMouseEnter={(e) => { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); }}
             onMouseLeave={() => setSpotHover(false)}
             style={{ position: "absolute", left: spotPos.x, top: Math.max(4, spotPos.y - 34), transform: "translateX(-50%)", pointerEvents: "auto", cursor: "help", display: "flex", flexDirection: "column", alignItems: "center", zIndex: 5 }}
           >
-            {spotHover && spotCard && (
-              <div style={{ position: "absolute", bottom: "100%", marginBottom: 8, left: "50%", transform: `translateX(${spotPos.x < 190 ? "-12%" : spotPos.x > ((hostRef.current?.clientWidth ?? 0) - 190) ? "-88%" : "-50%"})`, zIndex: 10 }}>{spotCard}</div>
+            {spotHover && spotCard && spotRect && typeof document !== "undefined" && createPortal(
+              (() => {
+                // Rendered on <body> so the chart frame can never clip it; flips above/below by available room.
+                const vh = window.innerHeight, vw = window.innerWidth;
+                const cx = Math.min(vw - 200, Math.max(200, spotRect.left + spotRect.width / 2));
+                const above = spotRect.top > vh / 2;
+                const pos = above
+                  ? { bottom: vh - spotRect.top + 8, maxHeight: Math.max(160, spotRect.top - 16) }
+                  : { top: spotRect.bottom + 8, maxHeight: Math.max(160, vh - spotRect.bottom - 16) };
+                return <div style={{ position: "fixed", left: cx, transform: "translateX(-50%)", zIndex: 1300, overflowY: "auto", pointerEvents: "none", ...pos }}>{spotCard}</div>;
+              })(),
+              document.body,
             )}
             <span style={{ width: 26, height: 26, borderRadius: "50%", background: "#0c0c10", border: "1.5px solid #ff7b3d", boxShadow: "0 0 12px rgba(255,123,61,.65)", display: "grid", placeItems: "center", overflow: "hidden" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}

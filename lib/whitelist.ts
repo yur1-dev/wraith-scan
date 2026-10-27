@@ -7,7 +7,12 @@ export const WHITELISTED_WALLETS: string[] = [
   // "HvNroefT67VL3j6AjRerRE9oYMRG1yR5DitbTonDGpo4",
 ];
 
-export const WHITELISTED_EMAILS: string[] = ["yuriesb01@gmail.com"];
+export const WHITELISTED_EMAILS: string[] = [
+  "yuriesb01@gmail.com",
+  "villanuevajared62@gmail.com",
+  "kudu.bernas.au@phinmaed.com",
+  "liba.perez.au@phinmaed.com",
+];
 
 // ─── PER-WALLET TIER OVERRIDES ───────────────────────────────────────────────
 // Uncomment ONE line to force your wallet into that tier for testing.
@@ -31,9 +36,7 @@ export function isWhitelisted(
   );
 }
 
-export function isEmailWhitelisted(
-  email: string | null | undefined,
-): boolean {
+export function isEmailWhitelisted(email: string | null | undefined): boolean {
   if (!email) return false;
   const normalizedEmail = email.trim().toLowerCase();
   return WHITELISTED_EMAILS.some(

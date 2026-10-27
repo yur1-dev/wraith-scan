@@ -18,6 +18,7 @@ import bs58 from "bs58";
 import { DEPOSIT_CHAINS } from "@/lib/cashTokens";
 import ChainLogo from "@/components/ChainLogo";
 import CashLogo from "@/components/CashLogo";
+import WithdrawCash from "@/components/WithdrawCash";
 import { ArrowLeft, Check, Copy, LoaderCircle } from "lucide-react";
 
 type Screen = "deposit-home" | "deposit-crypto" | "withdraw-amount" | "withdraw-recipient" | "withdraw-done";
@@ -42,6 +43,7 @@ export default function EmbeddedWalletTransfers({
   const [error, setError] = useState("");
   const [txSig, setTxSig] = useState("");
   const [depChain, setDepChain] = useState("solana");
+  const [wAsset, setWAsset] = useState<"cash" | "sol">("cash");
   const [ddOpen, setDdOpen] = useState(false);
   const ddRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -230,9 +232,16 @@ export default function EmbeddedWalletTransfers({
       )}
 
       {/* WITHDRAW — AMOUNT */}
-      {screen === "withdraw-amount" && (
+      {(screen === "withdraw-amount" || screen === "withdraw-recipient") && (
+        <div className="wd-seg" role="tablist" aria-label="Withdraw asset">
+          <button type="button" role="tab" aria-selected={wAsset === "cash"} className={wAsset === "cash" ? "on" : ""} onClick={() => { setWAsset("cash"); setScreen("withdraw-amount"); }}>Cash · USDC</button>
+          <button type="button" role="tab" aria-selected={wAsset === "sol"} className={wAsset === "sol" ? "on" : ""} onClick={() => setWAsset("sol")}>SOL</button>
+        </div>
+      )}
+      {screen === "withdraw-amount" && wAsset === "cash" && <WithdrawCash onDone={() => { setScreen("deposit-home"); onClose?.(); }} />}
+      {screen === "withdraw-amount" && wAsset === "sol" && (
         <div className="ewt-screen">
-          <h3 className="ewt-title">Withdraw to wallet</h3>
+          <h3 className="ewt-title">Withdraw SOL</h3>
           <div className="ewt-amount-input-wrap">
             <span className="ewt-currency-sign">◎</span>
             <input

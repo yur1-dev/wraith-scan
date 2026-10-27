@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Thin proxy to LI.FI so an API key (LIFI_API_KEY) can be added later without touching the client.
 export const dynamic = "force-dynamic";
-const OK = new Set(["fromChain", "toChain", "fromToken", "toToken", "fromAmount", "fromAddress", "toAddress", "slippage"]);
+const OK = new Set(["fromChain", "toChain", "fromToken", "toToken", "fromAmount", "fromAddress", "toAddress", "slippage", "skipSimulation", "order", "denyExchanges", "denyBridges"]);
 
 export async function GET(req: NextRequest) {
   const incoming = req.nextUrl.searchParams;

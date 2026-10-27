@@ -8,13 +8,15 @@ import { CASH_TOKENS } from "@/lib/cashTokens";
 import { useSignAndSendTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
 import { VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { createPublicClient, formatUnits, http, parseAbi, parseUnits } from "viem";
+import { createPublicClient, createWalletClient, custom, formatUnits, http, parseAbi, parseEther, parseUnits, type PublicClient } from "viem";
+import { execV4Sell, planV4Sell, type SendTx, type V4Plan } from "@/lib/uniV4";
 import { LoaderCircle, Wallet } from "lucide-react";
 import ChainLogo from "@/components/ChainLogo";
 import { FINE_PRINT, NO_CASH_NOTE, PositionBlock } from "@/components/DockParts";
 const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
 import { VIEM_CHAINS, rpcFor } from "@/lib/cashTokens";
-import { friendlyError, execEvmRoute, lifiQuote, NATIVE_ADDR, SOLANA_LIFI_ID, waitForRoute, type LifiQuote } from "@/lib/lifi";
+import { friendlyError, execEvmRoute, lifiQuote, NATIVE_ADDR, SOLANA_LIFI_ID, waitForRoute, withGasFallback, type LifiQuote } from "@/lib/lifi";
+import { useEnsureGas, useSponsoredSend } from "@/lib/useSponsoredSend";
 import { useCashSources } from "@/lib/useCashSources";
 import { chainOf } from "@/lib/chains";
 import { formatCurrency, isDisplayCurrency, type DisplayCurrency } from "@/lib/currencies";
@@ -27,11 +29,13 @@ const SELL_PRESETS = [25, 50, 100];
 type Phase = "idle" | "quoting" | "approving" | "sending" | "bridging" | "done" | "error";
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd }: { chainKey: string; tokenAddress: string; symbol: string; priceUsd: number }) {
+export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd, mcap, imageUrl }: { chainKey: string; tokenAddress: string; symbol: string; priceUsd: number; mcap?: number | null; imageUrl?: string | null }) {
   const { authenticated, login } = usePrivy();
   const { wallets } = useWallets();
   const { wallets: solWallets } = useSolanaWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
+  const sponsoredSend = useSponsoredSend();
+  const ensureGas = useEnsureGas();
   const target = chainOf(chainKey);
   const tokenAddr = tokenAddress as `0x${string}`;
   const cash = useCashSources(chainKey);
@@ -42,7 +46,6 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd }
   const [rate, setRate] = useState<number | null>(1);
   const [amountCash, setAmountCash] = useState("10");
   const [sellPct, setSellPct] = useState(100);
-  const [srcId, setSrcId] = useState("");
   const [bal, setBal] = useState<{ raw: bigint; dec: number } | null>(null);
   const [quote, setQuote] = useState<LifiQuote | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -65,7 +68,6 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd }
     return () => { live = false; };
   }, [cur]);
 
-  useEffect(() => { setSrcId((c) => (c && sources.some((h) => h.id === c) ? c : sources[0]?.id ?? "")); }, [sources]);
   const loadCash = cash.reload;
 
   const loadToken = useCallback(async () => {
@@ -84,11 +86,15 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd }
   useEffect(() => { void loadCash(); void loadToken(); }, [loadCash, loadToken]);
 
   const totalCash = cash.total;
-  const src = sources.find((s) => s.id === srcId) ?? null;
   // where sells land: this chain's cash token (USDC / USDG)
   const sellDest = CASH_TOKENS.find((c) => c.chain === chainKey && !c.native) ?? CASH_TOKENS.find((c) => c.chain === chainKey) ?? null;
   const qty = bal ? Number(formatUnits(bal.raw, bal.dec)) : 0;
   const amountUsd = rate && rate > 0 ? Number(amountCash) / rate : NaN;
+  // cash is just dollars: pay from whichever balance covers it, preferring this token's own chain
+  const src = useMemo(() => {
+    const ok = amountUsd > 0 ? sources.filter((x) => x.balance + 1e-9 >= amountUsd) : sources;
+    return ok.find((x) => x.chain === chainKey) ?? ok[0] ?? sources[0] ?? null;
+  }, [sources, amountUsd, chainKey]);
 
   // build the quote request for the current mode
   const req = useMemo(() => {
@@ -116,13 +122,87 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd }
         const q = await lifiQuote({ fromChain: req.fromId, toChain: req.toId, fromToken: req.fromToken, toToken: req.toToken, fromAmount: req.fromRaw.toString(), fromAddress: req.fromAddr, toAddress: req.toAddr });
         if (seq !== qSeq.current) return;
         setQuote(q); setPhase("idle");
-      } catch (e) { if (seq === qSeq.current) { setPhase("error"); setMsg(e instanceof Error ? e.message : "Quote failed. Try again."); } }
+      } catch (e) {
+        if (seq !== qSeq.current) return;
+        // no router can route this sell (new Uniswap v4 pool): sell straight into the pool
+        let v4Msg = "";
+        if (mode === "sell" && chainKey === "base" && bal) {
+          try {
+            const chain = VIEM_CHAINS.base;
+            const client = createPublicClient({ chain, transport: http(rpcFor(chain) ?? undefined) }) as unknown as PublicClient;
+            const plan = await planV4Sell(client, tokenAddr, req.fromRaw);
+            if (seq !== qSeq.current) return;
+            const usd = Number(formatUnits(req.fromRaw, bal.dec)) * priceUsd;
+            setQuote({ transactionRequest: { data: "0x" }, estimate: { toAmountMin: BigInt(Math.max(0, Math.floor(usd * 1e6))).toString() }, action: { toToken: { decimals: 6, symbol: "USDC" } }, v4: plan });
+            setPhase("idle");
+            return;
+          } catch (e2) { v4Msg = e2 instanceof Error && /liquidity|pool/i.test(e2.message) ? e2.message : ""; }
+        }
+        setPhase("error"); setMsg(v4Msg || (e instanceof Error ? e.message : "Quote failed. Try again."));
+      }
     }, 500);
     return () => clearTimeout(t);
   }, [req]);
 
+  const runV4 = async (plan: V4Plan) => {
+    if (!evm) return;
+    try {
+      setMsg(""); setTx("");
+      const chain = VIEM_CHAINS.base;
+      const wallet = wallets.find((w) => w.address.toLowerCase() === evm.toLowerCase()) ?? wallets.find((w) => w.walletClientType === "privy");
+      if (!wallet) { setPhase("error"); setMsg("Wallet not ready yet. Try again in a moment."); return; }
+      const pc = createPublicClient({ chain, transport: http(rpcFor(chain) ?? undefined) });
+      const selfSend: SendTx = async (t) => {
+        await ensureGas("base", evm);
+        await wallet.switchChain(chain.id);
+        const provider = await wallet.getEthereumProvider();
+        const wc = createWalletClient({ account: evm, chain, transport: custom(provider as Parameters<typeof custom>[0]) });
+        return wc.sendTransaction({ to: t.to, data: t.data, value: t.value });
+      };
+      const send: SendTx = (t) => withGasFallback(() => sponsoredSend({ ...t, chainId: chain.id }), () => selfSend(t));
+      setPhase("sending");
+      const before = await pc.getBalance({ address: evm });
+      const hash = await execV4Sell({ client: pc as unknown as PublicClient, account: evm, plan, send, wait: async (h) => { await pc.waitForTransactionReceipt({ hash: h }); }, onPhase: (p) => setPhase(p) });
+      setTx(hash);
+      // proceeds arrive as ETH: turn them into USDC cash
+      try {
+        const gained = (await pc.getBalance({ address: evm })) - before;
+        const keep = parseEther("0.00004");
+        if (sellDest && gained > keep * BigInt(3)) {
+          const amount = gained - keep;
+          const q = await lifiQuote({ fromChain: chain.id, toChain: chain.id, fromToken: NATIVE_ADDR, toToken: sellDest.address, fromAmount: amount.toString(), fromAddress: evm, toAddress: evm });
+          const o = { wallet, account: evm, chain, quote: q, fromToken: NATIVE_ADDR, native: true, fromRaw: amount, onPhase: (p: "approving" | "sending") => setPhase(p) };
+          await withGasFallback(() => execEvmRoute({ ...o, send: sponsoredSend }), async () => { await ensureGas("base", evm); return execEvmRoute(o); });
+        }
+      } catch { setMsg("Sold. The proceeds stayed as ETH on Base (could not convert to USDC automatically)."); }
+      setPhase("done"); setQuote(null); void loadCash(); void loadToken();
+      void record("sell", Number(formatUnits(BigInt(quote?.estimate.toAmountMin ?? "0"), 6)) || qty * priceUsd * (Number(plan.amountIn) / Math.max(1, Number(bal?.raw ?? BigInt(1)))), Number(formatUnits(plan.amountIn, bal?.dec ?? 18)), hash);
+      window.dispatchEvent(new Event("wraith:trade-recorded"));
+    } catch (e) {
+      setPhase("error");
+      setMsg(friendlyError(e, "ETH", "Base"));
+    }
+  };
+
+  // ledger for the profile (positions, trades, P&L)
+  const record = async (side: "buy" | "sell", usd: number, tokens: number, hash: string) => {
+    try {
+      if (!(usd > 0) || !(tokens > 0) || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return;
+      await fetch("/api/evm-trades", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ chain: chainKey, address: tokenAddress, symbol, side, usd, tokens, priceUsd, mcap: mcap ?? null, hash, imageUrl: imageUrl ?? null }) });
+    } catch { /* the ledger is best-effort */ }
+  };
+  const readBalRaw = async (): Promise<bigint | null> => {
+    try {
+      const chain = VIEM_CHAINS[chainKey]; const rpc = chain ? rpcFor(chain) : null;
+      if (!chain || !rpc || !evm) return null;
+      const c = createPublicClient({ chain, transport: http(rpc, { retryCount: 1, timeout: 8000 }) });
+      return await c.readContract({ address: tokenAddr, abi: ERC20, functionName: "balanceOf", args: [evm] });
+    } catch { return null; }
+  };
+
   const run = async () => {
     if (!quote || !req || !evm) return;
+    if (quote.v4) { await runV4(quote.v4); return; }
     try {
       setMsg(""); setTx("");
       let hash: string;
@@ -136,11 +216,20 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd }
       } else {
         const wallet = wallets.find((w) => w.address.toLowerCase() === evm.toLowerCase()) ?? wallets.find((w) => w.walletClientType === "privy");
         if (!wallet) { setPhase("error"); setMsg("Wallet not ready yet. Try again in a moment."); return; }
-        hash = await execEvmRoute({ wallet, account: evm, chain: VIEM_CHAINS[req.fromKey], quote, fromToken: req.fromToken, native: req.native, fromRaw: req.fromRaw, onPhase: (p) => setPhase(p) });
+        const o = { wallet, account: evm, chain: VIEM_CHAINS[req.fromKey], quote, fromToken: req.fromToken, native: req.native, fromRaw: req.fromRaw, onPhase: (p: "approving" | "sending") => setPhase(p) };
+        hash = await withGasFallback(() => execEvmRoute({ ...o, send: sponsoredSend }), async () => { await ensureGas(req.fromKey, evm); return execEvmRoute(o); });
       }
       setTx(hash);
       if (req.fromId !== req.toId) { setPhase("bridging"); await waitForRoute(hash, req.fromId, req.toId); }
-      setPhase("done"); setQuote(null); void loadCash(); void loadToken();
+      setPhase("done"); void loadCash(); void loadToken();
+      if (mode === "buy") {
+        const after = await readBalRaw();
+        const got = after !== null && bal ? Number(formatUnits(after - bal.raw, bal.dec)) : (out ?? 0);
+        void record("buy", amountUsd, got > 0 ? got : (out ?? 0), hash);
+      } else {
+        void record("sell", out ?? 0, bal ? Number(formatUnits(req.fromRaw, bal.dec)) : 0, hash);
+      }
+      setQuote(null);
       window.dispatchEvent(new Event("wraith:trade-recorded"));
     } catch (e) {
       setPhase("error");
@@ -186,14 +275,6 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd }
             <span>Cash value available</span>
             <strong style={{ color: "var(--text)" }}>{!cashLoaded && evm ? "Loading..." : fx(totalCash)}</strong>
           </div>
-          {src && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--border)", borderRadius: 10, padding: "0 10px", height: 38, marginBottom: 10, background: "var(--surface)" }}>
-              <ChainLogo chain={src.chain} size={16} />
-              <select value={srcId} onChange={(e) => setSrcId(e.target.value)} disabled={busy} style={{ flex: 1, minWidth: 0, background: "transparent", border: 0, color: "var(--text)", fontSize: 12, outline: 0, height: "100%", ...MONO }}>
-                {sources.map((s) => <option key={s.id} value={s.id} style={{ background: "#14141a" }}>Pay from {s.chainName} · {s.symbol} · {fx(s.balance)}</option>)}
-              </select>
-            </div>
-          )}
           <label style={{ display: "block", color: "var(--text-muted)", fontSize: 10, marginBottom: 6 }}>AMOUNT IN {cur}</label>
           <input aria-label={`Buy amount in ${cur}`} inputMode="decimal" value={amountCash} disabled={busy} onChange={(e) => { setAmountCash(e.target.value.replace(/[^0-9.]/g, "")); setMsg(""); }} style={{ width: "100%", height: 54, padding: "0 14px", color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, outlineColor: "var(--orange)", fontSize: 20, fontWeight: 700, ...MONO }} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginTop: 8 }}>

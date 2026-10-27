@@ -246,7 +246,7 @@ export default function EvmTokenView({ address, sidebar }: { address: string; si
 
       <aside className="wx-dock">
         <DockFrame>
-          <EvmBuyPanel chainKey={chain.key} tokenAddress={address} symbol={snap.symbol} priceUsd={snap.priceUsd} />
+          <EvmBuyPanel chainKey={chain.key} tokenAddress={address} symbol={snap.symbol} priceUsd={snap.priceUsd} mcap={snap.marketCap ?? snap.fdv} imageUrl={snap.imageUrl} />
           <AboutBlock
             symbol={snap.symbol}
             change={snap.change}

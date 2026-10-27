@@ -67,7 +67,7 @@ export default function StatusBar() {
   return (
     <footer className="wx-statusbar wx-tape" aria-label="Wraith live tape">
       <span className={`wx-tp-live${ok ? "" : " bad"}`}><i />LIVE</span>
-      {tape && tape.stats.calls > 0 && (
+      {tape?.stats && tape.stats.calls > 0 && (
         <span className="wx-tp-record" title="Calls from the last 7 days that reached 2x or more">
           <b>{tape.stats.rate}%</b> hit 2x <small>· {tape.stats.hit2}/{tape.stats.calls} calls 7d</small>
         </span>

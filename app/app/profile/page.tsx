@@ -167,8 +167,12 @@ export default function ProfilePage() {
   const [notice, setNotice] = useState("");
   const [timeframe, setTimeframe] = useState<Timeframe>("7d");
   const [tradeMode, setTradeMode] = useState<"ALL" | Trade["mode"]>("ALL");
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
+  const [baseTrades, setTrades] = useState<Trade[]>([]);
+  const [basePositions, setPositions] = useState<Position[]>([]);
+  const [evmData, setEvmData] = useState<{
+    closed: { id: string; symbol: string; mint: string; costUsd: number; pnlPct: number; entryMcap: number; exitMcap: number; ts: number; imageUrl: string | null }[];
+    positions: { id: string; symbol: string; mint: string; costUsd: number; pnlPct: number; entryMcap: number; currentMcap: number; ts: number; imageUrl: string | null }[];
+  } | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [hotWalletAddress, setHotWalletAddress] = useState("");
@@ -183,6 +187,8 @@ export default function ProfilePage() {
   const [socialCounts, setSocialCounts] = useState({ followers: 0, following: 0 });
   const [xLinkAvailable, setXLinkAvailable] = useState(false);
   const [avatarFallback, setAvatarFallback] = useState("");
+  // false until the real profile (cached or fetched) is in: avoids flashing placeholder name/cover/avatar first
+  const [profileReady, setProfileReady] = useState(false);
   const [xBusy, setXBusy] = useState(false);
   const [usernameEdit, setUsernameEdit] = useState("");
   const [usernameChecking, setUsernameChecking] = useState(false);
@@ -206,6 +212,8 @@ export default function ProfilePage() {
   const [transferBusy, setTransferBusy] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const coverImgRef = useRef<HTMLImageElement | null>(null);
+  const [coverCrop, setCoverCrop] = useState<{ zoom: number; x: number; y: number } | null>(null);
 
   const refreshWalletBalance = useCallback(async () => {
     const balanceAddress = embeddedSolanaAddress
@@ -246,6 +254,18 @@ export default function ProfilePage() {
     if (status !== "authenticated") return;
     setHasHotWallet(!!localStorage.getItem(HOT_WALLET_KEY));
     let active = true;
+    try {
+      const raw = localStorage.getItem("wraith_profile_cache_v1");
+      if (raw) {
+        const c = JSON.parse(raw) as { profile?: ProfileData; userId?: string; avatarFallback?: string };
+        if (c?.profile && typeof c.profile.displayName === "string") {
+          setProfile(c.profile);
+          if (c.userId) setUserId(c.userId);
+          if (c.avatarFallback) setAvatarFallback(c.avatarFallback);
+          setProfileReady(true);
+        }
+      }
+    } catch { /* ignore bad cache */ }
     const load = async () => {
       setBusy(true);
       setError("");
@@ -326,8 +346,21 @@ export default function ProfilePage() {
           console.error("[profile paper data]", cause);
           setError("Paper history could not be read from this browser.");
         }
+        try {
+          // pick up trades made earlier / elsewhere with this wallet (throttled)
+          try {
+            const last = Number(localStorage.getItem("wraith_evm_sync_v1") ?? "0");
+            if (Date.now() - last > 120_000) { localStorage.setItem("wraith_evm_sync_v1", String(Date.now())); await fetch("/api/evm-trades/sync", { method: "POST" }); }
+          } catch { /* sync is best-effort */ }
+          const er = await fetch("/api/evm-trades", { cache: "no-store" });
+          if (er.ok) { const ej = await er.json(); if (active && Array.isArray(ej?.closed) && Array.isArray(ej?.positions)) setEvmData(ej); }
+        } catch { /* EVM history is optional */ }
         setProfile(loaded);
         setDraft(loaded);
+        setProfileReady(true);
+        try {
+          localStorage.setItem("wraith_profile_cache_v1", JSON.stringify({ profile: loaded, userId: profileJson.userId ?? "", avatarFallback: typeof profileJson.profile?.avatarUrl === "string" ? profileJson.profile.avatarUrl : "" }));
+        } catch { /* storage full/blocked */ }
         setAccountCreatedAt(profileJson.accountCreatedAt ?? null);
         setUserId(profileJson.userId ?? "");
         setUsernameEdit(profileJson.profile?.username ?? "");
@@ -347,7 +380,7 @@ export default function ProfilePage() {
           );
         }
       } finally {
-        if (active) setBusy(false);
+        if (active) { setBusy(false); setProfileReady(true); }
       }
     };
     void load();
@@ -499,6 +532,24 @@ export default function ProfilePage() {
     return () =>
       window.removeEventListener("wraith:currency-sync", onCurrencyUpdated);
   }, []);
+
+  // Base / BNB / ETH trades live in USD; the stats below work in SOL-equivalents, so convert with the live SOL price
+  const trades = useMemo<Trade[]>(() => {
+    if (!evmData || !solUsd) return baseTrades;
+    const extra: Trade[] = evmData.closed.map((c) => ({
+      id: c.id, symbol: c.symbol, mint: c.mint, amountSol: c.costUsd / solUsd, pnlPct: c.pnlPct,
+      entryMcap: c.entryMcap, exitMcap: c.exitMcap || undefined, status: "filled", ts: c.ts, imageUrl: c.imageUrl ?? undefined, mode: "LIVE",
+    }));
+    return [...baseTrades, ...extra];
+  }, [baseTrades, evmData, solUsd]);
+  const positions = useMemo<Position[]>(() => {
+    if (!evmData || !solUsd) return basePositions;
+    const extra: Position[] = evmData.positions.map((p) => ({
+      id: p.id, symbol: p.symbol, mint: p.mint, amountSol: p.costUsd / solUsd, currentPnlPct: p.pnlPct,
+      entryMcap: p.entryMcap, currentMcap: p.currentMcap, ts: p.ts, imageUrl: p.imageUrl ?? undefined, status: "watching", mode: "LIVE",
+    }));
+    return [...basePositions, ...extra];
+  }, [basePositions, evmData, solUsd]);
 
   const filteredTrades = useMemo(() => {
     const now = Date.now();
@@ -859,27 +910,11 @@ export default function ProfilePage() {
       setError("Choose an image file.");
       return;
     }
-    const W = 1200;
-    const H = 300;
-    const dataUrl = await new Promise<string>((resolve, reject) => {
+    const loaded = await new Promise<HTMLImageElement>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const image = new window.Image();
-        image.onload = () => {
-          const canvas = document.createElement("canvas");
-          canvas.width = W;
-          canvas.height = H;
-          const context = canvas.getContext("2d");
-          if (!context) {
-            reject(new Error("Could not process this image."));
-            return;
-          }
-          const scale = Math.max(W / image.width, H / image.height);
-          const width = image.width * scale;
-          const height = image.height * scale;
-          context.drawImage(image, (W - width) / 2, (H - height) / 2, width, height);
-          resolve(canvas.toDataURL("image/jpeg", 0.8));
-        };
+        image.onload = () => resolve(image);
         image.onerror = () => reject(new Error("Could not read this image."));
         image.src = String(reader.result);
       };
@@ -887,13 +922,34 @@ export default function ProfilePage() {
       reader.readAsDataURL(file);
     }).catch((cause: unknown) => {
       setError(cause instanceof Error ? cause.message : "Could not read this image.");
-      return "";
+      return null;
     });
+    if (!loaded) return;
+    coverImgRef.current = loaded;
+    const crop = { zoom: 1, x: 50, y: 50 };
+    setCoverCrop(crop);
+    applyCoverCrop(crop);
+  };
+
+  // crop the picked image to the cover shape (16:4.4); zoom 1-3, x/y = which part of the image stays in frame (0-100)
+  const paintCover = (img: HTMLImageElement, zoom: number, px: number, py: number) => {
+    const W = 1600, H = 440;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    const scale = Math.max(W / img.width, H / img.height) * zoom;
+    const w = img.width * scale, h = img.height * scale;
+    ctx.drawImage(img, (W - w) * (px / 100), (H - h) * (py / 100), w, h);
+    return canvas.toDataURL("image/jpeg", 0.8);
+  };
+  const applyCoverCrop = (crop: { zoom: number; x: number; y: number }) => {
+    const img = coverImgRef.current;
+    if (!img) return;
+    const dataUrl = paintCover(img, crop.zoom, crop.x, crop.y);
     if (!dataUrl) return;
-    if (dataUrl.length > 650_000) {
-      setError("That cover is too large. Choose a smaller image.");
-      return;
-    }
+    if (dataUrl.length > 650_000) { setError("That cover is too large. Choose a smaller image or zoom out."); return; }
+    setError("");
     setDraft((current) => ({ ...current, coverDataUrl: dataUrl }));
   };
 
@@ -1049,7 +1105,7 @@ export default function ProfilePage() {
             className="profile-cover"
             style={
               {
-                backgroundImage: `url("${profile.coverDataUrl || defaultCover(userId || displayName)}")`,
+                backgroundImage: profileReady ? `url("${profile.coverDataUrl || defaultCover(userId || displayName)}")` : "none",
                 backgroundSize: "cover",
                 backgroundPosition: "center",
               }
@@ -1064,7 +1120,7 @@ export default function ProfilePage() {
               style={{ cursor: "default" }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={avatar || defaultAvatar(userId || displayName)} alt="" className="profile-avatar" />
+              {profileReady ? <img src={avatar || defaultAvatar(userId || displayName)} alt="" className="profile-avatar" /> : <span className="profile-avatar-fallback" style={{ background: "#141414" }} />}
               </div>
             <input
               ref={photoInputRef}
@@ -1077,7 +1133,7 @@ export default function ProfilePage() {
               }}
             />
             <div className="profile-title-block">
-              <h1>{displayName}</h1>
+              <h1 style={profileReady ? undefined : { opacity: 0, minHeight: "1.2em" }}>{displayName}</h1>
               {profile.username ? (
                 <p className="profile-username"><span>@</span>{profile.username}</p>
               ) : (
@@ -1793,6 +1849,17 @@ export default function ProfilePage() {
                     </button>
                   )}
                 </div>
+                {coverCrop && coverImgRef.current && draft.coverDataUrl && (
+                  <div className="profile-crop">
+                    {([["zoom", "Zoom", 1, 3, 0.01], ["x", "Left / right", 0, 100, 1], ["y", "Up / down", 0, 100, 1]] as const).map(([k, label, min, max, step]) => (
+                      <label key={k}>
+                        <span>{label}</span>
+                        <input type="range" min={min} max={max} step={step} value={coverCrop[k]}
+                          onChange={(e) => { const next = { ...coverCrop, [k]: Number(e.target.value) }; setCoverCrop(next); applyCoverCrop(next); }} />
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <input
                   ref={coverInputRef}
                   type="file"

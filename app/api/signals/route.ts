@@ -6,7 +6,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import type { MarketCategory, MarketToken } from "@/lib/market";
-import { recordSignals, refreshCalls } from "@/lib/signalCalls";
+import { recordSignals, refreshCalls, type RecordInput } from "@/lib/signalCalls";
+import { enrichSignals, featuresOf, type SignalIntel } from "@/lib/signalIntel";
 import { getSolUsd, IGNORED_MINTS, IGNORED_SYMBOLS } from "@/lib/marketProviders";
 import { evmCandidates } from "@/lib/evmScan";
 import { dexCandidates, jupiterCandidates, jupiterEnrich, type Candidate, type ScanMeta } from "@/lib/scannerSources";
@@ -19,11 +20,15 @@ export interface Signal {
   tags: string[];
   risks: string[];
   meta?: ScanMeta;
+  /** dev history, buyer-flow and proven-wallet intel (Solana only) */
+  intel?: SignalIntel;
 }
 
 const CACHE_MS = 30_000;
-let cache: { ts: number; signals: Signal[] } | null = null;
-let inflight: Promise<Signal[]> | null = null;
+interface Built { signals: Signal[]; records: RecordInput[] }
+let cache: { ts: number; signals: Signal[]; records: RecordInput[] } | null = null;
+let inflight: Promise<Built> | null = null;
+const HOT_MIN = Number(process.env.SIGNAL_HOT_MIN) || 72;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n)));
@@ -46,7 +51,7 @@ function scoreToken(t: MarketToken, meta: ScanMeta, now: number): Signal | null 
 
   // 1. volume pressure (1h volume vs market cap)
   const volRatio = t.volume.h1 / t.mcap;
-  score += clamp(volRatio * 180, 0, 22);
+  score += clamp(volRatio * 140, 0, 16);
   if (volRatio >= 0.08) good.push("Volume surge");
 
   // 2. buy pressure: real buy/sell volume when we have it, else txn counts
@@ -57,9 +62,11 @@ function scoreToken(t: MarketToken, meta: ScanMeta, now: number): Signal | null 
     buyShare = t.txns.buys / (t.txns.buys + t.txns.sells);
   }
   if (buyShare !== null) {
-    score += clamp((buyShare - 0.5) * 56, 0, 14);
-    if (buyShare >= 0.55) good.push("Buy pressure");
-    if (buyShare < 0.42) risks.push("Sell heavy");
+    // healthy accumulation sits in 0.55-0.82; a 90%+ one-sided tape is usually bots or a thin book
+    if (buyShare >= 0.5 && buyShare <= 0.9) score += clamp((buyShare - 0.5) * 36, 0, 12);
+    else if (buyShare > 0.9) { score -= 3; risks.push("One-sided flow"); }
+    if (buyShare >= 0.55 && buyShare <= 0.9) good.push("Buy pressure");
+    if (buyShare < 0.42) { score -= 5; risks.push("Sell heavy"); }
   }
 
   // 3. momentum
@@ -67,13 +74,21 @@ function scoreToken(t: MarketToken, meta: ScanMeta, now: number): Signal | null 
   const m5 = t.change.m5 ?? 0;
   const h6 = t.change.h6 ?? 0;
   const h24 = t.change.h24 ?? 0;
-  if (h1 > 2) score += clamp(h1 / 4, 0, 16);
+  // Reward the early, building move; punish the late chase (the old scorer ranked tokens that had already pumped first).
+  if (h1 >= 8 && h1 <= 90) score += clamp(h1 / 6, 0, 14);
+  else if (h1 > 90 && h1 <= 200) score += 6;
+  else if (h1 > 200) { score -= 12; risks.push("Late: already ran"); }
   if (m5 > 0) score += 4;
+  if (h1 > 0 && m5 > 0 && m5 * 12 > h1) { score += 4; good.push("Accelerating"); }
   if (h1 > 0 && h6 > 10) { score += 3; good.push("Sustained"); }
-  if (h1 > 300) { score -= 15; risks.push("Already pumped"); }
   if (h24 < -50) { score -= 20; risks.push("Down hard 24h"); }
   else if (h1 < -10) { score -= 10; risks.push("Dumping"); }
   if (h1 >= 15 && m5 > 0) good.push("Trending up");
+
+  // market-cap sweet spot: small enough to still 2x, big enough to have real depth
+  if (t.mcap >= 8_000 && t.mcap <= 150_000) score += 5;
+  else if (t.mcap > 600_000) score -= 6;
+  if (t.chain && t.chain !== "solana") score -= 5;
 
   // 4. liquidity health
   const liqRatio = liq / t.mcap;
@@ -117,14 +132,14 @@ function scoreToken(t: MarketToken, meta: ScanMeta, now: number): Signal | null 
   return {
     token: t,
     score,
-    tier: score >= 70 ? "HOT" : "WATCH",
+    tier: "WATCH",
     tags: good.slice(0, 5),
     risks: risks.slice(0, 3),
     meta: Object.keys(meta).length ? meta : undefined,
   };
 }
 
-async function build(origin: string): Promise<Signal[]> {
+async function build(origin: string): Promise<Built> {
   const solUsd = await getSolUsd();
   const cats: MarketCategory[] = ["trending", "new", "gainers", "volume"];
 
@@ -198,7 +213,27 @@ async function build(origin: string): Promise<Signal[]> {
     if (seen.has(s.token.address) || (perChain.get(k) ?? 0) >= 8) continue;
     top.push(s); seen.add(s.token.address); perChain.set(k, (perChain.get(k) ?? 0) + 1);
   }
-  return top.sort((a, b) => b.score - a.score);
+  top.sort((a, b) => b.score - a.score);
+
+  // Scanner v2: pull dev history, buyer flow and proven-wallet intel for the best Solana candidates,
+  // fold it into the score, then decide the final tier. HOT is rare on purpose.
+  await enrichSignals(top, { max: 14, minScore: 45, concurrency: 3, budgetMs: 5_000 }).catch(() => undefined);
+  for (const sg of top) {
+    sg.score = Math.round(clamp(sg.score, 0, 100));
+    const isSol = !sg.token.chain || sg.token.chain === "solana";
+    const vetted = isSol ? !!sg.intel && !sg.intel.block : true;
+    sg.tier = sg.score >= HOT_MIN && vetted ? "HOT" : "WATCH";
+    if (sg.intel?.block) sg.risks = [sg.intel.block, ...sg.risks].slice(0, 3);
+  }
+  top.sort((a, b) => b.score - a.score);
+
+  const records: RecordInput[] = top.map((sg) => ({
+    token: sg.token, score: sg.score, tier: sg.tier, intel: sg.intel,
+    features: featuresOf(sg.token, sg.meta ?? {}, sg.intel, now),
+  }));
+  // the wallet list is for the scoreboard only; never ship it to browsers
+  const signals = top.map((sg) => (sg.intel ? { ...sg, intel: { ...sg.intel, buyers: undefined } } : sg));
+  return { signals, records };
 }
 
 export async function GET(req: NextRequest) {
@@ -209,11 +244,11 @@ export async function GET(req: NextRequest) {
     inflight = build(req.nextUrl.origin).finally(() => { inflight = null; });
   }
   try {
-    const signals = await inflight;
-    if (signals.length) cache = { ts: Date.now(), signals };
+    const built = await inflight;
+    if (built.signals.length) cache = { ts: Date.now(), ...built };
     else if (!cache) throw new Error("scored zero candidates");
     // Persist new calls and refresh tracked prices for everyone (awaited so serverless does not drop it).
-    await recordSignals(signals).catch(() => undefined);
+    await recordSignals(built.records).catch(() => undefined);
     await refreshCalls().catch(() => undefined);
     return NextResponse.json({ signals: cache.signals, updatedAt: cache.ts });
   } catch {

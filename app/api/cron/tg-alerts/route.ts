@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   const out = { entries: 0, wins: 0, sent: 0 };
 
   // 1) fresh calls (spotted in the last 20 min)
-  const fresh = await calls.find({ spottedAt: { $gt: Date.now() - 20 * 60_000 } }).toArray();
+  const fresh = await calls.find({ spottedAt: { $gt: Date.now() - 20 * 60_000 }, shadow: { $ne: true }, engine: 2 }).toArray();
   const feed = new Map(signals.map((s) => [s.token.address, s]));
   for (const c of fresh) {
     if (!(await claim(`entry:${c.address}`))) continue;
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 2) win milestones across the last 7 days
-  const tracked = await calls.find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 } }).toArray();
+  const tracked = await calls.find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
   for (const c of tracked) {
     const m = milestoneFor(c.lastMcap / c.spottedMcap);
     if (!m) continue;

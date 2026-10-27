@@ -209,7 +209,7 @@ export default function TokenChart({
         lockVisibleTimeRangeOnResize: true,
         shiftVisibleRangeOnNewBar: true,
       },
-      kineticScroll: { mouse: true, touch: true },
+      kineticScroll: { mouse: false, touch: false },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
     });

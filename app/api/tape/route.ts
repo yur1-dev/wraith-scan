@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   let stats = { calls: 0, hit2: 0, rate: 0 };
   try {
     const db = await getDb();
-    const calls = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 } }).toArray();
+    const calls = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
     const px = (c: SignalCall) => c.peakMcap / c.spottedMcap;
     const hit2 = calls.filter((c) => px(c) >= 2).length;
     stats = { calls: calls.length, hit2, rate: calls.length ? Math.round((hit2 / calls.length) * 100) : 0 };

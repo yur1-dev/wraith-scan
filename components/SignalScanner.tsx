@@ -285,7 +285,7 @@ export default function SignalScanner({
         </header>
 
         {deep ? (
-          <div className="sg-deep">{deepScan}</div>
+          <div className={`sg-deep ${view}`}>{deepScan}</div>
         ) : (
           <>
             <div className="sg-filters sg-chains" role="tablist" aria-label="Chain">

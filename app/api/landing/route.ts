@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   let calls: SignalCall[] = [];
   try {
     const db = await getDb();
-    calls = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: now - 7 * 86_400_000 }, spottedMcap: { $gt: 0 } }).toArray();
+    calls = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: now - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
   } catch { /* db optional: site shows empty states */ }
 
   const hit2 = calls.filter((c) => xOf(c) >= 2).length;

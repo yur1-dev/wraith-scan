@@ -1,5 +1,6 @@
 "use client";
 
+import { defaultAvatar, defaultCover } from "@/lib/defaultArt";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1047,13 +1048,11 @@ export default function ProfilePage() {
           <div
             className="profile-cover"
             style={
-              profile.coverDataUrl
-                ? {
-                    backgroundImage: `url(${profile.coverDataUrl})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }
-                : undefined
+              {
+                backgroundImage: `url("${profile.coverDataUrl || defaultCover(userId || displayName)}")`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }
             }
           >
             </div>
@@ -1064,14 +1063,8 @@ export default function ProfilePage() {
               className="profile-avatar-button"
               style={{ cursor: "default" }}
             >
-              {avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatar} alt="" className="profile-avatar" />
-              ) : (
-                <span className="profile-avatar-fallback">
-                  {displayName.slice(0, 1).toUpperCase()}
-                </span>
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={avatar || defaultAvatar(userId || displayName)} alt="" className="profile-avatar" />
               </div>
             <input
               ref={photoInputRef}

@@ -1,5 +1,6 @@
 "use client";
 
+import { defaultAvatar, defaultCover } from "@/lib/defaultArt";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -161,20 +162,14 @@ export default function PublicTraderPage() {
           <div
             className="pub-cover"
             style={
-              trader.coverDataUrl
-                ? { backgroundImage: `url(${trader.coverDataUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
-                : undefined
+              { backgroundImage: `url("${trader.coverDataUrl || defaultCover(userId)}")`, backgroundSize: "cover", backgroundPosition: "center" }
             }
           />
 
           <div className="pub-identity">
             <div className="pub-avatar">
-              {trader.avatarDataUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={trader.avatarDataUrl} alt="" className="pub-avatar-img" />
-              ) : (
-                <span className="pub-avatar-fallback">{trader.displayName.slice(0, 1).toUpperCase()}</span>
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={trader.avatarDataUrl || defaultAvatar(userId)} alt="" className="pub-avatar-img" />
             </div>
 
             <div className="pub-id-name">

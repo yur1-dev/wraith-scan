@@ -11,7 +11,7 @@ export async function GET() {
   if (cache && Date.now() - cache.ts < 30_000) return NextResponse.json(cache.body);
   try {
     const db = await getDb();
-    const all = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: Date.now() - 30 * DAY }, spottedMcap: { $gt: 0 } }).toArray();
+    const all = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: Date.now() - 30 * DAY }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
     const peak = (c: SignalCall) => Math.max(c.peakMcap, c.lastMcap) / c.spottedMcap;
     const windowOf = (ms: number) => {
       const rows = all.filter((c) => c.spottedAt > Date.now() - ms);

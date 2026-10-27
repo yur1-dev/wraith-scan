@@ -151,7 +151,7 @@ async function cmdTop(chatId: number, origin: string) {
 
 async function cmdWins(chatId: number) {
   const db = (await clientPromise).db();
-  const calls = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 } }).toArray();
+  const calls = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
   if (!calls.length) return send(chatId, `🏆 <b>WRAITH RECORD</b>\n${rule}\nNo calls tracked yet.`, scannerBtn);
   const x = (c: SignalCall) => c.peakMcap / c.spottedMcap;
   const hit2 = calls.filter((c) => x(c) >= 2).length;
@@ -181,7 +181,7 @@ async function cmdToken(chatId: number, ca: string | null) {
   const mcap = p.marketCap ?? p.fdv ?? 0;
   const b = p.txns?.h1;
   const db = (await clientPromise).db();
-  const call = await db.collection<SignalCall>("signal_calls").findOne({ address: ca });
+  const call = await db.collection<SignalCall>("signal_calls").findOne({ address: ca, shadow: { $ne: true }, engine: 2 });
   const L = [
     `🔍 <b>TOKEN</b>\n<b>$${esc(p.baseToken.symbol.toUpperCase())}</b>  <i>${esc(p.baseToken.name)} · ${esc(CHAINS[chain]?.name ?? chainName(chain))}</i>\n${rule}`,
     `💰 <b>MCap</b>  ${fmtUsd(mcap)}    💧 <b>Liq</b>  ${fmtUsd(p.liquidity?.usd)}`,

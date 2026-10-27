@@ -16,8 +16,11 @@ const MONGO_OPTIONS = {
   serverSelectionTimeoutMS: 30_000,
   connectTimeoutMS: 30_000,
   socketTimeoutMS: 45_000,
-  maxPoolSize: 10,
-  minPoolSize: 1,
+  // Serverless: every warm instance keeps its own pool. 10 x many instances blows past Atlas' connection cap
+  // (free tier: 500), so keep pools small and let idle ones close.
+  maxPoolSize: 5,
+  minPoolSize: 0,
+  maxIdleTimeMS: 30_000,
   heartbeatFrequencyMS: 15_000,
 };
 
@@ -27,6 +30,8 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
   // eslint-disable-next-line no-var
   var _mongoIndexesEnsured: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var _mongoScaleIndexes: boolean | undefined;
 }
 
 let clientPromise: Promise<MongoClient>;
@@ -101,5 +106,50 @@ export async function ensureIndexes(): Promise<void> {
   }
 }
 
+// ─── SCALE INDEXES ────────────────────────────────────────────────────────────
+// Added for 1,000+ users: every list/feed endpoint looks users up by userId / mint / wallet. Without these Mongo reads
+// the whole collection on each request. All non-unique (safe on existing data) and idempotent. Each one is wrapped so a
+// single failure never blocks the rest. Runs a few seconds after boot so it never competes with the first requests.
+type IndexSpec = [string, Record<string, 1 | -1>, Record<string, unknown>?];
+const SCALE_INDEXES: IndexSpec[] = [
+  ["signal_calls", { shadow: 1, spottedAt: -1 }],
+  ["signal_calls", { learned: 1, spottedAt: 1 }],
+  ["profiles", { userId: 1 }],
+  ["profiles", { updatedAt: -1 }],
+  ["profiles", { displayName: 1 }],
+  ["users", { telegramChatId: 1 }, { sparse: true }],
+  ["users", { walletAddress: 1 }, { sparse: true }],
+  ["trader_follows", { followerId: 1, traderId: 1 }],
+  ["trader_follows", { traderId: 1 }],
+  ["callouts", { mint: 1, createdAt: -1 }],
+  ["callouts", { userId: 1, createdAt: -1 }],
+  ["callouts", { parentId: 1, createdAt: 1 }],
+  ["callouts", { createdAt: -1 }],
+  ["callout_hearts", { calloutId: 1, userId: 1 }],
+  ["callout_reposts", { calloutId: 1, userId: 1 }],
+  ["token_activity", { mint: 1, lastAt: -1 }],
+  ["token_activity", { userId: 1, mint: 1 }],
+  ["telegram_links", { token: 1 }],
+  ["positions", { userId: 1, mint: 1, status: 1 }],
+  // dedupe markers for Telegram alerts: nothing reads them after a few weeks, so let Mongo delete them
+  ["tg_sent", { at: 1 }, { expireAfterSeconds: 30 * 24 * 3600 }],
+];
+async function ensureScaleIndexes(): Promise<void> {
+  if (global._mongoScaleIndexes) return;
+  global._mongoScaleIndexes = true;
+  try {
+    const db = await getDb();
+    let ok = 0;
+    for (const [col, spec, opts] of SCALE_INDEXES) {
+      try { await db.collection(col).createIndex(spec, opts ?? {}); ok++; }
+      catch (e) { console.warn(`[mongoClient] index ${col} ${JSON.stringify(spec)} skipped:`, e instanceof Error ? e.message : e); }
+    }
+    console.log(`[mongoClient] Scale indexes ensured (${ok}/${SCALE_INDEXES.length})`);
+  } catch (e) {
+    console.warn("[mongoClient] scale indexes failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 // Auto-run on module load (non-blocking — errors are caught above)
 ensureIndexes();
+setTimeout(() => { void ensureScaleIndexes(); }, 4000).unref?.();

@@ -740,3 +740,14 @@ html.wraith-blur-balances :is(
   /* hide the separate sub-tab hint, tighten header */
   .wraith-app-header { padding-left: 12px; padding-right: 12px; }
 }
+
+/* Deep scan honours the Cards / Table toggle */
+.sg-deep.grid .wx-scan-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); align-content: start; gap: 0 4px; padding: 12px 16px 20px; }
+.sg-deep.grid .wx-scan-item { padding: 4px; }
+.sg-deep.list .wx-scan-list { display: block; }
+.sg-deep.list .wx-scan-item { padding: 1px 14px; }
+.sg-deep.list .wx-scan-row { padding: 7px 12px; border-radius: 8px; }
+
+/* Taller, proper-ratio covers (own + public profile) */
+.profile-hero .profile-cover, .pub-cover { height: auto; aspect-ratio: 16 / 4.4; min-height: 130px; max-height: 250px; }
+@media (max-width: 767px) { .profile-hero .profile-cover, .pub-cover { aspect-ratio: 16 / 6; min-height: 110px; } }

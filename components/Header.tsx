@@ -1,5 +1,7 @@
 "use client";
 
+import { QRCodeSVG } from "qrcode.react";
+import { defaultAvatar } from "@/lib/defaultArt";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
@@ -26,7 +28,7 @@ import { Lock as LockIcon,
   UserRound,
   X,
 } from "lucide-react";
-import { useMfa, useMfaEnrollment } from "@privy-io/react-auth";
+import { useLinkWithPasskey, useMfaEnrollment, usePrivy } from "@privy-io/react-auth";
 import StyledSelect from "./StyledSelect";
 import EmbeddedWalletBalanceChip from "./EmbeddedWalletBalanceChip";
 import MobileTabBar from "./MobileTabBar";
@@ -2199,7 +2201,9 @@ type PinStep =
   | "removing";
 
 function SecurityPanel() {
-  const { mfaMethods } = useMfa();
+  // The user's own enrolled methods. (useMfa().mfaMethods only lists what the app allows, which wrongly showed everything as ON.)
+  const { user: privyUser } = usePrivy();
+  const mfaMethods = privyUser?.mfaMethods ?? [];
   const {
     initEnrollmentWithTotp,
     submitEnrollmentWithTotp,
@@ -2207,6 +2211,7 @@ function SecurityPanel() {
     initEnrollmentWithPasskey,
     unenrollWithPasskey,
   } = useMfaEnrollment();
+  const { linkWithPasskey } = useLinkWithPasskey();
 
   // TOTP state
   const [totpStep, setTotpStep] = useState<TotpStep>("idle");
@@ -2282,7 +2287,15 @@ function SecurityPanel() {
     setPasskeyError("");
     setPasskeyBusy(true);
     try {
-      await initEnrollmentWithPasskey();
+      try {
+        await initEnrollmentWithPasskey();
+      } catch (e: unknown) {
+        // Privy only enrols passkeys that are already linked to the account: create/link one, then retry.
+        if (e instanceof Error && /eligible passkey/i.test(e.message)) {
+          await linkWithPasskey({ name: "Wraith" });
+          await initEnrollmentWithPasskey();
+        } else throw e;
+      }
     } catch (e: unknown) {
       setPasskeyError(e instanceof Error ? e.message : "Passkey setup failed");
     } finally {
@@ -2537,9 +2550,14 @@ function SecurityPanel() {
               }}
             >
               Open your authenticator app (Google Authenticator, Authy, etc.)
-              and add a new account using the secret below, or tap the link to
-              open it directly.
+              and scan this QR code (or add a new account using the secret key
+              below).
             </p>
+            {totpAuthUrl && (
+              <div style={{ alignSelf: "center", padding: 10, background: "#fff", borderRadius: 10, lineHeight: 0 }}>
+                <QRCodeSVG value={totpAuthUrl} size={156} level="M" />
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 10, color: "#555", letterSpacing: 1 }}>
                 SECRET KEY
@@ -3378,22 +3396,14 @@ export default function Header({ onSelectMeme }: HeaderProps) {
             aria-label="Profile menu"
           >
             <div className="wraith-profile-menu-account">
-              {profileAvatar || session.user?.image ? (
-                <Image
-                  src={profileAvatar || session.user.image || ""}
-                  alt=""
-                  width={40}
-                  height={40}
-                  className="wraith-profile-menu-avatar"
-                  unoptimized
-                />
-              ) : (
-                <div className="wraith-profile-menu-avatar wraith-profile-menu-initial">
-                  {(session.user?.name ??
-                    session.user?.email ??
-                    "?")[0].toUpperCase()}
-                </div>
-              )}
+              <Image
+                src={profileAvatar || session.user?.image || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
+                alt=""
+                width={40}
+                height={40}
+                className="wraith-profile-menu-avatar"
+                unoptimized
+              />
               <div className="wraith-profile-menu-identity">
                 <strong>
                   {profileDisplayName || session.user?.name || "Your account"}
@@ -3959,39 +3969,15 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                   handleProfileMouseLeave();
                 }}
               >
-                {profileAvatar || session.user?.image ? (
-                  <Image
-                    src={profileAvatar || session.user.image || ""}
-                    alt="avatar"
-                    width={32}
-                    height={32}
-                    className="wraith-header-avatar"
-                    style={{ borderRadius: "50%", display: "block" }}
-                    unoptimized
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: "50%",
-                      background: "linear-gradient(145deg, #ff7a3d, #a9320b)",
-                      border: "1px solid rgba(255,151,102,.6)",
-                      boxShadow: "0 0 0 3px rgba(var(--accent-rgb),.08)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#fff8f3",
-                      fontSize: 14,
-                      fontWeight: 800,
-                      ...MONO,
-                    }}
-                  >
-                    {(session.user?.name ??
-                      session.user?.email ??
-                      "?")[0].toUpperCase()}
-                  </div>
-                )}
+                <Image
+                  src={profileAvatar || session.user?.image || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
+                  alt="avatar"
+                  width={32}
+                  height={32}
+                  className="wraith-header-avatar"
+                  style={{ borderRadius: "50%", display: "block" }}
+                  unoptimized
+                />
               </button>
             </div>
           )}

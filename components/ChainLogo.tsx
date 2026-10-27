@@ -31,8 +31,8 @@ function Mark({ k }: { k: string }) {
 
 export default function ChainLogo({ chain, size = 16, className = "" }: { chain?: string | null; size?: number; className?: string }) {
   const k = (chain || "").toLowerCase();
-  // Built-in marks by default (no /chains/*.svg 404s). Set NEXT_PUBLIC_CHAIN_LOGO_FILES=1 after adding real files to /public/chains.
-  const [broken, setBroken] = useState(process.env.NEXT_PUBLIC_CHAIN_LOGO_FILES !== "1");
+  // Official logos live in /public/chains/<key>.png; the built-in mark below is only the fallback if a file is missing.
+  const [broken, setBroken] = useState(false);
   const ref = useRef<HTMLImageElement>(null);
   // An <img> rendered on the server can fail before React attaches onError, so check once on mount.
   useEffect(() => {
@@ -44,7 +44,7 @@ export default function ChainLogo({ chain, size = 16, className = "" }: { chain?
   if (!broken) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img ref={ref} src={`/chains/${k}.svg`} alt="" width={size} height={size} className={`wx-chain-logo ${className}`} style={{ ...style, borderRadius: "50%" }} onError={() => setBroken(true)} />
+      <img ref={ref} src={`/chains/${k}.png`} alt="" width={size} height={size} className={`wx-chain-logo ${className}`} style={{ ...style, borderRadius: "50%" }} onError={() => setBroken(true)} />
     );
   }
   return (

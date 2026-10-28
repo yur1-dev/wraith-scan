@@ -828,3 +828,58 @@ html.wraith-blur-balances :is(
 .profile-mode-badge.live { background: rgba(61,220,132,.12); color: #3ddc84; border: 1px solid rgba(61,220,132,.3); }
 .profile-trade-pnl.is-positive, .profile-open-row .is-positive { color: #3ddc84; font-weight: 800; }
 .profile-trade-pnl.is-negative, .profile-open-row .is-negative { color: #ff6b5e; font-weight: 800; }
+
+/* positions tabs */
+.profile-tabs{display:inline-flex;gap:4px;padding:3px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.03)}
+.profile-tabs button{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:0;border-radius:9px;background:transparent;color:var(--text-muted);font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.profile-tabs button em{font-style:normal;font-size:10px;padding:1px 6px;border-radius:99px;background:rgba(255,255,255,.07)}
+.profile-tabs button.on{background:rgba(255,123,61,.16);color:#ff9a63}
+.profile-empty-note{margin:6px 2px 2px;color:var(--text-dim);font-size:12px;line-height:1.5}
+
+/* holdings (wallet view) */
+.hold-list{display:flex;flex-direction:column;gap:2px;margin-top:8px}
+.hold-row{display:flex;align-items:center;gap:12px;padding:10px 8px;border-radius:12px;color:inherit;text-decoration:none;transition:background .15s}
+a.hold-row:hover{background:rgba(255,255,255,.05)}
+.hold-ico{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.08);display:grid;place-items:center;overflow:hidden;font-weight:700;flex:none}
+.hold-ico img{width:100%;height:100%;object-fit:cover}
+.hold-name{display:flex;flex-direction:column;min-width:0;flex:1}
+.hold-name b{font-size:14px}
+.hold-name em{font-style:normal;font-size:12px;opacity:.6;overflow:hidden;text-overflow:ellipsis}
+.hold-val{font-weight:600;font-variant-numeric:tabular-nums}
+
+/* simpler profile: hide empty chart + X card, 3-up stat row */
+.profile-portfolio-chart.is-empty{display:none}
+.profile-portfolio-overview:has(.profile-portfolio-chart.is-empty){grid-template-columns:1fr !important}
+.profile-social-panel{display:none !important}
+.profile-stat-grid{grid-template-columns:repeat(3,minmax(0,1fr)) !important}
+@media (max-width:640px){.profile-stat-grid{grid-template-columns:1fr 1fr !important}}
+
+/* ── market board: phone layout ── */
+.wx-spark{flex:none;opacity:.95}
+.wx-mc-cell{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0}
+.wx-mc-cell .wx-spark{display:none}
+@media (max-width: 700px){
+  .wx-board-bar{gap:8px !important;padding:8px 10px !important}
+  .wx-board-bar > .wx-seg.lg{order:1;flex:1 1 100%;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+  .wx-board-bar > .wx-seg.lg::-webkit-scrollbar{display:none}
+  .wx-board-bar > .wx-seg.lg button{flex:none;white-space:nowrap;padding:7px 12px}
+  .wx-board-bar .wx-search{order:2;flex:1 1 100% !important}
+  .wx-board-bar .wx-check{order:3;font-size:12px}
+  .wx-board-bar .wx-live{order:4;font-size:11px}
+  .wx-board-bar > div[style]{display:none}
+  .wx-board-bar > .wx-seg:not(.lg){order:5;margin-left:auto}
+  .wx-board-bar .wx-icon-btn{order:6}
+  .wx-board-body{padding:8px !important}
+  .wx-grid{grid-template-columns:1fr 1fr !important;gap:8px !important}
+  .wx-tcard{padding:10px !important;gap:8px !important}
+  .wx-tcard-top img,.wx-tcard-top > *:first-child{max-width:38px;max-height:38px}
+  .wx-tcard-sym strong{font-size:14px !important}
+  .wx-tcard-mc{flex-wrap:wrap}
+  .wx-tcard-mc strong{font-size:17px !important}
+  .wx-tcard-mc .wx-spark{order:3;width:100%;height:20px}
+  .wx-tcard-meta{flex-wrap:wrap;gap:4px 10px !important;font-size:11px !important}
+  .wx-tcard-meta .wx-qb{margin-left:auto}
+  .wx-trow{grid-template-columns:minmax(0,1.7fr) minmax(0,1fr) minmax(0,.7fr) auto !important;gap:8px !important;padding:10px 8px !important}
+  .wx-mc-cell .wx-spark{display:block}
+  .wx-trow.head .wx-spark{display:none}
+}

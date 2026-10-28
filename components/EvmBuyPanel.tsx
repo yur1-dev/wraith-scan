@@ -118,6 +118,22 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd, 
     const seq = ++qSeq.current;
     const t = setTimeout(async () => {
       setPhase("quoting"); setMsg("");
+      // Base sells: go straight into the pool first (fast, no router search); only fall back to routers if that pool can't do it
+      if (mode === "sell" && chainKey === "base" && bal) {
+        try {
+          const chain = VIEM_CHAINS.base;
+          const client = createPublicClient({ chain, transport: http(rpcFor(chain) ?? undefined) }) as unknown as PublicClient;
+          const plan = await planV4Sell(client, tokenAddr, req.fromRaw);
+          if (seq !== qSeq.current) return;
+          const usd = Number(formatUnits(req.fromRaw, bal.dec)) * priceUsd;
+          setQuote({ transactionRequest: { data: "0x" }, estimate: { toAmountMin: BigInt(Math.max(0, Math.floor(usd * 1e6))).toString() }, action: { toToken: { decimals: 6, symbol: "USDC" } }, v4: plan });
+          setPhase("idle");
+          return;
+        } catch (e0) {
+          if (seq !== qSeq.current) return;
+          if (e0 instanceof Error && /no liquidity/i.test(e0.message)) { setPhase("error"); setMsg(e0.message); return; }
+        }
+      }
       try {
         const q = await lifiQuote({ fromChain: req.fromId, toChain: req.toId, fromToken: req.fromToken, toToken: req.toToken, fromAmount: req.fromRaw.toString(), fromAddress: req.fromAddr, toAddress: req.toAddr });
         if (seq !== qSeq.current) return;

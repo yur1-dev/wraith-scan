@@ -36,6 +36,7 @@ import StyledSelect from "@/components/StyledSelect";
 import UsernameSetupModal from "@/components/UsernameSetupModal";
 import FollowListModal from "@/components/FollowListModal";
 import { decryptHotWalletKey } from "@/lib/hotWalletCrypto";
+import { useCashSources } from "@/lib/useCashSources";
 import {
   DisplayCurrency,
   formatCurrency,
@@ -148,7 +149,7 @@ export default function ProfilePage() {
   } = useWraithSession();
   const { connection } = useConnection();
   const { connected, publicKey, sendTransaction } = useWallet();
-  const { user: privyUser } = usePrivy();
+  const { user: privyUser, getAccessToken } = usePrivy();
   const embeddedSolanaAccount = privyUser?.linkedAccounts.find(
       (account) =>
         account.type === "wallet" &&
@@ -167,6 +168,24 @@ export default function ProfilePage() {
   const [notice, setNotice] = useState("");
   const [timeframe, setTimeframe] = useState<Timeframe>("7d");
   const [tradeMode, setTradeMode] = useState<"ALL" | Trade["mode"]>("ALL");
+  const cashHook = useCashSources();
+  const [posTab, setPosTab] = useState<"open" | "closed">("open");
+  const fmtHoldUsd = (v: number) => (v < 0.01 ? "<$0.01" : v.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: v < 100 ? 2 : 0 }));
+  const [holdings, setHoldings] = useState<{ address: string; symbol: string; name: string; amount: number; priceUsd: number; valueUsd: number; imageUrl?: string; native?: boolean }[]>([]);
+  useEffect(() => {
+    let on = true;
+    const load = async () => {
+      try {
+        const token = await getAccessToken();
+        const r = await fetch("/api/holdings", { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        const j = await r.json().catch(() => ({}));
+        if (on && r.ok && Array.isArray(j?.holdings)) setHoldings(j.holdings);
+      } catch { /* holdings optional */ }
+    };
+    void load();
+    window.addEventListener("wraith-evm-synced", load);
+    return () => { on = false; window.removeEventListener("wraith-evm-synced", load); };
+  }, [getAccessToken]);
   const [baseTrades, setTrades] = useState<Trade[]>([]);
   const [basePositions, setPositions] = useState<Position[]>([]);
   const [evmData, setEvmData] = useState<{
@@ -321,40 +340,26 @@ export default function ProfilePage() {
               )
               .map((position: Position) => ({ ...position, mode: "LIVE" as const }))
           : [];
-        let paperTrades: Trade[] = [];
-        let paperPositions: Position[] = [];
-        try {
-          const paperLog: unknown = JSON.parse(
-            localStorage.getItem(PAPER_LOG_KEY) ?? "[]",
-          );
-          const storedPaperPositions: unknown = JSON.parse(
-            localStorage.getItem(PAPER_POSITIONS_KEY) ?? "[]",
-          );
-          if (Array.isArray(paperLog)) {
-            paperTrades = paperLog
-              .map((trade) =>
-                toTrade(trade as Record<string, unknown>, "PAPER"),
-              )
-              .filter((trade): trade is Trade => trade !== null);
-          }
-          if (Array.isArray(storedPaperPositions)) {
-            paperPositions = storedPaperPositions.filter(
-              (position: Position) => position.status === "watching",
-            ).map((position: Position) => ({ ...position, mode: "PAPER" as const }));
-          }
-        } catch (cause) {
-          console.error("[profile paper data]", cause);
-          setError("Paper history could not be read from this browser.");
-        }
-        try {
-          // pick up trades made earlier / elsewhere with this wallet (throttled)
+        const loadEvm = async () => {
+          try {
+            const er = await fetch("/api/evm-trades", { cache: "no-store" });
+            if (er.ok) { const ej = await er.json(); if (active && Array.isArray(ej?.closed) && Array.isArray(ej?.positions)) setEvmData(ej); }
+          } catch { /* EVM history is optional */ }
+        };
+        await loadEvm();
+        // pick up trades made earlier / elsewhere with this wallet, in the background (throttled)
+        void (async () => {
           try {
             const last = Number(localStorage.getItem("wraith_evm_sync_v1") ?? "0");
-            if (Date.now() - last > 120_000) { localStorage.setItem("wraith_evm_sync_v1", String(Date.now())); await fetch("/api/evm-trades/sync", { method: "POST" }); }
-          } catch { /* sync is best-effort */ }
-          const er = await fetch("/api/evm-trades", { cache: "no-store" });
-          if (er.ok) { const ej = await er.json(); if (active && Array.isArray(ej?.closed) && Array.isArray(ej?.positions)) setEvmData(ej); }
-        } catch { /* EVM history is optional */ }
+            if (Date.now() - last < 60_000) return;
+            localStorage.setItem("wraith_evm_sync_v1", String(Date.now()));
+            const token = await getAccessToken();
+            const r = await fetch("/api/evm-trades/sync", { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {} });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) localStorage.removeItem("wraith_evm_sync_v1");
+            if (r.ok && j?.added > 0) { await loadEvm(); window.dispatchEvent(new Event("wraith-evm-synced")); }
+          } catch { localStorage.removeItem("wraith_evm_sync_v1"); }
+        })();
         setProfile(loaded);
         setDraft(loaded);
         setProfileReady(true);
@@ -364,8 +369,8 @@ export default function ProfilePage() {
         setAccountCreatedAt(profileJson.accountCreatedAt ?? null);
         setUserId(profileJson.userId ?? "");
         setUsernameEdit(profileJson.profile?.username ?? "");
-        setTrades([...liveTrades, ...paperTrades]);
-        setPositions([...livePositions, ...paperPositions]);
+        setTrades(liveTrades);
+        setPositions(livePositions);
         localStorage.setItem(
           "wraith_display_currency_v1",
           loaded.displayCurrency,
@@ -637,12 +642,13 @@ export default function ProfilePage() {
       0,
     );
   const portfolioSol =
-    (walletBalance ?? 0) + (hotWalletBalance ?? 0) + livePositionValue;
+    (walletBalance ?? 0) + (hotWalletBalance ?? 0) + livePositionValue + (solUsd ? cashHook.total / solUsd : 0);
   const portfolioValue =
     solUsd !== null &&
     fxRate !== null &&
     (walletBalance !== null ||
       hotWalletBalance !== null ||
+      cashHook.total > 0 ||
       positions.some((position) => position.mode === "LIVE"))
       ? portfolioSol * solUsd * fxRate
       : null;
@@ -1319,7 +1325,7 @@ export default function ProfilePage() {
                 : "No open positions"}
             </small>
           </article>
-          <article className="profile-stat-card">
+          {bestTrade && <article className="profile-stat-card">
             <span>BEST TRADE</span>
             <strong className={bestTrade ? "is-positive" : ""}>
               {bestTrade
@@ -1329,7 +1335,7 @@ export default function ProfilePage() {
             <small>
               {bestTrade ? bestTrade.symbol : "Your best close will show here"}
             </small>
-          </article>
+          </article>}
         </section>
 
         <section className={`profile-main-grid${filteredTrades.length ? "" : " is-social-only"}`}>
@@ -1354,20 +1360,6 @@ export default function ProfilePage() {
                       {period === "all" ? "All" : period}
                     </button>
                   ))}
-                </div>
-                <div className="profile-mode-select">
-                  <StyledSelect
-                    value={tradeMode}
-                    onChange={(value) =>
-                      setTradeMode(value as "ALL" | Trade["mode"])
-                    }
-                    ariaLabel="Filter trade mode"
-                    options={[
-                      { value: "ALL", label: "All modes" },
-                      { value: "PAPER", label: "Paper" },
-                      { value: "LIVE", label: "Live" },
-                    ]}
-                  />
                 </div>
               </div>
             </div>
@@ -1449,15 +1441,64 @@ export default function ProfilePage() {
           </article>}
 
           <aside className="profile-side-column">
-            {positions.length > 0 && <article className="profile-panel profile-position-panel">
+            {holdings.length > 0 && (
+              <article className="profile-panel profile-holdings-panel">
+                <div className="profile-panel-heading">
+                  <div>
+                    <span className="profile-eyebrow">WALLET · BASE</span>
+                    <h2>Holdings</h2>
+                  </div>
+                  <strong>{fmtHoldUsd(holdings.reduce((t, h) => t + h.valueUsd, 0))}</strong>
+                </div>
+                <div className="hold-list">
+                  {holdings.map((h) => (
+                    <a key={h.address} className="hold-row" href={h.native ? undefined : `/app/token/${h.address}?chain=base`}>
+                      <span className="hold-ico">{h.imageUrl ? <img src={h.imageUrl} alt="" /> : h.symbol.slice(0, 1)}</span>
+                      <span className="hold-name"><b>{h.symbol}</b><em>{h.amount >= 1000 ? h.amount.toLocaleString(undefined, { maximumFractionDigits: 0 }) : h.amount.toLocaleString(undefined, { maximumSignificantDigits: 5 })}</em></span>
+                      <span className="hold-val">{fmtHoldUsd(h.valueUsd)}</span>
+                    </a>
+                  ))}
+                </div>
+              </article>
+            )}
+
+            <article className="profile-panel profile-position-panel">
               <div className="profile-panel-heading">
                 <div>
                   <span className="profile-eyebrow">LIVE EXPOSURE</span>
                   <h2>Open positions</h2>
                 </div>
-                <span className="profile-count">{positions.length}</span>
+                <div className="profile-tabs" role="tablist">
+                  <button type="button" role="tab" aria-selected={posTab === "open"} className={posTab === "open" ? "on" : ""} onClick={() => setPosTab("open")}>Open <em>{positions.length}</em></button>
+                  <button type="button" role="tab" aria-selected={posTab === "closed"} className={posTab === "closed" ? "on" : ""} onClick={() => setPosTab("closed")}>Closed <em>{completedTrades.length}</em></button>
+                </div>
               </div>
-              {positions.length ? (
+              {posTab === "closed" ? (
+                completedTrades.length ? (
+                  <div className="profile-open-list">
+                    {completedTrades.slice(0, 8).map((t) => {
+                      const pct = t.pnlPct ?? 0;
+                      const ready = solUsd !== null && fxRate !== null;
+                      const invested = ready ? formatCurrency(t.amountSol * solUsd * fxRate, profile.displayCurrency) : "";
+                      const pnlAmt = ready ? formatCurrency(Math.abs(t.amountSol * (pct / 100)) * solUsd * fxRate, profile.displayCurrency) : "";
+                      return (
+                        <Link className="profile-open-row" key={`${t.mode}-${t.id}`} href={`/app/token/${t.mint}`}>
+                          <div className="profile-token-avatar">
+                            {t.imageUrl ? <Image src={t.imageUrl} alt="" width={34} height={34} unoptimized /> : t.symbol.slice(0, 1)}
+                          </div>
+                          <div className="profile-open-name">
+                            <strong>{t.symbol}</strong>
+                            <small>{invested ? `${invested} invested · ` : ""}{formatDate(t.ts)}</small>
+                          </div>
+                          <span className={pct >= 0 ? "is-positive" : "is-negative"}>
+                            {pnlAmt ? `${pct >= 0 ? "+" : "-"}${pnlAmt} · ` : ""}{pct >= 0 ? "+" : ""}{pct.toFixed(1)}%
+                          </span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : <p className="profile-empty-note">No closed trades in this window yet.</p>
+              ) : positions.length ? (
                 <div className="profile-open-list">
                   {positions.slice(0, 6).map((position) => (
                     <Link
@@ -1495,12 +1536,14 @@ export default function ProfilePage() {
                     </Link>
                   ))}
                 </div>
-              ) : null}
-              <div className="profile-exposure-foot">
-                <span>Open value</span>
-                <strong>{openPositionValueDisplay}</strong>
-              </div>
-            </article>}
+              ) : <p className="profile-empty-note">No open positions. Buy a token and it shows up here.</p>}
+              {posTab === "open" && positions.length > 0 && (
+                <div className="profile-exposure-foot">
+                  <span>Open value</span>
+                  <strong>{openPositionValueDisplay}</strong>
+                </div>
+              )}
+            </article>
 
             <article className="profile-panel profile-social-panel">
               <span className="profile-eyebrow" id="profile-social">LINKED ACCOUNT</span>

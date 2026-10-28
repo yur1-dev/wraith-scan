@@ -68,6 +68,24 @@ function CardBar({ token }: { token: MarketToken }) {
   );
 }
 
+// Tiny trend line built from the real 24h / 6h / 1h / 5m price changes (no extra fetch)
+function Spark({ token }: { token: MarketToken }) {
+  const c = token.change;
+  const pts: number[] = [];
+  for (const v of [c.h24, c.h6, c.h1, c.m5]) if (v != null && v > -99) pts.push(1 / (1 + v / 100));
+  if (pts.length < 2) return null;
+  pts.push(1);
+  const min = Math.min(...pts), max = Math.max(...pts), span = max - min || 1;
+  const d = pts.map((v, i) => `${i ? "L" : "M"}${((i / (pts.length - 1)) * 64).toFixed(1)} ${(20 - ((v - min) / span) * 18).toFixed(1)}`).join(" ");
+  const first = c.h24 ?? c.h6 ?? c.h1 ?? 0;
+  const col = first >= 0 ? "#22c55e" : "#ef4444";
+  return (
+    <svg className="wx-spark" viewBox="0 0 64 22" width="64" height="22" aria-hidden="true">
+      <path d={d} fill="none" stroke={col} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // Sanitize name: skip tokens whose symbol/name is clearly garbage data.
 function safeName(name: string, symbol: string): string {
   if (!name || name === "?" || /^\[/.test(name)) return symbol;
@@ -107,6 +125,7 @@ function Card({ token, onOpen, quickSol }: { token: MarketToken; onOpen: () => v
           <span className="wx-kicker">Market cap</span>
           <strong>{fmtUsd(token.mcap, { decimals: 1 })}</strong>
         </div>
+        <Spark token={token} />
         <div className="wx-tcard-chg" style={{ color: changeColor(token.change.h1) }}>
           {fmtPct(token.change.h1)}
           <small>1h</small>
@@ -144,7 +163,7 @@ function Row({ token, onOpen, quickSol, hover }: { token: MarketToken; onOpen: (
         </span>
       </span>
       <span className="c-age">{fmtAge(token.createdAt)}</span>
-      <span><b>{fmtUsd(token.mcap)}</b></span>
+      <span className="wx-mc-cell"><b>{fmtUsd(token.mcap)}</b><Spark token={token} /></span>
       <span className="c-liq">{fmtUsd(token.liquidity)}</span>
       <span className="c-vol">{fmtUsd(token.volume.h24)}</span>
       <span className="c-5m"><Change v={token.change.m5} /></span>
@@ -212,7 +231,7 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
 
   useEffect(() => {
     setCategory(readPref("wraith_board_cat", MARKET_CATEGORIES.map((c) => c.key), "trending"));
-    setView(readPref("wraith_board_view", ["grid", "list"] as const, "grid"));
+    setView(readPref("wraith_board_view", ["grid", "list"] as const, typeof window !== "undefined" && window.innerWidth < 700 ? "list" : "grid"));
   }, []);
   useEffect(() => {
     const syncPreset = () => setQuickSol(getActivePreset().amounts[0] || 0.1);

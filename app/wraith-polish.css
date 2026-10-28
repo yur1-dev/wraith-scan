@@ -901,3 +901,13 @@ a.hold-row:hover{background:rgba(255,255,255,.05)}
 }
 @keyframes wx-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes wx-fade{from{opacity:0}to{opacity:1}}
+
+/* authenticator setup on phones */
+.wx-totp-phone-hint{display:none;margin:0;font-size:12px;line-height:1.5;color:#9a9aa0}
+.wx-totp-open{display:inline-block}
+@media (hover:none), (pointer:coarse){
+  .wx-totp-qr{display:none !important}
+  .wx-totp-phone-hint{display:block}
+  .wx-totp-open{display:flex !important;align-items:center;justify-content:center;min-height:48px;border-radius:12px;background:#ff7b3d;color:#111 !important;font-size:15px !important;font-weight:700;text-align:center}
+  .wx-totp-copy{font-size:13px !important;padding:10px 12px !important;color:#ff7b3d !important;border:1px solid rgba(255,123,61,.4) !important;border-radius:8px !important}
+}

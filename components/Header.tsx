@@ -28,7 +28,7 @@ import { Lock as LockIcon,
   UserRound,
   X,
 } from "lucide-react";
-import { useLinkWithPasskey, useMfaEnrollment, usePrivy } from "@privy-io/react-auth";
+import { useLinkWithPasskey, useMfaEnrollment, usePrivy, useUser as usePrivyUser } from "@privy-io/react-auth";
 import StyledSelect from "./StyledSelect";
 import EmbeddedWalletBalanceChip from "./EmbeddedWalletBalanceChip";
 import MobileTabBar from "./MobileTabBar";
@@ -2202,7 +2202,7 @@ type PinStep =
 
 function SecurityPanel() {
   // The user's own enrolled methods. (useMfa().mfaMethods only lists what the app allows, which wrongly showed everything as ON.)
-  const { user: privyUser } = usePrivy();
+  const { user: privyUser, refreshUser } = usePrivyUser();
   const mfaMethods = privyUser?.mfaMethods ?? [];
   const {
     initEnrollmentWithTotp,
@@ -2210,6 +2210,7 @@ function SecurityPanel() {
     unenrollWithTotp,
     initEnrollmentWithPasskey,
     unenrollWithPasskey,
+    showMfaEnrollmentModal,
   } = useMfaEnrollment();
   const { linkWithPasskey } = useLinkWithPasskey();
 
@@ -2258,13 +2259,19 @@ function SecurityPanel() {
     setTotpError("");
     setTotpBusy(true);
     try {
-      await submitEnrollmentWithTotp({ mfaCode: totpCode });
+      await submitEnrollmentWithTotp({ mfaCode: totpCode.replace(/\D/g, "") });
       setTotpStep("idle");
       setTotpCode("");
       setTotpSecret("");
       setTotpAuthUrl("");
     } catch (e: unknown) {
-      setTotpError(e instanceof Error ? e.message : "Invalid code — try again");
+      const m = e instanceof Error ? e.message : "";
+      setTotpError(
+        !m || /verif|invalid|incorrect|code/i.test(m)
+          ? "That code didn’t match. Use the newest “Wraith” entry in your authenticator, enter it before it refreshes, and make sure your phone’s date and time are set to automatic. If you scanned an older QR, remove that entry and scan the current one."
+          : m,
+      );
+      setTotpCode("");
     } finally {
       setTotpBusy(false);
     }
@@ -2284,20 +2291,35 @@ function SecurityPanel() {
 
   // ── Passkey ──────────────────────────────────────────────────────────────
   const addPasskey = async () => {
+    console.log("[passkey] add clicked");
     setPasskeyError("");
     setPasskeyBusy(true);
     try {
-      try {
-        await initEnrollmentWithPasskey();
-      } catch (e: unknown) {
-        // Privy only enrols passkeys that are already linked to the account: create/link one, then retry.
-        if (e instanceof Error && /eligible passkey/i.test(e.message)) {
-          await linkWithPasskey({ name: "Wraith" });
-          await initEnrollmentWithPasskey();
-        } else throw e;
+      // A passkey has to exist on the account before it can be used as a second factor.
+      const hasPasskey = (privyUser?.linkedAccounts ?? []).some((a) => a.type === "passkey");
+      if (!hasPasskey) {
+        console.log("[passkey] creating passkey…");
+        await linkWithPasskey({ name: "Wraith" });
+      }
+      console.log("[passkey] enrolling as second factor…");
+      await initEnrollmentWithPasskey();
+      console.log("[passkey] enrollment finished");
+      // refresh once, slowly: Privy rate-limits /users/me (429) if we ask twice in a row
+      await new Promise((r) => setTimeout(r, 1500));
+      let fresh = await refreshUser().catch(async () => {
+        await new Promise((r) => setTimeout(r, 3500));
+        return refreshUser().catch(() => null);
+      });
+      if (!fresh?.mfaMethods?.includes("passkey")) {
+        // The silent enroll didn't register it — hand over to Privy's own enrollment screen.
+        console.log("[passkey] not enrolled yet, opening Privy enrollment screen");
+        showMfaEnrollmentModal();
       }
     } catch (e: unknown) {
-      setPasskeyError(e instanceof Error ? e.message : "Passkey setup failed");
+      console.error("[passkey]", e);
+      const o = e as { message?: string; privyErrorCode?: string; name?: string } | null;
+      const detail = [o?.privyErrorCode, o?.name, o?.message].filter(Boolean).join(" · ");
+      setPasskeyError(detail || "Passkey setup didn’t finish. Check for a Windows Hello / browser passkey prompt, then try again.");
     } finally {
       setPasskeyBusy(false);
     }
@@ -2554,7 +2576,7 @@ function SecurityPanel() {
               below).
             </p>
             {totpAuthUrl && (
-              <div style={{ alignSelf: "center", padding: 10, background: "#fff", borderRadius: 10, lineHeight: 0 }}>
+              <div className="wx-totp-qr" style={{ alignSelf: "center", padding: 10, background: "#fff", borderRadius: 10, lineHeight: 0 }}>
                 <QRCodeSVG value={totpAuthUrl} size={156} level="M" />
               </div>
             )}
@@ -2581,7 +2603,8 @@ function SecurityPanel() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => navigator.clipboard.writeText(totpSecret)}
+                  onClick={() => { void navigator.clipboard?.writeText(totpSecret).catch(() => {}); }}
+                  className="wx-totp-copy"
                   style={{
                     flexShrink: 0,
                     fontSize: 10,
@@ -2595,9 +2618,13 @@ function SecurityPanel() {
                 </button>
               </div>
             </div>
+            <p className="wx-totp-phone-hint">
+              On this phone you can’t scan the QR code. Tap the button to open your authenticator app, or copy the secret key and choose “Enter a setup key” in the app.
+            </p>
             <a
               href={totpAuthUrl}
-              style={{ fontSize: 11, color: "#ff7b3d", textDecoration: "none" }}
+              className="wx-totp-open"
+              style={{ fontSize: 12, color: "#ff7b3d", textDecoration: "none" }}
             >
               Open in authenticator app ↗
             </a>

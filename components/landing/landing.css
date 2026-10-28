@@ -313,3 +313,27 @@ html { scroll-behavior: smooth; }
 .lp-soonpill { margin-left: 8px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); color: #a1a1a6; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .lp-h1 .lp-rot { display: inline-block; }
 .lp-h1 .lp-rot-w { display: inline-flex; }
+
+/* hero: stack on tablets/phones (the two-column rule above was overriding the responsive one) */
+.lp-hero-in > * { min-width: 0; }
+@media (max-width: 960px) {
+  .lp-hero-in { grid-template-columns: minmax(0, 1fr) !important; gap: 28px; min-height: 0; }
+  .lp-hero-art { order: 0 !important; min-height: 0 !important; }
+  .lp-hero-copy { text-align: center; }
+  .lp-hero-copy .lp-h1 { margin-inline: auto; }
+  .lp-board, .lp-stage, .lp-hero-art { max-width: 100%; }
+  .lp-stage { padding: 8px 0 28px; }
+  .lp-float.toast { position: static !important; margin: 0 auto 10px; max-width: 100%; }
+}
+@media (max-width: 560px) {
+  .lp-hero { padding-top: 88px; }
+  .lp-hero-copy .lp-h1 { font-size: clamp(36px, 11vw, 48px); line-height: 1.02; }
+  .lp-hero-copy .lp-left-cta, .lp-hero-copy .ws-cta { flex-direction: column; align-items: stretch; width: 100%; max-width: 320px; margin-inline: auto; }
+  .lp-hero-copy .ws-btn { width: 100%; justify-content: center; }
+  .lp-board { border-radius: 18px; }
+  .lp-board-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .lp-board-stats > div { padding: 10px 6px; min-width: 0; }
+  .lp-board-stats strong { font-size: 18px; }
+  .lp-board-row { gap: 10px; }
+  .lp-board-row > * { min-width: 0; }
+}

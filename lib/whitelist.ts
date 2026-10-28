@@ -12,6 +12,7 @@ export const WHITELISTED_EMAILS: string[] = [
   "villanuevajared62@gmail.com",
   "kudu.bernas.au@phinmaed.com",
   "liba.perez.au@phinmaed.com",
+  "crca.rayo.au@phinmaed.com",
 ];
 
 // ─── PER-WALLET TIER OVERRIDES ───────────────────────────────────────────────

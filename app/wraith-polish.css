@@ -883,3 +883,21 @@ a.hold-row:hover{background:rgba(255,255,255,.05)}
   .wx-mc-cell .wx-spark{display:block}
   .wx-trow.head .wx-spark{display:none}
 }
+
+/* profile menu: bottom sheet on phones (tap the avatar) */
+.wraith-profile-backdrop{display:none}
+@media (max-width: 700px){
+  .wraith-profile-backdrop{display:block;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);animation:wx-fade .18s ease-out}
+  .wraith-profile-menu{
+    top:auto !important;right:0 !important;left:0 !important;bottom:0 !important;width:auto !important;
+    max-height:86dvh !important;border-radius:22px 22px 0 0 !important;
+    padding:14px 12px calc(16px + env(safe-area-inset-bottom)) !important;
+    z-index:1000;animation:wx-sheet-up .24s cubic-bezier(.2,.8,.2,1) !important;
+  }
+  .wraith-profile-menu::before{content:"";display:block;width:42px;height:4px;border-radius:4px;background:rgba(255,255,255,.22);margin:0 auto 12px}
+  .wraith-profile-menu-item{min-height:52px !important;font-size:15px !important;padding-block:12px !important}
+  .wraith-profile-menu-item > svg{width:20px !important;height:20px !important}
+  .wraith-profile-menu-account{padding:6px 8px 12px !important}
+}
+@keyframes wx-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes wx-fade{from{opacity:0}to{opacity:1}}

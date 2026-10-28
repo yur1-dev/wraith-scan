@@ -3308,15 +3308,24 @@ export default function Header({ onSelectMeme }: HeaderProps) {
     }
   };
 
+  // phones/tablets have no hover: a tap on the avatar opens the menu instead of jumping to the profile
+  const isTouchUi = () => typeof window !== "undefined" && window.matchMedia("(hover: none), (pointer: coarse)").matches;
+
   const handleProfileClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (hoverOpenRef.current) clearTimeout(hoverOpenRef.current);
     if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current);
+    if (isTouchUi()) {
+      positionMenu();
+      setUserMenuOpen((v) => !v);
+      return;
+    }
     setUserMenuOpen(false);
     window.location.href = "/app/profile";
   };
 
   const handleProfileMouseEnter = () => {
+    if (isTouchUi()) return;
     if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current);
     if (hoverOpenRef.current) clearTimeout(hoverOpenRef.current);
     positionMenu();
@@ -3324,6 +3333,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
   };
 
   const handleProfileMouseLeave = () => {
+    if (isTouchUi()) return;
     if (hoverOpenRef.current) clearTimeout(hoverOpenRef.current);
     hoverCloseRef.current = setTimeout(() => setUserMenuOpen(false), 200);
   };
@@ -3333,6 +3343,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
   };
 
   const handleMenuMouseLeave = () => {
+    if (isTouchUi()) return;
     hoverCloseRef.current = setTimeout(() => setUserMenuOpen(false), 200);
   };
 
@@ -3385,6 +3396,8 @@ export default function Header({ onSelectMeme }: HeaderProps) {
   const userMenu =
     mounted && userMenuOpen && session
       ? createPortal(
+          <>
+          <div className="wraith-profile-backdrop" onClick={() => setUserMenuOpen(false)} aria-hidden="true" />
           <div
             id="wraith-user-menu"
             className="wraith-profile-menu"
@@ -3773,7 +3786,8 @@ export default function Header({ onSelectMeme }: HeaderProps) {
               <LogOut size={17} strokeWidth={1.8} />
               <span className="wraith-profile-menu-label">Log out</span>
             </button>
-          </div>,
+          </div>
+          </>,
           document.body,
         )
       : null;

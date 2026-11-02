@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAppSession } from "@/lib/session";
 import { jupiterLimiter, checkLimit } from "@/lib/ratelimit";
+import { solanaFeeEnabled, feeBpsForUser, feeMintFor, feeAta } from "@/lib/solanaFee";
 
 const JUP_BASE = "https://api.jup.ag/swap/v1";
 const JUP_PRICE_BASE = "https://api.jup.ag/price/v3";
 const TIMEOUT_MS = 30000;
 const MAX_BODY_BYTES = 10_000;
 
-const FEE_WALLET = "FnpcuNmMhGjTLKJLbXTecaCYCKmdCzeA6cg3fkbSz92g";
-const FEE_ACCOUNT = "FnpcuNmMhGjTLKJLbXTecaCYCKmdCzeA6cg3fkbSz92g";
 
 const ALLOWED_ENDPOINTS = new Set(["quote", "swap", "price", "tokens"]);
 
@@ -68,6 +67,16 @@ export async function GET(req: NextRequest) {
   const forwardedParams = new URLSearchParams();
   for (const [key, value] of searchParams.entries()) {
     if (QUOTE_ALLOWED_PARAMS.has(key)) forwardedParams.set(key, value);
+  }
+
+  // Server-side platform fee (tier based). The client cannot choose or remove it.
+  if (endpoint === "quote" && solanaFeeEnabled()) {
+    const im = forwardedParams.get("inputMint") ?? "";
+    const om = forwardedParams.get("outputMint") ?? "";
+    if (feeMintFor(im, om)) {
+      const bps = await feeBpsForUser(session.user.id);
+      if (bps > 0) forwardedParams.set("platformFeeBps", String(bps));
+    }
   }
 
   const upstreamUrl =
@@ -159,19 +168,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── FEE INJECTION ──────────────────────────────────────────────────────────
-  if (endpoint === "swap") {
-    const clientFeeBps =
-      typeof rawBody.feeBps === "number"
-        ? Math.min(Math.max(Math.round(rawBody.feeBps), 0), 100)
-        : 0;
-
-    if (clientFeeBps > 0) {
-      filteredBody.platformFeeBps = clientFeeBps;
-      filteredBody.feeAccount = FEE_ACCOUNT;
+  // ── FEE ACCOUNT (the bps were already applied to the quote on the server) ──
+  if (endpoint === "swap" && solanaFeeEnabled()) {
+    const q = rawBody.quoteResponse as { inputMint?: string; outputMint?: string; platformFee?: { amount?: string } | null } | undefined;
+    if (q?.platformFee && Number(q.platformFee.amount ?? 0) > 0) {
+      const mint = feeMintFor(q.inputMint ?? "", q.outputMint ?? "");
+      if (mint) filteredBody.feeAccount = feeAta(mint);
     }
   }
-  // ──────────────────────────────────────────────────────────────────────────
 
   const upstreamUrl = `${JUP_BASE}/${endpoint}`;
 

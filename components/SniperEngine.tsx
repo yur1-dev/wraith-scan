@@ -121,7 +121,7 @@ export default function SniperEngine({ allowed }: { allowed: boolean }) {
             </div>
 
             {!allowed ? (
-              <a href="/#omen" style={{ display: "block", marginTop: 16, padding: 14, border: "1px dashed var(--border)", borderRadius: 10, color: "var(--text-muted)", fontSize: 12, textDecoration: "none" }}>🔒 Sniper unlocks at SHADE (10K OMEN).</a>
+              <a href="/#omen" style={{ display: "block", marginTop: 16, padding: 14, border: "1px dashed var(--border)", borderRadius: 10, color: "var(--text-muted)", fontSize: 12, textDecoration: "none" }}>🔒 Sniper unlocks at SHADE (250K OMEN).</a>
             ) : !cfg.ack ? (
               <div style={{ marginTop: 16, fontSize: 12, lineHeight: 1.7, color: "var(--text-muted)" }}>
                 <p style={{ margin: "0 0 10px" }}><b style={{ color: "var(--text)" }}>Read this first.</b> New memecoins are extremely risky and many are scams that cannot be sold. The sniper spends your real USDC without asking each time.</p>

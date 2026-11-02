@@ -332,8 +332,8 @@ function EmbeddedTradeDock({ meme }: Props) {
   useEffect(() => {
     void refreshTokenBalance();
     void refreshCashBalance();
-    const timer = window.setInterval(() => void refreshTokenBalance(), 10_000);
-    const cashTimer = window.setInterval(() => void refreshCashBalance(), 15_000);
+    const timer = window.setInterval(() => { if (!document.hidden) void refreshTokenBalance(); }, 20_000);
+    const cashTimer = window.setInterval(() => { if (!document.hidden) void refreshCashBalance(); }, 45_000);
     return () => { window.clearInterval(timer); window.clearInterval(cashTimer); };
   }, [refreshCashBalance, refreshTokenBalance]);
 

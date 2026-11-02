@@ -67,7 +67,7 @@ export default function EmbeddedWalletBalanceChip({
         .catch(() => {});
     };
     tick();
-    const t = window.setInterval(tick, 8000);
+    const t = window.setInterval(() => { if (!document.hidden) tick(); }, 30_000);
     return () => { active = false; window.clearInterval(t); };
   }, [testMode, solanaWallet]);
 
@@ -112,7 +112,7 @@ export default function EmbeddedWalletBalanceChip({
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 60_000);
+    const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 90_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [connection, ethereumWallet, ready, solanaWallet]);
 

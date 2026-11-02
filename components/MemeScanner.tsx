@@ -947,6 +947,10 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
           lastScan: scanTime,
           scannedAtMs: Date.now(),
         };
+        try {
+          // survives new tabs / reloads so the list shows instantly while a fresh scan runs
+          localStorage.setItem("wraith_scan_cache_v1", JSON.stringify({ ...scannerCache, trends: enriched.slice(0, 80) }));
+        } catch { /* storage full or blocked: in-memory cache still works */ }
       } catch (err) {
         clearInterval(ticker);
         const status = axios.isAxiosError(err) ? err.response?.status : null;
@@ -979,6 +983,18 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     // initializers above, so re-fetching would just blank the list and
     // replay the whole scan animation for no reason. Only fall through to a
     // real fetch when there's no cache or it's aged past the refresh window.
+    if (!scannerCache) {
+      try {
+        const raw = localStorage.getItem("wraith_scan_cache_v1");
+        const c = raw ? JSON.parse(raw) : null;
+        // show a previous scan instantly (up to 6h old); the fresh scan below replaces it
+        if (c && Array.isArray(c.trends) && c.trends.length && Date.now() - Number(c.scannedAtMs) < 6 * 3600 * 1000) {
+          scannerCache = c;
+          setTrends(c.trends);
+          setLastScan(c.lastScan ?? null);
+        }
+      } catch { /* ignore corrupt cache */ }
+    }
     const ageMs = scannerCache
       ? Date.now() - scannerCache.scannedAtMs
       : Infinity;

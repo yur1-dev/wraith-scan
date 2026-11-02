@@ -102,13 +102,13 @@ export async function executeQuickBuy(
   // Fee buffer covers network fee + priority fee + rent.
   const input = opts?.input;
   const spendingSol = !input || input.mint === SOL_MINT;
-  const FEE_BUFFER_SOL = spendingSol ? 0.01 : 0.005;
+  const FEE_BUFFER_SOL = spendingSol ? 0.01 : 0.0035;
   const balanceLamports = await connection.getBalance(wallet.publicKey);
   const requiredLamports = Math.round((FEE_BUFFER_SOL + (spendingSol ? amountSol : 0)) * 1e9);
   if (balanceLamports < requiredLamports) {
     throw new SwapError(
       "INSUFFICIENT_SOL",
-      spendingSol ? "Not enough SOL — lower size or priority fee" : "Keep about 0.005 SOL in your Solana wallet to pay network fees",
+      spendingSol ? "Not enough SOL — lower size or priority fee" : "Solana network fees are paid in SOL. Send about 0.004 SOL (roughly $0.60) to your Solana deposit address, then try again",
     );
   }
 

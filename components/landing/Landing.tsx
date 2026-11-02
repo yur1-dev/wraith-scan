@@ -16,7 +16,7 @@ import { BOT, CHAINS, FAQ, HERO, PORTAL, SHOWCASE, SOON, TELEGRAM_STEPS } from "
 const display = Bricolage_Grotesque({ subsets: ["latin"], weight: ["500", "700", "800"], display: "swap", variable: "--lp-display" });
 
 const TIER_COLOR: Record<TierKey, string> = { GHOST: "#8d8d99", SHADE: "#38bdf8", SPECTER: "#c084fc", WRAITH: "#ff7b3d" };
-const NEED: Record<TierKey, string> = { GHOST: "No OMEN needed", SHADE: "Hold 10,000 OMEN", SPECTER: "Hold 100,000 OMEN", WRAITH: "Hold 1,000,000 OMEN" };
+const NEED: Record<TierKey, string> = { GHOST: "No OMEN needed", SHADE: "Hold 250,000 OMEN", SPECTER: "Hold 500,000 OMEN", WRAITH: "Hold 1,000,000 OMEN" };
 const SHOW = [
   ["scanner_view", "Scanner"], ["sniper", "Sniper and auto-buy"], ["auto_sell", "Auto TP / SL / trail"],
   ["ai_score", "AI score"], ["telegram_alerts", "Telegram alerts"], ["live_signals_view", "Live signals"],

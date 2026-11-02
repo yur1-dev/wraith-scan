@@ -955,3 +955,14 @@ a.hold-row:hover{background:rgba(255,255,255,.05)}
 .wsk-grid > div { height: 96px; border-radius: 14px; }
 @media (max-width: 767px) { .wsk-cover { height: 110px; } .wsk-av { width: 68px; height: 68px; } .wsk-id { margin-top: -26px; } .wsk-counts { display: none; } }
 @media (prefers-reduced-motion: reduce) { .wsk-b::after { animation: none; } }
+
+/* Manage account: one account, two deposit gateways */
+.embedded-wallet-balance.ew-total{display:flex;flex-direction:column;gap:4px;align-items:flex-start;padding:18px 16px}
+.ew-total-label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.65}
+.ew-total-amount{font-size:32px;line-height:1.1}
+.ew-total small{opacity:.6}
+.ew-holdings{display:flex;flex-wrap:wrap;gap:6px}
+.ew-hold{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.12)}
+.ew-gw-title{margin:6px 0 0;font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.65}
+.ew-gw-chains{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ew-gw-chains strong{margin-left:4px}

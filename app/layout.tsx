@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import "./wraith-ui.css";
@@ -17,6 +17,16 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "WRAITH — Meme Token Sniper",
   description: "Scan viral memes, find Solana tokens, buy instantly.",
+  applicationName: "WRAITH",
+  appleWebApp: { capable: true, title: "WRAITH", statusBarStyle: "black-translucent" },
+  icons: { apple: "/apple-touch-icon.png" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0c0c0d",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

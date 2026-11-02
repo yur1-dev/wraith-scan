@@ -43,10 +43,10 @@ export const TIERS: Record<TierKey, Tier> = {
   SHADE: {
     key: "SHADE",
     label: "SHADE",
-    minTokens: 10_000,
+    minTokens: 250_000,
     feeBps: 100,
     color: "#00b4d8",
-    description: "Hold 10K+ OMEN. 1% trading fee.",
+    description: "Hold 250K+ OMEN. 1% trading fee.",
     features: [
       { id: "scanner_view", label: "View Scanner", unlocked: true },
       { id: "live_signals_view", label: "View Live Signals", unlocked: false },
@@ -61,10 +61,10 @@ export const TIERS: Record<TierKey, Tier> = {
   SPECTER: {
     key: "SPECTER",
     label: "SPECTER",
-    minTokens: 100_000,
+    minTokens: 500_000,
     feeBps: 50,
     color: "#a855f7",
-    description: "Hold 100K+ OMEN. 0.5% fee, Telegram alerts and AI score.",
+    description: "Hold 500K+ OMEN. 0.5% fee, Telegram alerts and AI score.",
     features: [
       { id: "scanner_view", label: "View Scanner", unlocked: true },
       { id: "live_signals_view", label: "View Live Signals", unlocked: false },

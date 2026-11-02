@@ -9,10 +9,9 @@ import {
   type Address,
 } from "viem";
 import { arc, base, bsc, mainnet, monad, robinhood } from "viem/chains";
-import { rpcFor, DEPOSIT_CHAINS } from "@/lib/cashTokens";
+import { rpcFor } from "@/lib/cashTokens";
 import { useCashSources } from "@/lib/useCashSources";
 import ChainLogo from "@/components/ChainLogo";
-import CashLogo from "@/components/CashLogo";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
 import {
@@ -41,13 +40,6 @@ export default function EmbeddedWalletOverview() {
   const { exportWallet: exportEthereumWallet } = useExportEthereumWallet();
   const { exportWallet: exportSolanaWallet } = useExportSolanaWallet();
   const { sources: cashSources, loaded: cashLoaded } = useCashSources();
-  const chainKeyOf = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.startsWith("solana")) return "solana";
-    if (n.startsWith("bnb")) return "bsc";
-    if (n.startsWith("robinhood")) return "robinhood";
-    return n; // base, ethereum, monad, arc
-  };
   const [balances, setBalances] = useState<WalletBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
@@ -58,7 +50,7 @@ export default function EmbeddedWalletOverview() {
   const [exportAcknowledged, setExportAcknowledged] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [depositDialogOpen, setDepositDialogOpen] = useState(false);
-  const [depositNetwork, setDepositNetwork] = useState("Solana");
+  const [depositNetwork, setDepositNetwork] = useState("evm");
   const [walletSetupMissing, setWalletSetupMissing] = useState<string[] | null>(
     null,
   );
@@ -178,7 +170,7 @@ export default function EmbeddedWalletOverview() {
     };
 
     void loadBalances();
-    const interval = window.setInterval(() => void loadBalances(), 60_000);
+    const interval = window.setInterval(() => { if (!document.hidden) void loadBalances(); }, 90_000);
     return () => {
       active = false;
       window.clearInterval(interval);
@@ -186,9 +178,14 @@ export default function EmbeddedWalletOverview() {
   }, [connection, embeddedEthereum, embeddedSolana, ethereumReady, privyReady]);
 
   const hasWallets = Boolean(embeddedEthereum || embeddedSolana);
-  const depositWallet = balances.find(
-    (wallet) => wallet.name === depositNetwork,
-  );
+  // One account, two deposit gateways: a single EVM address (all EVM chains) + Solana.
+  const evmGateway = balances.find((w) => w.name !== "Solana") ?? null;
+  const solGateway = balances.find((w) => w.name === "Solana") ?? null;
+  const gateways: { id: "evm" | "solana"; label: string; wallet: WalletBalance }[] = [];
+  if (evmGateway) gateways.push({ id: "evm", label: "EVM chains", wallet: evmGateway });
+  if (solGateway) gateways.push({ id: "solana", label: "Solana", wallet: solGateway });
+  const totalCash = cashSources.reduce((t, x) => t + x.balance, 0);
+  const depositWallet = gateways.find((g) => g.id === depositNetwork)?.wallet;
 
   const copyAddress = async (address: string) => {
     try {
@@ -238,7 +235,7 @@ export default function EmbeddedWalletOverview() {
       <div className="embedded-wallet-overview-heading">
         <div>
           <span className="profile-eyebrow">WRAITH ACCOUNT</span>
-          <h3>Account wallets</h3>
+          <h3>Your account</h3>
         </div>
         <span className="profile-network-pill">
           {hasWallets ? "EMBEDDED ACCOUNT" : "SETTING UP"}
@@ -257,36 +254,42 @@ export default function EmbeddedWalletOverview() {
         </p>
       ) : (
         <div className="embedded-wallet-balance-list">
-          {balances.map((wallet) => (
-            <article key={wallet.name} className="embedded-wallet-balance">
-              <span className="embedded-wallet-network">
-                <ChainLogo chain={chainKeyOf(wallet.name)} size={20} />
-                <strong>{wallet.name}</strong>
+          <article className="embedded-wallet-balance ew-total">
+            <span className="ew-total-label">Total balance</span>
+            <strong className="ew-total-amount">{cashLoaded ? `$${totalCash.toFixed(2)}` : "…"}</strong>
+            <small>One account · all chains combined</small>
+          </article>
+          {cashLoaded && cashSources.length > 0 && (
+            <div className="ew-holdings">
+              {cashSources.map((x) => (
+                <span key={x.id} className="ew-hold">
+                  <ChainLogo chain={x.chain} size={14} />
+                  {x.chainName} · ${x.balance.toFixed(2)} {x.symbol}
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="ew-gw-title">Deposit addresses</p>
+          {gateways.map((g) => (
+            <article key={g.id} className="embedded-wallet-balance ew-gateway">
+              <span className="ew-gw-chains">
+                {(g.id === "evm"
+                  ? ["base", "ethereum", "bsc", "monad", "arc", "robinhood"]
+                  : ["solana"]
+                ).map((k) => (
+                  <ChainLogo key={k} chain={k} size={18} />
+                ))}
+                <strong>{g.label}</strong>
               </span>
-              {(() => {
-                const key = chainKeyOf(wallet.name);
-                const tok = DEPOSIT_CHAINS.find((c) => c.key === key)?.symbol ?? "USDC";
-                const cash = cashSources.filter((x) => x.chain === key).reduce((t, x) => t + x.balance, 0);
-                return (
-                  <strong className="embedded-wallet-amount ew-cash">
-                    <CashLogo symbol={tok} size={16} />
-                    {cashLoaded ? `$${cash.toFixed(2)}` : "…"} <small>{tok}</small>
-                  </strong>
-                );
-              })()}
-              <code title={wallet.address}>{wallet.address}</code>
+              <code title={g.wallet.address}>{g.wallet.address}</code>
               <div className="embedded-wallet-actions">
                 <button
                   type="button"
-                  onClick={() => void copyAddress(wallet.address)}
-                  aria-label={`Copy ${wallet.name} wallet address`}
+                  onClick={() => void copyAddress(g.wallet.address)}
+                  aria-label={`Copy ${g.label} deposit address`}
                 >
-                  {copiedAddress === wallet.address ? (
-                    <Check size={14} />
-                  ) : (
-                    <Copy size={14} />
-                  )}
-                  {copiedAddress === wallet.address ? "Copied" : "Copy"}
+                  {copiedAddress === g.wallet.address ? <Check size={14} /> : <Copy size={14} />}
+                  {copiedAddress === g.wallet.address ? "Copied" : "Copy"}
                 </button>
               </div>
             </article>
@@ -299,7 +302,7 @@ export default function EmbeddedWalletOverview() {
             type="button"
             className="embedded-wallet-deposit-trigger"
             onClick={() => {
-              setDepositNetwork(balances[0]?.name ?? "Solana");
+              setDepositNetwork(gateways[0]?.id ?? "evm");
               setDepositDialogOpen(true);
             }}
           >
@@ -326,9 +329,9 @@ export default function EmbeddedWalletOverview() {
         </p>
       )}
       <p className="embedded-wallet-overview-note">
-        Your EVM address is shared across Base, Ethereum, BNB Chain, Monad, Arc and
-        Robinhood Chain; Solana has its own address. Send USDC (USDG on
-        Robinhood Chain) to add cash. Export opens Privy’s secure flow—WRAITH
+        These are just entry points into your one WRAITH account: send from any
+        supported chain to the matching address and it all counts toward your
+        total balance. Send USDC (USDG on Robinhood Chain) to add cash. Export opens Privy’s secure flow—WRAITH
         never reads or stores your private key. Paper funds remain separate.
       </p>
       {depositDialogOpen && (
@@ -361,15 +364,15 @@ export default function EmbeddedWalletOverview() {
               </button>
             </div>
             <div className="embedded-wallet-deposit-networks" role="group" aria-label="Deposit network">
-              {balances.map((wallet) => (
+              {gateways.map((g) => (
                 <button
                   type="button"
-                  key={wallet.name}
-                  className={depositNetwork === wallet.name ? "is-active" : ""}
-                  aria-pressed={depositNetwork === wallet.name}
-                  onClick={() => setDepositNetwork(wallet.name)}
+                  key={g.id}
+                  className={depositNetwork === g.id ? "is-active" : ""}
+                  aria-pressed={depositNetwork === g.id}
+                  onClick={() => setDepositNetwork(g.id)}
                 >
-                  {wallet.name}
+                  {g.label}
                 </button>
               ))}
             </div>
@@ -384,7 +387,7 @@ export default function EmbeddedWalletOverview() {
                   />
                 </div>
                 <div className="embedded-wallet-deposit-address">
-                  <span>{depositWallet.name} address</span>
+                  <span>{depositNetwork === "evm" ? "EVM address" : "Solana address"}</span>
                   <code>{depositWallet.address}</code>
                   <button
                     type="button"
@@ -401,15 +404,18 @@ export default function EmbeddedWalletOverview() {
                   </button>
                 </div>
                 <p className="embedded-wallet-deposit-warning" role="note">
-                  Send only <strong>{DEPOSIT_CHAINS.find((c) => c.key === chainKeyOf(depositWallet.name))?.symbol ?? "USDC"}</strong> on <strong>{depositWallet.name}</strong>. Using a
-                  different network can permanently lose your funds.
+                  {depositNetwork === "evm" ? (
+                    <>Works on <strong>Base, Ethereum, BNB Chain, Monad, Arc and Robinhood Chain</strong>. Send <strong>USDC</strong> (USDG on Robinhood Chain). Do not send from Solana to this address.</>
+                  ) : (
+                    <>Send only <strong>USDC</strong> on <strong>Solana</strong>. Using a different network can permanently lose your funds.{process.env.NEXT_PUBLIC_SOL_GAS_FREE === "1" ? null : <> Solana network fees are paid in SOL, so also send about <strong>0.004 SOL</strong> (roughly $0.60) to this address.</>}</>
+                  )}
                 </p>
               </>
             ) : (
               <p className="embedded-wallet-deposit-warning" role="status">
                 {loading
                   ? "Loading your wallet address…"
-                  : `No ${depositNetwork} wallet address is available.`}
+                  : "No deposit address is available."}
               </p>
             )}
           </section>
@@ -445,17 +451,17 @@ export default function EmbeddedWalletOverview() {
             </div>
             {!exportWalletTarget ? (
               <div className="embedded-wallet-export-list">
-                {balances.map((wallet) => (
+                {gateways.map((g) => (
                   <button
                     type="button"
-                    key={wallet.name}
+                    key={g.id}
                     onClick={() => {
-                      setExportWalletTarget(wallet);
+                      setExportWalletTarget(g.wallet);
                       setExportAcknowledged(false);
                     }}
                   >
-                    <span>{wallet.name}</span>
-                    <code>{wallet.address}</code>
+                    <span>{g.label}</span>
+                    <code>{g.wallet.address}</code>
                   </button>
                 ))}
               </div>

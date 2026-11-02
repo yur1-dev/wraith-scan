@@ -17,7 +17,7 @@ const PRIVY_SESSION_COOKIE = "wraith_privy_session";
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  if (pathname.startsWith("/_next/") || pathname === "/favicon.ico") {
+  if (pathname.startsWith("/_next/") || pathname === "/favicon.ico" || pathname === "/manifest.webmanifest") {
     return NextResponse.next();
   }
 

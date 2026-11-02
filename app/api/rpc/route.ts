@@ -4,6 +4,8 @@ import { rpcLimiter } from "@/lib/ratelimit";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const RPC_URLS = [
+  // SOLANA_RPC_URLS="https://a,https://b": extra free-tier keys tried in order when the first one rate-limits
+  ...(process.env.SOLANA_RPC_URLS ? process.env.SOLANA_RPC_URLS.split(",").map((u) => u.trim()).filter(Boolean) : []),
   ...[process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC].filter((u): u is string => !!u),
   "https://solana-rpc.publicnode.com",
   "https://solana.drpc.org",

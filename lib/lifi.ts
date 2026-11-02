@@ -51,6 +51,8 @@ export type SponsoredSend = (tx: { to: `0x${string}`; data?: `0x${string}`; valu
 
 /** Try gas-free first; if sponsorship isn't available for this chain/app, fall back to paying gas from the wallet. */
 export async function withGasFallback<T>(sponsored: () => Promise<T>, selfPaid: () => Promise<T>): Promise<T> {
+  // Wraith's one gas style: auto-drip (see useCashSources). Privy sponsorship stays off unless NEXT_PUBLIC_GAS_SPONSOR=1.
+  if (process.env.NEXT_PUBLIC_GAS_SPONSOR !== "1") return selfPaid();
   try { return await sponsored(); } catch (e) {
     const m = e instanceof Error ? e.message : "";
     if (/reject|denied|cancel|closed|exit/i.test(m)) throw e;

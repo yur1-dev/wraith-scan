@@ -18,7 +18,7 @@ export default function ExitBox({ mint, symbol, on, setOn, prefs, setPrefs, allo
     </label>
   );
   if (!allowed) {
-    return <a href="/#omen" style={{ display: "block", marginTop: 12, padding: "10px 12px", border: "1px dashed var(--border)", borderRadius: 10, color: "var(--text-muted)", fontSize: 11, textDecoration: "none" }}>🔒 Auto TP / SL / trailing stop unlocks at SHADE (10K OMEN)</a>;
+    return <a href="/#omen" style={{ display: "block", marginTop: 12, padding: "10px 12px", border: "1px dashed var(--border)", borderRadius: 10, color: "var(--text-muted)", fontSize: 11, textDecoration: "none" }}>🔒 Auto TP / SL / trailing stop unlocks at SHADE (250K OMEN)</a>;
   }
   return (
     <div style={{ marginTop: 12, padding: 12, border: `1px solid ${on ? "var(--orange)" : "var(--border)"}`, borderRadius: 10 }}>

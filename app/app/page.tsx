@@ -1,7 +1,6 @@
 "use client";
 
 import StatusBar from "@/components/StatusBar";
-import { useTestMode } from "@/lib/testMode";
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -12,8 +11,6 @@ const Header = dynamic(() => import("@/components/Header"), { ssr: false });
 const TokenBoard = dynamic(() => import("@/components/TokenBoard"), { ssr: false });
 const MemeScanner = dynamic(() => import("@/components/MemeScanner"), { ssr: false });
 const WinsBoard = dynamic(() => import("@/components/WinsBoard"), { ssr: false });
-const TestMarket = dynamic(() => import("@/components/TestMarket"), { ssr: false });
-const TestnetLab = dynamic(() => import("@/components/TestnetLab"), { ssr: false });
 const SignalScanner = dynamic(() => import("@/components/SignalScanner"), { ssr: false });
 const MarketCallsRail = dynamic(() => import("@/components/MarketCallsRail"), { ssr: false });
 
@@ -37,24 +34,22 @@ export interface MemeTrend {
   aiContext?: string;
 }
 
-type View = "market" | "scanner" | "wins" | "testnet";
+type View = "market" | "scanner" | "wins";
 const VIEWS: { key: View; label: string; hint: string }[] = [
   { key: "market", label: "Market", hint: "Live Solana tokens" },
   { key: "scanner", label: "Scanner", hint: "Live momentum signals" },
   { key: "wins", label: "Wins", hint: "How our calls performed" },
-  { key: "testnet", label: "Testnet", hint: "Practice with free devnet SOL" },
 ];
 
 export default function Home() {
   const router = useRouter();
-  const [testMode, setTestModeFlag] = useTestMode();
   const [view, setView] = useState<View>("market");
   const [selected, setSelected] = useState<MemeTrend | null>(null);
 
   useEffect(() => {
     try {
       const v = localStorage.getItem("wraith_home_view");
-      if (v === "market" || v === "scanner" || v === "wins" || v === "testnet") setView(v);
+      if (v === "market" || v === "scanner" || v === "wins") setView(v);
     } catch {
       /* storage unavailable */
     }
@@ -64,7 +59,7 @@ export default function Home() {
   useEffect(() => {
     const h = (e: Event) => {
       const v = (e as CustomEvent).detail;
-      if (v === "market" || v === "scanner" || v === "wins" || v === "testnet") setView(v);
+      if (v === "market" || v === "scanner" || v === "wins") setView(v);
     };
     window.addEventListener("wraith:view", h);
     return () => window.removeEventListener("wraith:view", h);
@@ -94,12 +89,6 @@ export default function Home() {
     <div className="wraith-dashboard wx-page">
       <Header onSelectMeme={handleSelectMeme} />
 
-      {testMode && (
-        <div className="wx-testbar" role="status">
-          <span><b>TEST MODE</b> Solana devnet sandbox. Market and trades here use play money; Scanner and Wins still show real data.</span>
-          <button type="button" onClick={() => setTestModeFlag(false)}>Turn off</button>
-        </div>
-      )}
 
       <nav className="wx-subnav" aria-label="Discover sections">
         <div className="wx-subnav-inner">
@@ -117,11 +106,7 @@ export default function Home() {
           <div className="wx-market-layout">
             <MarketCallsRail onSelectMeme={handleSelectMeme} onOpenScanner={() => changeView("scanner")} />
             <div className="wx-market-main">
-              {testMode ? (
-                <TestMarket onSelectMeme={handleSelectMeme} onOpenTestnet={() => changeView("testnet")} />
-              ) : (
-                <TokenBoard onSelectMeme={handleSelectMeme} />
-              )}
+              <TokenBoard onSelectMeme={handleSelectMeme} />
             </div>
           </div>
         )}
@@ -132,12 +117,6 @@ export default function Home() {
               onSelectMeme={handleSelectMeme}
               deepScan={<MemeScanner onSelectMeme={handleSelectMeme} selectedMeme={selected} />}
             />
-          </div>
-        )}
-
-        {view === "testnet" && (
-          <div className="wx-wins-wrap">
-            <TestnetLab />
           </div>
         )}
 

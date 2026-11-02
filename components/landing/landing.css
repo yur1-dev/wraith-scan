@@ -337,3 +337,7 @@ html { scroll-behavior: smooth; }
   .lp-board-row { gap: 10px; }
   .lp-board-row > * { min-width: 0; }
 }
+
+/* section jumps from the nav: keep the heading clear of the floating nav bar */
+.ws-sec[id] { scroll-margin-top: 120px; }
+@media (max-width: 760px) { .ws-sec[id] { scroll-margin-top: 90px; } }

@@ -150,6 +150,7 @@ async function fromPaprika(mint: string, tf: Tf): Promise<Candle[] | null> {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn("[token-chart] dexpaprika failed:", msg);
     if (msg.startsWith("429")) markDown("paprika", 2 * 60_000);
+    if (msg.startsWith("402")) markDown("paprika", 30 * 60_000); // payment required: stop asking for a while
     return null;
   }
 }
@@ -295,7 +296,8 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
       // Give the indexers a head start (they carry longer history); Helius answers fast when they do not.
       await new Promise((r) => setTimeout(r, isDown("gecko") ? 0 : 350));
       const r = await helJob;
-      if (!r || r.length < 1) throw new Error("helius: insufficient");
+      // 1-2 candles built from the last few trades is a stub, not a chart: only accept it as a last resort below
+      if (!r || r.length < MIN_GOOD) throw new Error("helius: insufficient");
       return { rows: r, source: "helius" } as Tagged;
     })(),
     (async () => {
@@ -336,8 +338,8 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
   }
 
   // Sparse-but-real beats nothing (brand-new token with 1-2 trades).
-  const [gecko, birdeye] = await Promise.all([geckoJob, birdeyeJob]);
-  const sparse = [gecko, birdeye].find((x) => x && x.length);
+  const [gecko, birdeye, hel] = await Promise.all([geckoJob, birdeyeJob, helJob]);
+  const sparse = [gecko, birdeye, hel].find((x) => x && x.length);
   if (sparse) {
     const candles = clean(sparse, tf.sec);
     if (candles.length) return { candles, source: "sparse" };

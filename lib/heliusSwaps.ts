@@ -104,7 +104,17 @@ export async function fetchSwaps(mint: string, pages = 1, address?: string | nul
 export async function swapsToCandles(swaps: Swap[], sec: number): Promise<{ t: number; o: number; h: number; l: number; c: number; v: number }[]> {
   const solUsd = await getSolUsd();
   const step = sec * 1000;
-  const sorted = [...swaps].sort((x, y) => x.ts - y.ts);
+  // Drop dust trades and one-off bad prints (multi-hop / partial parses) that stretch the whole chart:
+  // a swap whose price is >4x away from the median of its neighbours is not a real price.
+  const byTime = [...swaps].filter((x) => x.sol >= 0.003 && x.priceSol > 0).sort((x, y) => x.ts - y.ts);
+  const sorted = byTime.filter((sw, i) => {
+    const lo = Math.max(0, i - 6), hi = Math.min(byTime.length, i + 7);
+    const near = byTime.slice(lo, hi).map((q) => q.priceSol).sort((a2, b2) => a2 - b2);
+    if (near.length < 5) return true;
+    const med = near[Math.floor(near.length / 2)];
+    return sw.priceSol <= med * 4 && sw.priceSol >= med / 4;
+  });
+  if (!sorted.length) return [];
   const map = new Map<number, { t: number; o: number; h: number; l: number; c: number; v: number }>();
   for (const s of sorted) {
     const t = Math.floor(s.ts / step) * step;

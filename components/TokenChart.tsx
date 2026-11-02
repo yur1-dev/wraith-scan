@@ -21,7 +21,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { RefreshCw, Ruler } from "lucide-react";
+import { AlignJustify, Minus, MousePointer2, RefreshCw, Ruler, Slash, Square, Trash2 } from "lucide-react";
 import { fmtPct, fmtPrice, fmtUsd } from "@/lib/market";
 import { peekCandles } from "@/lib/candleCache";
 
@@ -163,10 +163,42 @@ export default function TokenChart({
   const measureModeRef = useRef(false);
   measureModeRef.current = measureMode;
 
+  // ── drawing tools: horizontal line, trend line, rectangle, fib. Stored by time + price, so they survive timeframe changes ──
+  type DrawKind = "hline" | "trend" | "rect" | "fib";
+  type DPt = { t: number; p: number };
+  type Drawing = { id: string; kind: DrawKind; a: DPt; b: DPt };
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [tool, setTool] = useState<DrawKind | null>(null);
+  const [draft, setDraft] = useState<Drawing | null>(null);
+  const drawingsRef = useRef<Drawing[]>([]);
+  drawingsRef.current = drawings;
+  const toolRef = useRef<DrawKind | null>(null);
+  toolRef.current = tool;
+  const draftRef = useRef<Drawing | null>(null);
+  draftRef.current = draft;
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const selectModeRef = useRef(false);
+  selectModeRef.current = selectMode;
+  const selectedRef = useRef<string[]>([]);
+  selectedRef.current = selected;
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const boxFnRef = useRef<(d: Drawing) => { l: number; t: number; r: number; b: number } | null>(() => null);
+  const drawKey = `wraith_draw_${mint}`;
+  useEffect(() => {
+    try { const raw = localStorage.getItem(drawKey); setDrawings(raw ? (JSON.parse(raw) as Drawing[]) : []); } catch { setDrawings([]); }
+  }, [drawKey]);
+  useEffect(() => {
+    try { if (drawings.length) localStorage.setItem(drawKey, JSON.stringify(drawings)); else localStorage.removeItem(drawKey); } catch { /* storage blocked */ }
+  }, [drawings, drawKey]);
+
   const supplyKey = supply && supply > 0 ? Math.round(supply) : 0;
   const effectiveMetric: Metric = metric === "mcap" && supplyKey ? "mcap" : "price";
   const mult = effectiveMetric === "mcap" ? supplyKey : 1;
   const tfSec = TIMEFRAMES.find((x) => x.key === tf)?.sec ?? 900;
+  const tfSecRef = useRef(900);
+  tfSecRef.current = tfSec;
 
   // ── persisted prefs (after mount: avoids hydration mismatch) ───────────
   useEffect(() => {
@@ -280,7 +312,7 @@ export default function TokenChart({
     const host = hostRef.current;
     const chart = chartRef.current;
     if (!host || !chart) return;
-    const toPt = (e: MouseEvent): MPt | null => {
+    const toPt = (e: { clientX: number; clientY: number }): MPt | null => {
       const main = mainRef.current;
       if (!main) return null;
       const r = host.getBoundingClientRect();
@@ -289,8 +321,76 @@ export default function TokenChart({
       if (logical === null || value === null) return null;
       return { logical: logical as number, value: value as number };
     };
+    const toD = (e: { clientX: number; clientY: number }): DPt | null => {
+      const pt = toPt(e);
+      const first = candlesRef.current[0];
+      if (!pt || !first) return null;
+      const m = metricMultRef.current || 1;
+      return { t: first.t + pt.logical * (tfSecRef.current * 1000), p: pt.value / m };
+    };
+    const placeTool = (kind: DrawKind, pt: { clientX: number; clientY: number }) => {
+      const p = toD(pt);
+      if (!p) return;
+      if (kind === "hline") {
+        setDrawings((d) => [...d, { id: String(Date.now()), kind, a: p, b: p }]);
+        setTool(null);
+        return;
+      }
+      const dr = draftRef.current;
+      if (!dr) { setDraft({ id: String(Date.now()), kind, a: p, b: p }); return; }
+      setDrawings((d) => [...d, { ...dr, b: p }]);
+      setDraft(null);
+      setTool(null);
+    };
+    // select mode: drag a box (like the Windows desktop) or tap a drawing to select it
+    const hostPos = (cx: number, cy: number) => { const r = host.getBoundingClientRect(); return { x: cx - r.left, y: cy - r.top }; };
+    const startSel = (cx: number, cy: number) => {
+      const q = hostPos(cx, cy);
+      marqueeStartRef.current = q;
+      setMarquee({ x1: q.x, y1: q.y, x2: q.x, y2: q.y });
+    };
+    const moveSel = (cx: number, cy: number) => {
+      const st = marqueeStartRef.current;
+      if (!st) return;
+      const q = hostPos(cx, cy);
+      setMarquee({ x1: st.x, y1: st.y, x2: q.x, y2: q.y });
+    };
+    const endSel = (cx: number, cy: number, additive: boolean) => {
+      const st = marqueeStartRef.current;
+      marqueeStartRef.current = null;
+      setMarquee(null);
+      if (!st) return;
+      const q = hostPos(cx, cy);
+      let L = Math.min(st.x, q.x), R = Math.max(st.x, q.x), T = Math.min(st.y, q.y), B = Math.max(st.y, q.y);
+      if (R - L < 4 && B - T < 4) { L -= 8; R += 8; T -= 8; B += 8; } // a tap: forgiving hit area
+      const hits = drawingsRef.current
+        .filter((d) => { const b = boxFnRef.current(d); return !!b && b.l <= R && b.r >= L && b.t <= B && b.b >= T; })
+        .map((d) => d.id);
+      setSelected((prev) => (additive ? Array.from(new Set([...prev, ...hits])) : hits));
+    };
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
+      const kind = toolRef.current;
+      if (kind) {
+        e.stopPropagation();
+        e.preventDefault();
+        placeTool(kind, e);
+        return;
+      }
+      if (selectModeRef.current) {
+        e.stopPropagation();
+        e.preventDefault();
+        startSel(e.clientX, e.clientY);
+        const mv = (ev: MouseEvent) => moveSel(ev.clientX, ev.clientY);
+        const up = (ev: MouseEvent) => {
+          endSel(ev.clientX, ev.clientY, ev.shiftKey || ev.ctrlKey || ev.metaKey);
+          window.removeEventListener("mousemove", mv);
+          window.removeEventListener("mouseup", up);
+        };
+        window.addEventListener("mousemove", mv);
+        window.addEventListener("mouseup", up);
+        return;
+      }
       const m = measureRef.current;
       if (m && !m.locked) {
         // second click: stop here
@@ -310,24 +410,67 @@ export default function TokenChart({
       if (m && m.locked) setMeasure(null); // plain click clears a finished measurement
     };
     const onMove = (e: MouseEvent) => {
+      const dr = draftRef.current;
+      if (dr) { const p = toD(e); if (p) setDraft({ ...dr, b: p }); return; }
       const m = measureRef.current;
       if (!m || m.locked) return;
       const p = toPt(e);
       if (p) setMeasure({ a: m.a, b: p, locked: false });
     };
     const onKey = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable='true']");
       if (e.key === "Escape") {
         setMeasure(null);
         setMeasureMode(false);
+        setTool(null);
+        setDraft(null);
+        setSelected([]);
+      }
+      if (!typing && (e.key === "Delete" || e.key === "Backspace") && selectedRef.current.length) {
+        const gone = new Set(selectedRef.current);
+        setDrawings((d) => d.filter((x) => !gone.has(x.id)));
+        setSelected([]);
+      }
+      if (!typing && selectModeRef.current && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelected(drawingsRef.current.map((x) => x.id));
       }
     };
-    const bump = () => { if (measureRef.current) setViewTick((t) => t + 1); };
+    const bump = () => { if (measureRef.current || drawingsRef.current.length || draftRef.current) setViewTick((t) => t + 1); };
+    const onTouch = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t0 = e.touches[0];
+      const kind = toolRef.current;
+      if (kind) {
+        e.stopPropagation();
+        e.preventDefault();
+        placeTool(kind, t0);
+        return;
+      }
+      if (!selectModeRef.current) return;
+      e.stopPropagation();
+      e.preventDefault();
+      startSel(t0.clientX, t0.clientY);
+      const mv = (ev: TouchEvent) => { ev.preventDefault(); const t = ev.touches[0]; if (t) moveSel(t.clientX, t.clientY); };
+      const up = (ev: TouchEvent) => {
+        const t = ev.changedTouches[0];
+        if (t) endSel(t.clientX, t.clientY, false);
+        window.removeEventListener("touchmove", mv);
+        window.removeEventListener("touchend", up);
+        window.removeEventListener("touchcancel", up);
+      };
+      window.addEventListener("touchmove", mv, { passive: false });
+      window.addEventListener("touchend", up);
+      window.addEventListener("touchcancel", up);
+    };
+    host.addEventListener("touchstart", onTouch, { capture: true, passive: false });
     host.addEventListener("mousedown", onDown, true);
     host.addEventListener("mousemove", onMove);
     window.addEventListener("keydown", onKey);
     chart.timeScale().subscribeVisibleLogicalRangeChange(bump);
     chart.subscribeCrosshairMove(bump);
     return () => {
+      host.removeEventListener("touchstart", onTouch, true);
       host.removeEventListener("mousedown", onDown, true);
       host.removeEventListener("mousemove", onMove);
       window.removeEventListener("keydown", onKey);
@@ -426,9 +569,11 @@ export default function TokenChart({
     const c = candles.find((k) => k.t === bucket);
     if (!c) { setSpotPos(null); return; } // spotted before the first candle we have
     const x = chart.timeScale().timeToCoordinate(chartTime(bucket));
-    const y = main.priceToCoordinate(c.h * mult);
+    // pin it to the price Wraith actually flagged it at (same level as the yellow Spotted line), not to a candle's high
+    const spotValue = spottedMcap && spottedMcap > 0 ? (effectiveMetric === "mcap" ? spottedMcap : supplyKey ? spottedMcap / supplyKey : 0) : 0;
+    const y = main.priceToCoordinate(spotValue > 0 ? spotValue : c.h * mult);
     setSpotPos(x == null || y == null ? null : { x, y });
-  }, [spottedAt, candles, tfSec, mult, spotTick, style, effectiveMetric]);
+  }, [spottedAt, spottedMcap, supplyKey, candles, tfSec, mult, spotTick, style, effectiveMetric]);
 
   // ── buy / sell dots from recent swaps ──
   useEffect(() => {
@@ -515,6 +660,8 @@ export default function TokenChart({
       // A young token with 8 candles therefore sits at the right with normal-width candles, not stretched wide.
       const span = Math.max(60, Math.min(n, 90));
       chart.timeScale().setVisibleLogicalRange({ from: n - span, to: n + 6 });
+      // a previous token (or a drag on the price axis) can leave auto-scale off: turn it back on so every token is framed properly
+      try { main.priceScale().applyOptions({ autoScale: true }); } catch { /* series gone */ }
     }
   }, [candles, style, mult, mint, chain, tf]);
 
@@ -667,10 +814,27 @@ export default function TokenChart({
     return {
       left: Math.min(x1, x2), top: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
       x1, x2, y1, y2, up: delta >= 0, pct, bars,
-      line1: `${pct >= 0 ? "+" : "-"}${Math.abs(pct).toFixed(2)}%  (${delta >= 0 ? "+" : "-"}${effectiveMetric === "mcap" ? fmtUsd(absDelta, { decimals: 2 }) : fmtPrice(absDelta)})`,
+      // same layout as TradingView: change, then (percent)
+      line1: `${delta < 0 ? "-" : ""}${effectiveMetric === "mcap" ? fmtUsd(absDelta, { decimals: 2 }) : fmtPrice(absDelta)} (${pct.toFixed(2)}%)`,
       line2: `${bars >= 0 ? "" : "-"}${Math.abs(bars)} bars, ${dur}`,
     };
   })();
+
+  // screen-space box of each drawing, used for drag-select / tap-select hit tests
+  boxFnRef.current = (d: Drawing) => {
+    const chart = chartRef.current, main = mainRef.current, first = candlesRef.current[0];
+    if (!chart || !main || !first) return null;
+    const ts = chart.timeScale();
+    const step = tfSec * 1000;
+    const X = (t: number) => ts.logicalToCoordinate(((t - first.t) / step) as Logical);
+    const Y = (pr: number) => main.priceToCoordinate(pr * mult);
+    const W = hostRef.current?.clientWidth ?? 0;
+    const x1 = X(d.a.t), x2 = X(d.b.t), y1 = Y(d.a.p), y2 = Y(d.b.p);
+    if (y1 === null) return null;
+    if (d.kind === "hline") return { l: 0, r: W, t: y1 - 5, b: y1 + 5 };
+    if (x1 === null || x2 === null || y2 === null) return null;
+    return { l: Math.min(x1, x2), r: Math.max(x1, x2), t: Math.min(y1, y2) - 4, b: Math.max(y1, y2) + 4 };
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -736,6 +900,43 @@ export default function TokenChart({
         >
           <Ruler size={13} />
         </button>
+        <button
+          type="button"
+          className={`wx-icon-btn${selectMode ? " on" : ""}`}
+          onClick={() => { setMeasure(null); setMeasureMode(false); setTool(null); setDraft(null); setSelected([]); setSelectMode((v) => !v); }}
+          aria-label="Select drawings"
+          aria-pressed={selectMode}
+          title="Select: drag a box (or tap) over drawings, then Delete. Shift/Ctrl adds to the selection."
+        >
+          <MousePointer2 size={13} />
+        </button>
+        {([["hline", Minus, "Horizontal line"], ["trend", Slash, "Trend line (2 clicks)"], ["rect", Square, "Rectangle (2 clicks)"], ["fib", AlignJustify, "Fib retracement (2 clicks)"]] as const).map(([k, Icon, label]) => (
+          <button
+            key={k}
+            type="button"
+            className={`wx-icon-btn${tool === k ? " on" : ""}`}
+            onClick={() => { setMeasure(null); setMeasureMode(false); setDraft(null); setSelectMode(false); setSelected([]); setTool((v) => (v === k ? null : k)); }}
+            aria-label={label}
+            aria-pressed={tool === k}
+            title={`${label}. Esc cancels.`}
+          >
+            <Icon size={13} />
+          </button>
+        ))}
+        {drawings.length > 0 && (
+          <button
+            type="button"
+            className="wx-icon-btn"
+            onClick={() => {
+              if (selected.length) { const gone = new Set(selected); setDrawings((d) => d.filter((x) => !gone.has(x.id))); setSelected([]); }
+              else { setDrawings([]); setDraft(null); }
+            }}
+            aria-label={selected.length ? "Delete selected drawings" : "Clear all drawings"}
+            title={selected.length ? `Delete ${selected.length} selected` : "Clear all drawings"}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
         {trades && (
           <button type="button" className={`wx-icon-btn${showTrades ? " on" : ""}`} onClick={() => setShowTrades((v) => !v)} aria-pressed={showTrades} aria-label="Show buys and sells" title="Buys / sells on the chart" style={{ width: "auto", padding: "0 9px", fontSize: 10, fontWeight: 700 }}>
             B/S
@@ -773,7 +974,7 @@ export default function TokenChart({
 
       {/* chart surface */}
       <div style={{ position: "relative", flex: 1, minHeight: 260 }}>
-        <div ref={hostRef} style={{ position: "absolute", inset: 0, cursor: measureMode || (measure && !measure.locked) ? "crosshair" : undefined }} />
+        <div ref={hostRef} style={{ position: "absolute", inset: 0, cursor: measureMode || tool || selectMode || (measure && !measure.locked) ? "crosshair" : undefined, touchAction: tool || selectMode ? "none" : undefined }} />
 
         {status === "ready" && dots.map((d) => (
           <span
@@ -810,6 +1011,60 @@ export default function TokenChart({
           </div>
         )}
 
+        {(drawings.length > 0 || draft || marquee) && chartRef.current && mainRef.current && (() => {
+          const ts = chartRef.current!.timeScale();
+          const main = mainRef.current!;
+          const first = candlesRef.current[0];
+          if (!first) return null;
+          const step = tfSec * 1000;
+          const X = (t: number) => ts.logicalToCoordinate(((t - first.t) / step) as Logical);
+          const Y = (pr: number) => main.priceToCoordinate(pr * mult);
+          const all = draft ? [...drawings, draft] : drawings;
+          const W = hostRef.current?.clientWidth ?? 0;
+          const LV = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+          const col = (id: string) => (selected.includes(id) ? "#ff7b3d" : "#4f9dff");
+          return (
+            <div className="wx-measure wx-draw" aria-hidden="true">
+              <svg className="wx-measure-svg" width="100%" height="100%">
+                {all.map((d) => {
+                  const x1 = X(d.a.t), x2 = X(d.b.t), y1 = Y(d.a.p), y2 = Y(d.b.p);
+                  if (y1 === null) return null;
+                  if (d.kind === "hline") {
+                    return (<g key={d.id}><line x1={0} x2={W} y1={y1} y2={y1} stroke={col(d.id)} strokeWidth={selected.includes(d.id) ? 2 : 1} /><text x={W - 8} y={y1 - 4} textAnchor="end" fill={col(d.id)} fontSize="10">{fmtVal(d.a.p * mult / (mult || 1))}</text></g>);
+                  }
+                  if (x1 === null || x2 === null || y2 === null) return null;
+                  if (d.kind === "trend") return (<line key={d.id} x1={x1} y1={y1} x2={x2} y2={y2} stroke={col(d.id)} strokeWidth={selected.includes(d.id) ? 2.5 : 1.5} />);
+                  if (d.kind === "rect") return (<rect key={d.id} x={Math.min(x1, x2)} y={Math.min(y1, y2)} width={Math.abs(x2 - x1)} height={Math.abs(y2 - y1)} fill={selected.includes(d.id) ? "rgba(255,123,61,.16)" : "rgba(79,157,255,.14)"} stroke={col(d.id)} strokeWidth={selected.includes(d.id) ? 2 : 1} />);
+                  const xl = Math.min(x1, x2), xr = Math.max(x1, x2);
+                  return (
+                    <g key={d.id}>
+                      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,.35)" strokeWidth="1" strokeDasharray="3 3" />
+                      {LV.map((lv) => {
+                        const pr = d.b.p + (d.a.p - d.b.p) * lv;
+                        const yy = Y(pr);
+                        if (yy === null) return null;
+                        return (<g key={lv}><line x1={xl} x2={xr} y1={yy} y2={yy} stroke={selected.includes(d.id) ? "#ff7b3d" : "#f0b90b"} strokeWidth={selected.includes(d.id) ? 2 : 1} opacity=".9" /><text x={xl + 4} y={yy - 3} fill="#f0b90b" fontSize="10">{lv} ({fmtVal(pr)})</text></g>);
+                      })}
+                    </g>
+                  );
+                })}
+                {marquee && (
+                  <rect x={Math.min(marquee.x1, marquee.x2)} y={Math.min(marquee.y1, marquee.y2)} width={Math.abs(marquee.x2 - marquee.x1)} height={Math.abs(marquee.y2 - marquee.y1)} fill="rgba(79,157,255,.15)" stroke="#4f9dff" strokeWidth="1" />
+                )}
+              </svg>
+            </div>
+          );
+        })()}
+        {selected.length > 0 && (
+          <button
+            type="button"
+            className="wx-draw-del"
+            onClick={() => { const gone = new Set(selected); setDrawings((d) => d.filter((x) => !gone.has(x.id))); setSelected([]); }}
+          >
+            <Trash2 size={13} /> Delete {selected.length}
+          </button>
+        )}
+
         {measureView && (
           <div className="wx-measure" aria-hidden="true">
             <div
@@ -818,7 +1073,7 @@ export default function TokenChart({
             />
             <svg className="wx-measure-svg" width="100%" height="100%">
               <defs>
-                <marker id="wxm-arrow" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+                <marker id="wxm-arrow" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
                   <path d="M1 1.5 L9 5 L1 8.5z" fill={measureView.up ? "#4f7cff" : "#ff5b5b"} />
                 </marker>
               </defs>

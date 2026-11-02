@@ -314,7 +314,7 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd, 
       )}
 
       <div style={{ minHeight: 18, marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
-        {phase === "quoting" ? <span><LoaderCircle size={11} className="animate-spin" style={{ display: "inline", marginRight: 5 }} />Finding best route…</span>
+        {phase === "quoting" ? <span><LoaderCircle size={11} className="animate-spin" style={{ display: "inline", marginRight: 5 }} />Getting your price…</span>
           : out !== null ? <span>{mode === "buy" ? <>You get ≈ <b style={{ color: "var(--text)" }}>{out.toLocaleString(undefined, { maximumFractionDigits: 4 })} {symbol}</b></> : <>You get ≈ <b style={{ color: "var(--text)" }}>{fx(out)}</b> cash</>}{feeUsd > 0 && <> · fees ≈ {fx(feeUsd)}</>}{req && req.fromId !== req.toId && <> · cross-chain{quote?.estimate.executionDuration ? ` ~${Math.max(1, Math.round(quote.estimate.executionDuration / 60))}m` : ""}</>}</span>
           : null}
       </div>

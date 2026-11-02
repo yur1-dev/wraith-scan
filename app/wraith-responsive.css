@@ -347,3 +347,17 @@ select.ewt-network-badge option{background:#14141a;color:#fff}
 /* chart: jump-to-latest */
 .wx-chart-latest{position:absolute;right:72px;bottom:38px;z-index:4;padding:6px 12px;border:1px solid rgba(255,123,61,.5);border-radius:999px;background:rgba(10,8,6,.88);color:#ff9a5c;font:700 12px/1 var(--font-sans,system-ui);cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 6px 20px rgba(0,0,0,.5)}
 .wx-chart-latest:hover{background:rgba(255,123,61,.18);color:#fff}
+
+/* Measure tool: TradingView look. White text (the .up/.down helper classes were colouring it green), hairline crosshair, small arrowheads */
+.wx-measure-label, .wx-measure-label b, .wx-measure-label span, .wx-measure-label.up, .wx-measure-label.down { color: #fff !important; }
+.wx-measure-label b { font-size: 13px; }
+.wx-measure-label span { opacity: 1; font-size: 12px; }
+.wx-measure-svg line { stroke-width: 1px !important; vector-effect: non-scaling-stroke; shape-rendering: crispEdges; }
+.wx-measure-box { border-width: 0 !important; }
+
+/* Drawing tools */
+.wx-draw-del { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 7; display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid rgba(255,91,91,.6); background: rgba(40,14,14,.92); color: #ff8a8a; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+@media (hover: none), (pointer: coarse) {
+  .wx-chart-toolbar .wx-icon-btn { min-width: 36px; min-height: 36px; }
+  .wx-draw-del { padding: 10px 18px; font-size: 13px; }
+}

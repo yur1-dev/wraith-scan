@@ -14,7 +14,6 @@ import { Lock as LockIcon,
   CheckCircle2,
   CircleDollarSign,
   EyeOff,
-  FlaskConical,
   Fingerprint,
   Gift,
   KeyRound,
@@ -39,7 +38,6 @@ import EmbeddedWalletTransfers from "./EmbeddedWalletTransfers";
 import TransfersHistory from "./TransfersHistory";
 import PrivyConfigurationNotice from "./PrivyConfigurationNotice";
 import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
-import { useTestMode } from "@/lib/testMode";
 import { useWraithTier } from "@/hooks/useWraithTier";
 import AutoExit from "@/components/AutoExit";
 import LiveAutoExit from "@/components/LiveAutoExit";
@@ -3032,7 +3030,6 @@ export default function Header({ onSelectMeme }: HeaderProps) {
   const [tgDisconnecting, setTgDisconnecting] = useState(false);
   const [tgTooltip, setTgTooltip] = useState(false);
   const [blurBalances, setBlurBalances] = useState(false);
-  const [testMode, setTestModeFlag] = useTestMode();
   const [isMobile, setIsMobile] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
   const [mounted, setMounted] = useState(false);
@@ -3524,22 +3521,6 @@ export default function Header({ onSelectMeme }: HeaderProps) {
             </div>
 
             <div className="wraith-profile-menu-group">
-              <button
-                className="wraith-profile-menu-item"
-                type="button"
-                onClick={() => setTestModeFlag(!testMode)}
-                role="menuitemcheckbox"
-                aria-checked={testMode}
-              >
-                <FlaskConical size={17} strokeWidth={1.8} />
-                <span className="wraith-profile-menu-label">Test mode</span>
-                <span
-                  className={`wraith-profile-switch${testMode ? " is-on" : ""}`}
-                  aria-hidden="true"
-                >
-                  <span />
-                </span>
-              </button>
               <button
                 className="wraith-profile-menu-item"
                 type="button"

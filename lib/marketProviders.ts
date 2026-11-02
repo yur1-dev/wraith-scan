@@ -31,29 +31,39 @@ export function arr(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
 }
 
-// GeckoTerminal's free tier allows ~30 requests/min per IP. Chart and trade calls are spaced out here so
-// parallel prefetches can't burn the whole budget at once; a real 429 pauses them for 15s.
-const GECKO_PACED = /^https:\/\/api\.geckoterminal\.com\/.*\/pools\/[^/?]+\/(ohlcv|trades)/;
-const GECKO_GAP_MS = 2200;
-const GECKO_MAX_WAIT_MS = 8000;
-let geckoNext = 0;
-async function geckoSlot(): Promise<void> {
+// GeckoTerminal's free tier allows ~30 requests/min per IP, shared by EVERYTHING that calls it (scanner pool lists
+// as well as chart candles). Two lanes: chart candles/trades get priority (they carry the history users see),
+// everything else (scanner lists) is slowed so it cannot eat the whole budget. A real 429 pauses both lanes.
+const GECKO_ANY = /^https:\/\/api\.geckoterminal\.com\//;
+const GECKO_HIGH = /\/pools\/[^/?]+\/(ohlcv|trades)/;
+const GECKO_GAP_HIGH_MS = 2600;
+const GECKO_GAP_LOW_MS = 5000;
+const GECKO_MAX_WAIT_MS = 9000;
+let geckoNextHigh = 0;
+let geckoNextLow = 0;
+let geckoPauseUntil = 0;
+async function geckoSlot(high: boolean): Promise<void> {
   const now = Date.now();
-  const at = Math.max(now, geckoNext);
+  const base = Math.max(now, geckoPauseUntil);
+  const at = high ? Math.max(base, geckoNextHigh) : Math.max(base, geckoNextHigh, geckoNextLow);
   if (at - now > GECKO_MAX_WAIT_MS) throw new Error("gecko queue full");
-  geckoNext = at + GECKO_GAP_MS;
+  if (high) geckoNextHigh = at + GECKO_GAP_HIGH_MS;
+  else geckoNextLow = at + GECKO_GAP_LOW_MS;
   if (at > now) await new Promise((r) => setTimeout(r, at - now));
 }
 
 export async function getJson(url: string, headers?: Record<string, string>, ms = 9000): Promise<unknown> {
-  const paced = GECKO_PACED.test(url);
-  if (paced) await geckoSlot();
+  const paced = GECKO_ANY.test(url);
+  if (paced) await geckoSlot(GECKO_HIGH.test(url));
   const res = await fetch(url, {
     headers: { accept: "application/json", ...headers },
     signal: AbortSignal.timeout(ms),
     cache: "no-store",
   });
-  if (paced && res.status === 429) geckoNext = Math.max(geckoNext, Date.now() + 15_000);
+  if (paced && res.status === 429) {
+    const ra = Number(res.headers.get("retry-after"));
+    geckoPauseUntil = Math.max(geckoPauseUntil, Date.now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 60) * 1000 : 15_000));
+  }
   if (!res.ok) throw new Error(`${res.status} ${url.split("?")[0]}`);
   return res.json();
 }

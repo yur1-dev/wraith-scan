@@ -12,6 +12,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "missing params" }, { status: 400 });
   }
   if (incoming.get("status")) q.set("status", "1");
+  // Platform fee on every EVM trade, collected by LI.FI into the Wraith fee wallet (set up once in the LI.FI partner portal).
+  // OFF until BOTH env vars exist, so nothing changes by accident:
+  //   LIFI_INTEGRATOR   = your integrator name registered at portal.li.fi (this is where the fee wallet is configured)
+  //   PLATFORM_FEE_BPS  = fee in basis points, e.g. 100 = 1%, 150 = 1.5%
+  // The fee is decided here on the server, so a browser can't ask for a lower one.
+  const integrator = process.env.LIFI_INTEGRATOR;
+  const feeBps = Number(process.env.PLATFORM_FEE_BPS);
+  if (integrator && Number.isFinite(feeBps) && feeBps > 0 && feeBps <= 500) {
+    q.set("integrator", integrator);
+    q.set("fee", String(feeBps / 10_000));
+  }
   try {
     const res = await fetch(`https://li.quest/v1/quote?${q}`, {
       headers: { accept: "application/json", ...(process.env.LIFI_API_KEY ? { "x-lifi-api-key": process.env.LIFI_API_KEY } : {}) },

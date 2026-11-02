@@ -80,10 +80,10 @@ const ITEMS: Item[] = [
   },
 ];
 
-function homeView(): "market" | "scanner" | "wins" | "testnet" {
+function homeView(): "market" | "scanner" | "wins" {
   try {
     const v = localStorage.getItem("wraith_home_view");
-    if (v === "scanner" || v === "wins" || v === "testnet") return v;
+    if (v === "scanner" || v === "wins") return v;
   } catch {
     /* ignore */
   }

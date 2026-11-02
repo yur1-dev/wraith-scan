@@ -38,7 +38,7 @@ export const SHOWCASE: { id: string; kicker: string; title: string; body: string
     id: "paper", kicker: "Paper trading", mock: "paper",
     title: "Practice with fake cash. Same screens.",
     body: "Test a strategy with stop-loss, take-profit and trailing stop before real money is involved, and share the result as a PnL card.",
-    bullets: ["SL / TP / trailing stop", "Shareable PnL cards", "Testnet mode for the real flow"],
+    bullets: ["SL / TP / trailing stop", "Shareable PnL cards", "Same screens as the real flow"],
   },
   {
     id: "wins", kicker: "Calls and Wins", mock: "wins",

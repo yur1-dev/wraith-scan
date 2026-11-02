@@ -6,6 +6,8 @@ const PUBLIC_API_PATHS = new Set(["/api/native-prices", "/api/landing"]);
 const PUBLIC_API_PREFIXES = [
   "/api/auth/",
   "/api/telegram/bot",
+  "/api/telegram/setup", // protected by TELEGRAM_SETUP_KEY inside the route
+  "/api/cron/", // protected by CRON_SECRET inside the route
   "/api/traders/search",
   "/api/user/username/check",
   "/api/callouts",

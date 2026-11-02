@@ -2,7 +2,7 @@
 
 import "../site.css";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import ChainLogo from "@/components/ChainLogo";
 import { CallsTable, ChartReal, Coin, LiveBoard, fmtUsd, useLandingData, xf } from "@/components/landing/Mocks";
@@ -61,7 +61,6 @@ function GoogleIcon() {
 
 function LoginInner() {
   const { status, login, syncAppSession } = useWraithSession();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -75,21 +74,33 @@ function LoginInner() {
     let cancelled = false;
     setSyncError(null);
     setSyncing(true);
-    syncAppSession()
-      .then(() => {
-        if (cancelled || redirected.current) return;
-        redirected.current = true;
-        router.replace(callbackUrl);
-      })
-      .catch((err: unknown) => {
+    // Privy can say "authenticated" a moment before its access token is ready (common on phones after the Google
+    // redirect), so retry a few times instead of failing once and leaving the button stuck.
+    const attempt = async () => {
+      let last: unknown = null;
+      for (let i = 0; i < 5; i++) {
         if (cancelled) return;
-        setSyncError(err instanceof Error ? err.message : "Could not start your session.");
-        setSyncing(false);
-      });
+        try {
+          await syncAppSession();
+          if (cancelled || redirected.current) return;
+          redirected.current = true;
+          // Full page load: guarantees the fresh cookie is used and no cached "go to /login" redirect is reused.
+          window.location.replace(callbackUrl);
+          return;
+        } catch (err) {
+          last = err;
+          await new Promise((r) => setTimeout(r, 700));
+        }
+      }
+      if (cancelled) return;
+      setSyncError(last instanceof Error ? last.message : "Could not start your session.");
+      setSyncing(false);
+    };
+    void attempt();
     return () => {
       cancelled = true;
     };
-  }, [status, syncAppSession, router, callbackUrl]);
+  }, [status, syncAppSession, callbackUrl]);
 
   if (status === "loading") return null;
 

@@ -838,6 +838,11 @@ export default function ProfilePage() {
       }
       setProfile(payload.profile);
       setDraft(payload.profile);
+      // keep the instant-load copy in step with what was just saved, so the old profile never flashes back
+      try {
+        const prev = JSON.parse(localStorage.getItem("wraith_profile_cache_v1") || "{}") as { userId?: string; avatarFallback?: string };
+        localStorage.setItem("wraith_profile_cache_v1", JSON.stringify({ profile: payload.profile, userId: prev.userId ?? userId, avatarFallback: prev.avatarFallback ?? avatarFallback }));
+      } catch { /* storage full or blocked: ignore */ }
       setEditing(false);
       setNotice("Profile saved.");
       window.dispatchEvent(
@@ -1082,7 +1087,17 @@ export default function ProfilePage() {
     return (
       <main className="wraith-dashboard profile-page">
         <Header />
-        <div className="profile-loading">Loading your account…</div>
+        <div className="profile-shell wsk" aria-busy="true" aria-label="Loading your profile">
+          <div className="wsk-cover wsk-b" />
+          <div className="wsk-id">
+            <div className="wsk-av wsk-b" />
+            <div className="wsk-lines"><div className="wsk-b" style={{ width: 170, height: 20 }} /><div className="wsk-b" style={{ width: 110, height: 14 }} /></div>
+            <div className="wsk-counts"><div className="wsk-b" style={{ width: 54, height: 34 }} /><div className="wsk-b" style={{ width: 54, height: 34 }} /></div>
+          </div>
+          <div className="wsk-b" style={{ width: "min(320px,70%)", height: 14, margin: "6px 0 18px" }} />
+          <div className="wsk-card wsk-b" />
+          <div className="wsk-grid"><div className="wsk-b" /><div className="wsk-b" /><div className="wsk-b" /></div>
+        </div>
       </main>
     );
   }
@@ -1986,7 +2001,7 @@ export default function ProfilePage() {
               </label>
 
               {/* X account row */}
-              <div className="profile-field">
+              <div className="profile-field" style={!xLinkAvailable && !profile.xHandle ? { display: "none" } : undefined}>
                 <span>X account</span>
                 <div className="profile-x-linked-row">
                   {profile.xHandle ? (

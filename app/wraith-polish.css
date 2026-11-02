@@ -911,3 +911,47 @@ a.hold-row:hover{background:rgba(255,255,255,.05)}
   .wx-totp-open{display:flex !important;align-items:center;justify-content:center;min-height:48px;border-radius:12px;background:#ff7b3d;color:#111 !important;font-size:15px !important;font-weight:700;text-align:center}
   .wx-totp-copy{font-size:13px !important;padding:10px 12px !important;color:#ff7b3d !important;border:1px solid rgba(255,123,61,.4) !important;border-radius:8px !important}
 }
+
+
+/* ── Profile cover: static (no drifting pan / sheen), fixed height so nothing jumps while it loads ── */
+.profile-hero .profile-cover, .pub-cover {
+  animation: none !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-color: #14100c;
+  aspect-ratio: auto !important;
+  height: 150px !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+.profile-hero .profile-cover::after, .pub-cover::after { animation: none !important; background: linear-gradient(180deg, transparent 60%, rgba(8,8,10,.45) 100%) !important; }
+@media (max-width: 767px) {
+  .profile-hero .profile-cover, .pub-cover { height: 110px !important; }
+}
+
+/* ── Edit profile on phones: bottom sheet that always opens at the top ── */
+@media (max-width: 767px) {
+  .profile-modal-backdrop { place-items: end center !important; padding: 0 !important; }
+  .profile-edit-modal { width: 100% !important; max-height: 92dvh !important; border-radius: 22px 22px 0 0 !important; padding: 22px 16px calc(20px + env(safe-area-inset-bottom)) !important; scroll-padding-top: 16px; overscroll-behavior: contain; }
+}
+
+/* Edit modal: the avatar must not inherit the header's pull-up margin, and the modal always starts at its top */
+.profile-edit-modal .profile-modal-avatar-section { padding-top: 6px; }
+.profile-edit-modal .profile-modal-avatar-btn { margin: 0 !important; top: 0 !important; transform: none !important; position: relative !important; }
+.profile-edit-modal .profile-modal-close { position: sticky; top: 0; float: right; z-index: 5; margin: -6px -4px 0 0; }
+
+/* ── Profile loading skeleton ── */
+.wsk { display: block; }
+.wsk-b { position: relative; overflow: hidden; border-radius: 10px; background: rgba(255,255,255,.055); }
+.wsk-b::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.07), transparent); animation: wsk-shimmer 1.3s ease-in-out infinite; }
+@keyframes wsk-shimmer { to { transform: translateX(100%); } }
+.wsk-cover { height: 150px; border-radius: 16px; }
+.wsk-id { display: flex; align-items: center; gap: 14px; margin: -34px 8px 14px; position: relative; }
+.wsk-av { width: 84px; height: 84px; border-radius: 50%; border: 3px solid var(--bg, #0d0d0d); flex: none; }
+.wsk-lines { display: grid; gap: 8px; padding-top: 30px; flex: 1; }
+.wsk-counts { display: flex; gap: 14px; padding-top: 30px; }
+.wsk-card { height: 150px; border-radius: 16px; margin-bottom: 14px; }
+.wsk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.wsk-grid > div { height: 96px; border-radius: 14px; }
+@media (max-width: 767px) { .wsk-cover { height: 110px; } .wsk-av { width: 68px; height: 68px; } .wsk-id { margin-top: -26px; } .wsk-counts { display: none; } }
+@media (prefers-reduced-motion: reduce) { .wsk-b::after { animation: none; } }

@@ -59,17 +59,37 @@ function parse(tx: Obj, mint: string): Swap | null {
   return null;
 }
 
+// Shared throttle: Helius rate-limits per second, so never run more than a few requests at once and
+// stop calling for a few seconds after a 429 instead of hammering it.
+const MAX_PARALLEL = 3;
+let running = 0;
+let cooldownUntil = 0;
+let lastWarn = 0;
+const waiters: Array<() => void> = [];
+async function slot<T>(fn: () => Promise<T>): Promise<T> {
+  if (running >= MAX_PARALLEL) await new Promise<void>((r) => waiters.push(r));
+  running++;
+  try { return await fn(); }
+  finally { running--; const next = waiters.shift(); if (next) next(); }
+}
+
 /** Newest-first swaps of a mint. `pages` x 100 transactions. Returns null if Helius is unavailable. */
 export async function fetchSwaps(mint: string, pages = 1, address?: string | null): Promise<Swap[] | null> {
   const key = heliusKey();
   if (!key) return null;
+  if (Date.now() < cooldownUntil) return null;
   const out: Swap[] = [];
   let before = "";
   for (let i = 0; i < pages; i++) {
     const url = `https://api.helius.xyz/v0/addresses/${address || mint}/transactions?api-key=${key}&type=SWAP&limit=100${before ? `&before=${before}` : ""}`;
     let rows: Obj[];
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(7000), cache: "no-store" });
+      const res = await slot(() => fetch(url, { signal: AbortSignal.timeout(7000), cache: "no-store" }));
+      if (res.status === 429) {
+        cooldownUntil = Date.now() + 4000;
+        if (Date.now() - lastWarn > 10000) { lastWarn = Date.now(); console.warn("[helius swaps] 429, pausing 4s"); }
+        return out.length ? out : null;
+      }
       if (!res.ok) { console.warn("[helius swaps]", res.status, (await res.text().catch(() => "")).slice(0, 160)); return out.length ? out : null; }
       rows = a(await res.json()).map(o);
     } catch (e) { console.warn("[helius swaps] failed:", e instanceof Error ? e.message : e); return out.length ? out : null; }
@@ -109,12 +129,12 @@ const swapCache = new Map<string, { ts: number; swaps: Swap[] }>();
  */
 export async function fetchTokenSwaps(mint: string, pages = 2): Promise<Swap[] | null> {
   const hit = swapCache.get(mint);
-  if (hit && Date.now() - hit.ts < 2500) return hit.swaps;
+  if (hit && Date.now() - hit.ts < 8000) return hit.swaps;
   const tries: Promise<Swap[]>[] = [];
   const nonEmpty = (p: Promise<Swap[] | null>) => p.then((r) => { if (!r || !r.length) throw new Error("empty"); return r; });
   const curve = mint.endsWith("pump") ? curvePda(mint) : null;
   if (curve) tries.push(nonEmpty(fetchSwaps(mint, pages, curve)));
-  tries.push(nonEmpty(fetchSwaps(mint, pages)));
+  if (!curve) tries.push(nonEmpty(fetchSwaps(mint, pages)));
   tries.push(nonEmpty((async () => {
     const pool = await Promise.race([resolvePool(mint).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
     return pool ? fetchSwaps(mint, pages, pool) : null;

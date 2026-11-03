@@ -327,3 +327,37 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 
 .wpl-bio { margin-top: 34px; width: 84px; height: 84px; border-radius: 50%; border: 1px solid rgba(255,123,61,.5); background: rgba(255,123,61,.08); color: #ff9a5c; display: grid; place-items: center; cursor: pointer; touch-action: manipulation; }
 .wpl-bio:active { background: rgba(255,123,61,.22); }
+
+/* ── Phone UX pass: compact Scanner header, clean single-column Market cards ───────────── */
+@media (max-width: 767px) {
+  /* Scanner header: one slim row (title + count on the left, icon buttons on the right) */
+  .sg-head { flex-direction: row !important; align-items: center !important; justify-content: space-between; gap: 10px !important; padding: 8px 12px 6px !important; }
+  .sg-head > div:first-child { min-width: 0; flex: 1 1 auto; }
+  .sg-title { font-size: 13px !important; gap: 6px !important; }
+  .sg-head p { margin: 2px 0 0 !important; font-size: 10.5px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sg-head-actions { flex: 0 0 auto; gap: 6px !important; align-items: center; }
+  .sg-head-actions .wx-seg button { padding: 7px 9px; }
+  .sg-btn { flex: 0 0 38px !important; width: 38px; height: 36px; padding: 0 !important; font-size: 0 !important; gap: 0 !important; display: inline-flex; align-items: center; justify-content: center; border-radius: 11px; }
+  .sg-btn svg { width: 16px; height: 16px; }
+  .sg-filters { padding: 0 12px 8px !important; gap: 6px !important; }
+  .sg-filters button { padding: 5px 11px !important; font-size: 11.5px !important; border-radius: 10px; }
+  .sg-body { padding: 4px 8px 16px !important; }
+
+  /* Market: no sideways scrolling, one tidy column of compact cards */
+  .wx-board-body { overflow-x: hidden !important; padding: 8px 10px 20px !important; }
+  .wx-grid { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: 8px !important; }
+  .wx-grid > * { min-width: 0; }
+  .wx-tcard { padding: 12px !important; gap: 8px !important; border-radius: 14px !important; height: auto !important; }
+  .wx-tcard-top { min-height: 0 !important; gap: 10px; }
+  .wx-tcard-sym strong { font-size: 15px !important; }
+  .wx-tcard-name { font-size: 11.5px; }
+  .wx-tcard-mc strong { font-size: 19px !important; margin-top: 1px; }
+  .wx-tcard-chg { font-size: 14px !important; }
+  .wx-tcard .wx-spark { display: none; }
+  .wx-tcard-meta { padding-top: 8px !important; gap: 10px !important; font-size: 11.5px !important; }
+  .wx-tcard .wx-qb { width: 64px !important; flex: 0 0 64px !important; }
+
+  /* Market toolbar: tighter */
+  .wx-board-bar { padding: 6px 10px !important; gap: 6px !important; }
+  .wx-board-bar .wx-search input { height: 34px; }
+}

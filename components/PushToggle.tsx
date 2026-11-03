@@ -130,7 +130,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
       <div className="wx-push-note">
         <p style={{ margin: 0 }}>Notifications are blocked for Wraith. Switch them on in Settings → Apps → Wraith → Notifications, then come back here.</p>
         <p style={{ margin: "6px 0 0", opacity: 0.7, fontSize: 12 }}>Phone says: {perm || "denied"}</p>
-        <button type="button" onClick={check} style={{ marginTop: 8, padding: "7px 14px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface-2)", color: "var(--text)", fontWeight: 700, fontSize: 12.5 }}>Check again</button>
+        <button type="button" onClick={() => { check(); window.setTimeout(() => window.location.reload(), 300); }} style={{ marginTop: 8, padding: "7px 14px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface-2)", color: "var(--text)", fontWeight: 700, fontSize: 12.5 }}>Check again</button>
       </div>
     );
   }

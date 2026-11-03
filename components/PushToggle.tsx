@@ -87,6 +87,21 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     }
   };
 
+  const test = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch("/api/push/test", { method: "POST" });
+      const d = (await r.json().catch(() => ({}))) as { sent?: number; error?: string };
+      if (!r.ok) setMsg(d.error || "Test failed.");
+      else if (d.sent && d.sent > 0) setMsg(`Sent to ${d.sent} device${d.sent > 1 ? "s" : ""}. If nothing pops up: turn off Do Not Disturb and check Settings > Apps > Wraith > Notifications.`);
+      else setMsg("No device is registered. Tap Turn off, then Turn on again.");
+    } catch {
+      setMsg("Test failed. Check your connection.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const disable = async () => {
     setBusy(true); setMsg("");
     try {
@@ -115,7 +130,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
         <>
           <span><BellRing size={15} /> Phone notifications are on</span>
           <span>
-            <button type="button" disabled={busy} onClick={() => void fetch("/api/push/test", { method: "POST" })}>Send test</button>
+            <button type="button" disabled={busy} onClick={() => void test()}>Send test</button>
             <button type="button" disabled={busy} onClick={() => void disable()}>Turn off</button>
           </span>
         </>

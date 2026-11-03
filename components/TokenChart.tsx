@@ -216,25 +216,25 @@ export default function TokenChart({
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#787b86",
+        textColor: "#8b8b92",
         fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: "rgba(42,46,57,0.55)" },
-        horzLines: { color: "rgba(42,46,57,0.55)" },
+        vertLines: { color: "rgba(255,255,255,0.03)" },
+        horzLines: { color: "rgba(255,255,255,0.045)" },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "#758696", width: 1, style: LineStyle.Dashed, labelBackgroundColor: "#2a2e39" },
-        horzLine: { color: "#758696", width: 1, style: LineStyle.Dashed, labelBackgroundColor: "#2a2e39" },
+        vertLine: { color: "rgba(255,123,61,0.45)", labelBackgroundColor: ACCENT },
+        horzLine: { color: "rgba(255,123,61,0.45)", labelBackgroundColor: ACCENT },
       },
       rightPriceScale: {
-        borderColor: "rgba(42,46,57,0.9)",
+        borderColor: "rgba(255,255,255,0.08)",
         scaleMargins: { top: 0.08, bottom: 0.24 },
       },
       timeScale: {
-        borderColor: "rgba(42,46,57,0.9)",
+        borderColor: "rgba(255,255,255,0.08)",
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 6,
@@ -492,7 +492,7 @@ export default function TokenChart({
     if (mainRef.current) chart.removeSeries(mainRef.current);
     if (volRef.current) chart.removeSeries(volRef.current);
 
-    const formatter = effectiveMetric === "mcap" ? (p: number) => fmtUsd(p, { decimals: 2 }).replace("—", "$0") : (p: number) => fmtPrice(p);
+    const formatter = effectiveMetric === "mcap" ? (p: number) => (p < 0 ? "" : p === 0 ? "$0" : fmtUsd(p, { decimals: 2 })) : (p: number) => fmtPrice(p);
     const priceFormat = {
       type: "custom" as const,
       minMove: effectiveMetric === "mcap" ? 1 : 1e-12,

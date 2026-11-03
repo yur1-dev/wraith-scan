@@ -34,7 +34,7 @@
 .wx-sheet {
   position: relative; width: 100%; max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain;
   border-radius: 20px 20px 0 0; border-top: 1px solid var(--border); background: var(--bg, #0c0c0d);
-  padding: 20px 0 env(safe-area-inset-bottom, 0px); animation: wx-sheet-up .24s cubic-bezier(.2, .8, .2, 1);
+  padding: 50px 0 env(safe-area-inset-bottom, 0px); animation: wx-sheet-up .24s cubic-bezier(.2, .8, .2, 1);
 }
 .wx-sheet aside { border-left: 0 !important; height: auto !important; overflow: visible !important; }
 .wx-sheet-grab { position: absolute; top: 8px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: rgba(255, 255, 255, .22); }
@@ -92,7 +92,7 @@
 
   .wraith-dashboard .wx-chart-card {
     height: calc(100dvh - 300px); min-height: 340px; max-height: none;
-    border-left: 0; border-right: 0; border-radius: 0 !important; background: #0c0e12;
+    border-left: 0; border-right: 0; border-radius: 0 !important;
   }
   .wx-chart-toolbar {
     flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 4px 6px 2px;

@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { Bell, X } from "lucide-react";
 import { readTokenFavorites } from "@/lib/tokenFavorites";
 import PushToggle from "@/components/PushToggle";
+import { enablePush, isStandalone, pushAvailable } from "@/lib/pushClient";
 
 type Kind = "trader" | "callout" | "saved" | "signal";
 interface Notif { id: string; kind: Kind; title: string; body: string; href: string; ts: number; img?: string }
@@ -73,6 +74,22 @@ export default function NotificationBell() {
     setItems(read<Notif[]>(KEY, []));
     setSeen(read<number>(SEEN, 0));
   }, []);
+
+  // Installed app: ask "Allow notifications?" by itself on the first tap, like other apps do.
+  useEffect(() => {
+    if (!mounted) return;
+    const ask = () => {
+      window.removeEventListener("pointerdown", ask);
+      try {
+        if (!pushAvailable() || !isStandalone() || Notification.permission !== "default") return;
+        if (localStorage.getItem("wraith_push_asked")) return;
+        localStorage.setItem("wraith_push_asked", "1");
+        void enablePush(DEFAULT_PREFS).catch(() => undefined);
+      } catch { /* not supported */ }
+    };
+    window.addEventListener("pointerdown", ask);
+    return () => window.removeEventListener("pointerdown", ask);
+  }, [mounted]);
 
   const poll = useCallback(async () => {
     if (busy.current || document.visibilityState !== "visible") return;

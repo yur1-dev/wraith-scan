@@ -333,7 +333,9 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   /* Scanner header: one slim row (title + count on the left, icon buttons on the right) */
   .sg-head { flex-direction: row !important; align-items: center !important; justify-content: space-between; gap: 10px !important; padding: 8px 12px 6px !important; }
   .sg-head > div:first-child { min-width: 0; flex: 1 1 auto; }
-  .sg-title { font-size: 13px !important; gap: 6px !important; }
+  .sg-title { font-size: 12px !important; gap: 6px !important; letter-spacing: .08em !important; white-space: nowrap; }
+  .sg-live { padding: 2px 8px !important; font-size: 10.5px !important; white-space: nowrap; letter-spacing: .04em; }
+  .sg-head-actions .wx-seg { display: none !important; }
   .sg-head p { margin: 2px 0 0 !important; font-size: 10.5px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sg-head-actions { flex: 0 0 auto; gap: 6px !important; align-items: center; }
   .sg-head-actions .wx-seg button { padding: 7px 9px; }

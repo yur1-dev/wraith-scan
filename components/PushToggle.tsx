@@ -6,17 +6,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BellRing } from "lucide-react";
 import { readTokenFavorites, TOKEN_FAVORITES_EVENT } from "@/lib/tokenFavorites";
+import { enablePush } from "@/lib/pushClient";
 
 const VAPID = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "";
 const SOL = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-
-function key(b64: string) {
-  const p = (b64 + "=".repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(p);
-  const out = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-  return out;
-}
 
 type Prefs = { trader: boolean; callout: boolean; saved: boolean; signal: boolean };
 type State = "checking" | "unsupported" | "off" | "on" | "blocked";
@@ -70,14 +63,8 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
   const enable = async () => {
     setBusy(true); setMsg("");
     try {
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") { setState(perm === "denied" ? "blocked" : "off"); return; }
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(VAPID) as BufferSource });
-      const r = await fetch("/api/push/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload(sub)) });
-      if (!r.ok) throw new Error("save failed");
+      const r = await enablePush(prefsRef.current, true);
+      if (r !== "on") { setState(r === "blocked" ? "blocked" : "off"); return; }
       setState("on");
       await fetch("/api/push/test", { method: "POST" }).catch(() => undefined);
     } catch {
@@ -91,8 +78,14 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     setBusy(true); setMsg("");
     try {
       const r = await fetch("/api/push/test", { method: "POST" });
-      const d = (await r.json().catch(() => ({}))) as { sent?: number; error?: string };
-      if (!r.ok) setMsg(d.error || "Test failed.");
+      let d = (await r.json().catch(() => ({}))) as { sent?: number; error?: string };
+      if (r.ok && !d.sent) {
+        // the server dropped this phone: register it again and retry once
+        await enablePush(prefsRef.current, true);
+        const r2 = await fetch("/api/push/test", { method: "POST" });
+        d = (await r2.json().catch(() => ({}))) as { sent?: number; error?: string };
+      }
+      if (d.error) setMsg(d.error);
       else if (d.sent && d.sent > 0) setMsg(`Sent to ${d.sent} device${d.sent > 1 ? "s" : ""}. If nothing pops up: turn off Do Not Disturb and check Settings > Apps > Wraith > Notifications.`);
       else setMsg("No device is registered. Tap Turn off, then Turn on again.");
     } catch {
@@ -122,7 +115,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     return <p className="wx-push-note">Phone notifications need a supported browser. On iPhone, add Wraith to your Home Screen first.</p>;
   }
   if (state === "blocked") {
-    return <p className="wx-push-note">Notifications are off for this app. Open your phone Settings → Apps → Wraith → Notifications, switch them on, then reopen Wraith.</p>;
+    return <p className="wx-push-note">Notifications are blocked for Wraith. Switch them on in Settings → Apps → Wraith → Notifications (one time), then come back.</p>;
   }
   return (
     <div className="wx-push">

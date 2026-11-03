@@ -6,6 +6,7 @@ import "./wraith-polish.css";
 import "./wraith-responsive.css";
 import "./wraith-mobile.css";
 import WalletProvider from "@/components/WalletProvider";
+import AppLock from "@/components/AppLock";
 import { WraithTierProvider } from "@/hooks/useWraithTier";
 
 const mono = IBM_Plex_Mono({
@@ -40,6 +41,7 @@ export default function RootLayout({
       <body>
         <WalletProvider>
           <WraithTierProvider>{children}</WraithTierProvider>
+          <AppLock />
         </WalletProvider>
       </body>
     </html>

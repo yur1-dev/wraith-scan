@@ -156,7 +156,8 @@ export default function TokenChart({
   const [spotTick, setSpotTick] = useState(0);
   const [spotHover, setSpotHover] = useState(false);
   const [showTrades, setShowTrades] = useState(true);
-  const [dots, setDots] = useState<{ key: string; x: number; y: number; side: "buy" | "sell"; usd: number; n: number }[]>([]);
+  const [dots, setDots] = useState<{ key: string; x: number; y: number; side: "buy" | "sell"; n: number; avatar: string; name: string; userId: string }[]>([]);
+  const [wTraders, setWTraders] = useState<{ userId: string; displayName: string; avatar: string; lastSide: "buy" | "sell"; lastAt: number; count: number }[]>([]);
   const [spotPos, setSpotPos] = useState<{ x: number; y: number } | null>(null);
   const [spotRect, setSpotRect] = useState<DOMRect | null>(null);
   const measureRef = useRef<Measure | null>(null);
@@ -576,31 +577,51 @@ export default function TokenChart({
     setSpotPos(x == null || y == null ? null : { x, y });
   }, [spottedAt, spottedMcap, supplyKey, candles, tfSec, mult, spotTick, style, effectiveMetric]);
 
-  // ── buy / sell dots from recent swaps ──
+  // ── Wraith traders: who on the platform bought / sold this token ──
+  useEffect(() => {
+    if (!mint || !showTrades) return;
+    let alive = true;
+    const run = async () => {
+      try {
+        const r = await fetch(`/api/token-traders?mint=${encodeURIComponent(mint)}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const d: { traders?: typeof wTraders } = await r.json();
+        if (alive && Array.isArray(d.traders)) setWTraders(d.traders);
+      } catch { /* optional */ }
+    };
+    void run();
+    const t = setInterval(run, 45_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [mint, showTrades]);
+
+  // ── their buys / sells drawn as avatars on the candle they traded in ──
   useEffect(() => {
     const chart = chartRef.current;
     const main = mainRef.current;
-    if (!chart || !main || !showTrades || !trades?.length || !candles.length) { setDots([]); return; }
+    if (!chart || !main || !showTrades || !wTraders.length || !candles.length) { setDots([]); return; }
     const step = tfSec * 1000;
-    const first = candles[0].t;
-    const groups = new Map<string, { bucket: number; side: "buy" | "sell"; usd: number; n: number; px: number }>();
-    for (const t of trades) {
-      const bucket = Math.floor(t.ts / step) * step;
-      if (bucket < first || !(t.priceUsd > 0)) continue;
-      const k = `${bucket}:${t.side}`;
-      const g = groups.get(k) ?? { bucket, side: t.side, usd: 0, n: 0, px: 0 };
-      g.usd += t.usd; g.n += 1; g.px += t.priceUsd;
-      groups.set(k, g);
+    const byBucket = new Map<number, ChartCandle>();
+    for (const c of candles) byBucket.set(c.t, c);
+    const groups = new Map<string, { bucket: number; side: "buy" | "sell"; n: number; avatar: string; name: string; userId: string; c: ChartCandle }>();
+    for (const t of wTraders) {
+      if (!(t.lastAt > 0)) continue;
+      const bucket = Math.floor(t.lastAt / step) * step;
+      const c = byBucket.get(bucket);
+      if (!c) continue;
+      const k = `${bucket}:${t.lastSide}`;
+      const g = groups.get(k);
+      if (g) g.n += 1;
+      else groups.set(k, { bucket, side: t.lastSide, n: 1, avatar: t.avatar, name: t.displayName, userId: t.userId, c });
     }
     const out: typeof dots = [];
     for (const [key, g] of groups) {
       const x = chart.timeScale().timeToCoordinate(chartTime(g.bucket));
-      const y = main.priceToCoordinate((g.px / g.n) * mult);
+      const y = main.priceToCoordinate(((g.c.h + g.c.l) / 2) * mult);
       if (x == null || y == null) continue;
-      out.push({ key, x, y, side: g.side, usd: g.usd, n: g.n });
+      out.push({ key, x, y, side: g.side, n: g.n, avatar: g.avatar, name: g.name, userId: g.userId });
     }
-    setDots(out.slice(0, 80));
-  }, [trades, candles, tfSec, mult, spotTick, showTrades, style]);
+    setDots(out.slice(0, 60));
+  }, [wTraders, candles, tfSec, mult, spotTick, showTrades, style]);
 
   // ── push candles into series ──────────────────────────────────────────
   useEffect(() => {
@@ -939,7 +960,7 @@ export default function TokenChart({
           </button>
         )}
         {trades && (
-          <button type="button" className={`wx-icon-btn${showTrades ? " on" : ""}`} onClick={() => setShowTrades((v) => !v)} aria-pressed={showTrades} aria-label="Show buys and sells" title="Buys / sells on the chart" style={{ width: "auto", padding: "0 9px", fontSize: 10, fontWeight: 700 }}>
+          <button type="button" className={`wx-icon-btn${showTrades ? " on" : ""}`} onClick={() => setShowTrades((v) => !v)} aria-pressed={showTrades} aria-label="Show Wraith trader buys and sells" title="Buys / sells by Wraith traders" style={{ width: "auto", padding: "0 9px", fontSize: 10, fontWeight: 700 }}>
             B/S
           </button>
         )}
@@ -977,13 +998,26 @@ export default function TokenChart({
       <div style={{ position: "relative", flex: 1, minHeight: 260 }}>
         <div ref={hostRef} style={{ position: "absolute", inset: 0, cursor: measureMode || tool || selectMode || (measure && !measure.locked) ? "crosshair" : undefined, touchAction: tool || selectMode ? "none" : undefined }} />
 
-        {status === "ready" && dots.map((d) => (
-          <span
-            key={d.key}
-            title={`${d.n} ${d.side}${d.n > 1 ? "s" : ""} · ${fmtUsd(d.usd)}`}
-            style={{ position: "absolute", left: d.x, top: d.y, width: Math.min(16, 7 + Math.log10(Math.max(10, d.usd)) * 1.6), height: Math.min(16, 7 + Math.log10(Math.max(10, d.usd)) * 1.6), transform: "translate(-50%,-50%)", borderRadius: "50%", background: d.side === "buy" ? "rgba(34,197,94,.85)" : "rgba(239,68,68,.85)", border: "1px solid rgba(255,255,255,.55)", pointerEvents: "auto", zIndex: 2, display: "grid", placeItems: "center", color: "#fff", fontSize: 7, fontWeight: 800 }}
-          >{d.n > 1 ? d.n : d.side === "buy" ? "B" : "S"}</span>
-        ))}
+        {status === "ready" && showTrades && dots.length > 0 && (
+          <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 2 }}>
+            {dots.map((d) => (
+              <a
+                key={d.key}
+                href={`/app/u/${encodeURIComponent(d.userId)}`}
+                title={`${d.name} ${d.side === "buy" ? "bought" : "sold"}${d.n > 1 ? ` (+${d.n - 1} more)` : ""}`}
+                style={{ position: "absolute", left: d.x, top: d.y, width: 24, height: 24, transform: "translate(-50%,-50%)", borderRadius: "50%", border: `2px solid ${d.side === "buy" ? UP : DOWN}`, background: "#14141a", overflow: "hidden", pointerEvents: "auto", display: "grid", placeItems: "center", color: "#fff", fontSize: 10, fontWeight: 800, boxShadow: "0 0 0 2px rgba(0,0,0,.5)" }}
+              >
+                {d.avatar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={d.avatar} alt="" width={20} height={20} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <span>{d.side === "buy" ? "B" : "S"}</span>
+                )}
+                {d.n > 1 && <i style={{ position: "absolute", right: -2, bottom: -2, minWidth: 12, height: 12, padding: "0 3px", borderRadius: 6, background: d.side === "buy" ? UP : DOWN, color: "#fff", fontSize: 8, fontStyle: "normal", lineHeight: "12px", textAlign: "center" }}>{d.n}</i>}
+              </a>
+            ))}
+          </div>
+        )}
 
         {spotPos && status === "ready" && (
           <div

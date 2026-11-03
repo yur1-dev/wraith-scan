@@ -5,6 +5,8 @@ import { defaultAvatar } from "@/lib/defaultArt";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import NotificationBell from "@/components/NotificationBell";
+import AppLockMenuItem from "@/components/AppLockMenuItem";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cacheTokenNav } from "@/lib/tokenNav";
@@ -3009,6 +3011,10 @@ export default function Header({ onSelectMeme }: HeaderProps) {
   const { data: session, logout } = useWraithSession();
   const { tier, canUse } = useWraithTier();
   const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
+  const [avatarReady, setAvatarReady] = useState(false);
+  useEffect(() => {
+    try { const c = localStorage.getItem("wraith_avatar_cache_v1"); if (c) setProfileAvatar(c); } catch { /* ignore */ }
+  }, []);
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(
     null,
   );
@@ -3065,12 +3071,13 @@ export default function Header({ onSelectMeme }: HeaderProps) {
     let active = true;
     fetch("/api/user/profile")
       .then(async (response) => {
-        if (!response.ok) return;
+        if (!response.ok) { setAvatarReady(true); return; }
         const payload = await response.json();
         if (!active) return;
-        setProfileAvatar(
-          payload.profile?.avatarDataUrl || payload.profile?.avatarUrl || null,
-        );
+        const av = payload.profile?.avatarDataUrl || payload.profile?.avatarUrl || null;
+        setProfileAvatar(av);
+        setAvatarReady(true);
+        try { if (av && av.length < 400_000) localStorage.setItem("wraith_avatar_cache_v1", av); else localStorage.removeItem("wraith_avatar_cache_v1"); } catch { /* ignore */ }
         setProfileDisplayName(payload.profile?.displayName || null);
         if (isDisplayCurrency(payload.profile?.displayCurrency)) {
           setDisplayCurrency(payload.profile.displayCurrency);
@@ -3082,6 +3089,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
       })
       .catch((error) => {
         console.error("[header profile]", error);
+        setAvatarReady(true);
       });
     const onProfileUpdated = (event: Event) => {
       const detail = (
@@ -3434,7 +3442,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
           >
             <div className="wraith-profile-menu-account">
               <Image
-                src={profileAvatar || session.user?.image || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
+                src={profileAvatar || (avatarReady ? session.user?.image : null) || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
                 alt=""
                 width={40}
                 height={40}
@@ -3783,6 +3791,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                 </svg>
               )}
             </button>
+            <AppLockMenuItem />
             <button
               onClick={() => {
                 void logout().then(() => window.location.assign("/login"));
@@ -3959,6 +3968,8 @@ export default function Header({ onSelectMeme }: HeaderProps) {
             </span>
           )}
 
+          {session && <NotificationBell />}
+
           {session && (
             <div style={{ flexShrink: 0 }}>
               <button
@@ -3992,7 +4003,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                 }}
               >
                 <Image
-                  src={profileAvatar || session.user?.image || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
+                  src={profileAvatar || (avatarReady ? session.user?.image : null) || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
                   alt="avatar"
                   width={32}
                   height={32}

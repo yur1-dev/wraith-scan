@@ -13,8 +13,8 @@ if (!MONGODB_URI) {
 
 // ─── CONNECTION OPTIONS ───────────────────────────────────────────────────────
 const MONGO_OPTIONS = {
-  serverSelectionTimeoutMS: 30_000,
-  connectTimeoutMS: 30_000,
+  serverSelectionTimeoutMS: 12_000,
+  connectTimeoutMS: 12_000,
   socketTimeoutMS: 45_000,
   // Serverless: every warm instance keeps its own pool. 10 x many instances blows past Atlas' connection cap
   // (free tier: 500), so keep pools small and let idle ones close.
@@ -34,20 +34,33 @@ declare global {
   var _mongoScaleIndexes: boolean | undefined;
 }
 
-let clientPromise: Promise<MongoClient>;
-
-if (!global._mongoClientPromise) {
-  const client = new MongoClient(MONGODB_URI, MONGO_OPTIONS);
-  global._mongoClientPromise = client.connect();
+// A failed connect must NOT stay cached: otherwise one Atlas hiccup poisons this warm instance and
+// every later request rethrows the same "Server selection timed out" until it is recycled.
+function getClient(): Promise<MongoClient> {
+  if (!global._mongoClientPromise) {
+    const client = new MongoClient(MONGODB_URI as string, MONGO_OPTIONS);
+    const p = client.connect();
+    p.catch(() => {
+      if (global._mongoClientPromise === p) global._mongoClientPromise = undefined;
+      client.close().catch(() => undefined);
+    });
+    global._mongoClientPromise = p;
+  }
+  return global._mongoClientPromise;
 }
 
-clientPromise = global._mongoClientPromise;
+const clientPromise: Promise<MongoClient> = getClient();
 
 export default clientPromise;
 
 // ─── DB HELPER ────────────────────────────────────────────────────────────────
 export async function getDb(): Promise<Db> {
-  const client = await clientPromise;
+  let client: MongoClient;
+  try {
+    client = await getClient();
+  } catch {
+    client = await getClient(); // one fresh retry after the poisoned promise was cleared
+  }
   return client.db(MONGODB_DB);
 }
 

@@ -19,8 +19,8 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "WRAITH — Meme Token Sniper",
   description: "Scan viral memes, find Solana tokens, buy instantly.",
-  applicationName: "WRAITH",
-  appleWebApp: { capable: true, title: "WRAITH", statusBarStyle: "black-translucent" },
+  applicationName: "Wraith",
+  appleWebApp: { capable: true, title: "Wraith", statusBarStyle: "black-translucent" },
   icons: { apple: "/apple-touch-icon.png" },
 };
 

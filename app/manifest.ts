@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 // Makes WRAITH installable ("Add to Home Screen" / "Install app") on Android and iPhone.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "WRAITH",
-    short_name: "WRAITH",
+    name: "Wraith",
+    short_name: "Wraith",
     description: "Scan viral memes, find tokens, trade across chains.",
     start_url: "/app",
     scope: "/",

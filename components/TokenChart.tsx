@@ -298,10 +298,12 @@ export default function TokenChart({
       if (raf) cancelAnimationFrame(raf);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
       chart.unsubscribeCrosshairMove(onMove);
-      chart.remove();
       chartRef.current = null;
       mainRef.current = null;
       volRef.current = null;
+      // The chart may still have a paint queued. Disposing it right now makes that paint throw "Object is disposed",
+      // so let the queued frame run first, then remove it.
+      requestAnimationFrame(() => requestAnimationFrame(() => { try { chart.remove(); } catch { /* already gone */ } }));
     };
   }, []);
 

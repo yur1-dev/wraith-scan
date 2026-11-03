@@ -245,7 +245,7 @@ export default function TokenChart({
         shiftVisibleRangeOnNewBar: true,
       },
       kineticScroll: { mouse: false, touch: false },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
     });
     chartRef.current = chart;
@@ -943,7 +943,7 @@ export default function TokenChart({
             B/S
           </button>
         )}
-        <button type="button" className="wx-icon-btn" onClick={() => void load(true)} aria-label="Refresh chart" title="Refresh">
+        <button type="button" className="wx-icon-btn" onClick={() => { try { chartRef.current?.priceScale("right").applyOptions({ autoScale: true }); chartRef.current?.timeScale().scrollToRealTime(); } catch { /* ignore */ } void load(true); }} aria-label="Reset chart" title="Reset view / refresh">
           <RefreshCw size={13} />
         </button>
       </div>

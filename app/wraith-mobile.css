@@ -108,12 +108,16 @@
   .wx-legend { flex-wrap: nowrap; gap: 8px; overflow: hidden; white-space: nowrap; padding: 0 10px 2px; font-size: 10.5px; }
   .wx-legend .wx-src { display: none; }
 
-  /* Tabs under the chart: tighter */
-  .wraith-dashboard .wx-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 10px 12px 0; }
-  .wx-stat { padding: 8px 9px; gap: 3px; border-radius: 10px; }
-  .wx-stat > b { font-size: 13px; }
-  .wx-stat > span { font-size: 9.5px; }
-  .wx-stat > small { display: none; }
+  /* Under the chart: breathing room, big touch targets */
+  .wraith-dashboard .wx-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0; margin: 16px 14px 0; }
+  .wx-stat { padding: 12px 14px; gap: 5px; border-radius: 14px; }
+  .wx-stat > b { font-size: 15px; }
+  .wx-stat > span { font-size: 10.5px; }
+  .wraith-dashboard .wx-safety { margin: 14px 14px 0; padding: 16px; border-radius: 16px; }
+  .wx-safety-head { margin-bottom: 12px; }
+  .wx-safety-grid { grid-template-columns: 1fr; gap: 12px; font-size: 13px; }
+  .wx-curve { margin: 14px 14px 0; }
+  .wx-panel > div[style] { padding-top: 8px !important; }
 
   /* ── Market board ───────────────────────────────────────────────── */
   .wraith-dashboard .wx-board { border-radius: 0 !important; border-left: 0; border-right: 0; }

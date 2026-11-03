@@ -42,6 +42,17 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
 
   const check = useCallback(() => {
     if (fcmRef.current) { setState("on"); return; }
+    // inside the Android app the phone permission is handled natively, so Chrome's (often stale) "denied" must not matter
+    let nativeTok = false, nativeOff = false, nativeLinked = false;
+    try {
+      nativeTok = !!localStorage.getItem("wraith_fcm_token");
+      nativeOff = !!localStorage.getItem("wraith_fcm_off");
+      nativeLinked = !!localStorage.getItem("wraith_fcm_linked");
+    } catch { /* blocked */ }
+    if (nativeTok) {
+      if (nativeLinked && !nativeOff) { fcmRef.current = true; setState("on"); } else setState("off");
+      return;
+    }
     if (!VAPID || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) { setState("unsupported"); return; }
     setPerm(Notification.permission);
     if (Notification.permission === "denied") { setState("blocked"); return; }
@@ -147,7 +158,8 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     }
   };
 
-  if (state === "checking" || !VAPID) return null;
+  if (state === "checking") return null;
+  if (!VAPID && !fcmRef.current && state !== "on" && state !== "off") return null;
   if (state === "unsupported") {
     return <p className="wx-push-note">Phone notifications need a supported browser. On iPhone, add Wraith to your Home Screen first.</p>;
   }

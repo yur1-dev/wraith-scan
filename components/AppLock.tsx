@@ -25,6 +25,19 @@ function b64d(s: string) {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
+/** The lock only applies inside the installed app (APK / home-screen app), never in a normal browser tab. */
+export function isInstalledApp(): boolean {
+  try {
+    if (document.referrer.startsWith("android-app://")) sessionStorage.setItem("wx_app", "1");
+    return (
+      sessionStorage.getItem("wx_app") === "1" ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true ||
+      window.matchMedia("(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)").matches
+    );
+  } catch {
+    return false;
+  }
+}
 function load(): Stored | null {
   try { const v = localStorage.getItem(KEY); return v ? (JSON.parse(v) as Stored) : null; } catch { return null; }
 }
@@ -82,10 +95,10 @@ export default function AppLock() {
 
   const unlock = useCallback(async () => {
     const s = load();
-    if (!s?.on) { setLocked(false); return; }
+    if (!s?.on || !isInstalledApp()) { setLocked(false); document.documentElement.classList.remove("wx-prelock"); return; }
     setBusy(true); setErr("");
     try {
-      if (await verify(s.id)) setLocked(false);
+      if (await verify(s.id)) { setLocked(false); document.documentElement.classList.remove("wx-prelock"); }
       else setErr("Could not verify. Try again.");
     } catch (e) {
       const name = (e as { name?: string })?.name;
@@ -96,12 +109,12 @@ export default function AppLock() {
   }, []);
 
   useEffect(() => {
-    if (load()?.on) { setLocked(true); void unlock(); }
+    if (load()?.on && isInstalledApp()) { setLocked(true); void unlock(); } else { document.documentElement.classList.remove("wx-prelock"); }
     const onVis = () => {
       if (document.visibilityState === "hidden") { hiddenAt.current = Date.now(); return; }
-      if (load()?.on && hiddenAt.current && Date.now() - hiddenAt.current > LOCK_AFTER_MS) { setLocked(true); void unlock(); }
+      if (load()?.on && isInstalledApp() && hiddenAt.current && Date.now() - hiddenAt.current > LOCK_AFTER_MS) { setLocked(true); void unlock(); }
     };
-    const onChange = () => { if (!load()?.on) setLocked(false); };
+    const onChange = () => { if (!load()?.on) { setLocked(false); document.documentElement.classList.remove("wx-prelock"); } };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("wraith:applock-changed", onChange);
     return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("wraith:applock-changed", onChange); };
@@ -110,14 +123,20 @@ export default function AppLock() {
   if (!locked) return null;
   return (
     <div className="wx-lock" role="dialog" aria-modal="true" aria-label="App locked">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="" width={56} height={64} />
-      <h2>Wraith is locked</h2>
-      <p>Use your fingerprint, face or screen lock to continue.</p>
-      <button type="button" onClick={() => void unlock()} disabled={busy}>
-        <Fingerprint size={22} /> {busy ? "Waiting…" : "Unlock"}
-      </button>
-      {err && <small>{err}</small>}
+      <div className="wx-lock-mid">
+        <div className="wx-lock-tile">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="" width={44} height={49} />
+        </div>
+        <h2>Wraith</h2>
+        <p>Locked</p>
+      </div>
+      <div className="wx-lock-bottom">
+        <button type="button" onClick={() => void unlock()} disabled={busy}>
+          <Fingerprint size={22} /> {busy ? "Waiting…" : "Unlock with fingerprint"}
+        </button>
+        {err ? <small>{err}</small> : <small className="dim">Use your fingerprint, face or screen lock</small>}
+      </div>
     </div>
   );
 }

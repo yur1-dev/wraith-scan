@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Fingerprint } from "lucide-react";
-import { appLockEnabled, appLockSupported, disableAppLock, enableAppLock } from "@/components/AppLock";
+import { appLockEnabled, appLockSupported, disableAppLock, enableAppLock, isInstalledApp } from "@/components/AppLock";
 
 /** Profile-menu row: turn the fingerprint / face / screen-lock on or off. */
 export default function AppLockMenuItem() {
@@ -12,7 +12,7 @@ export default function AppLockMenuItem() {
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    setOk(appLockSupported());
+    setOk(appLockSupported() && isInstalledApp()); // only offered inside the installed app
     const sync = () => setOn(appLockEnabled());
     sync();
     window.addEventListener("wraith:applock-changed", sync);

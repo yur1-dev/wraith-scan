@@ -284,18 +284,41 @@
 .wx-notif-row em { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; font-style: normal; }
 
 /* ── App lock screen ──────────────────────────────────────────────────── */
+html.wx-prelock body > *:not(.wx-lock):not(#wx-boot) { visibility: hidden; }
+html.wx-prelock .wx-lock { visibility: visible; }
 .wx-lock {
-  position: fixed; inset: 0; z-index: 2147483600; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; padding: 24px; text-align: center; background: #0a0a0c; color: var(--text, #f2f2f3);
+  position: fixed; inset: 0; z-index: 2147483600; display: flex; flex-direction: column; justify-content: space-between;
+  padding: env(safe-area-inset-top, 0px) 22px calc(28px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, #0a0a0c 0%, #0d0b0a 55%, #26140a 100%); color: var(--text, #f2f2f3);
 }
-.wx-lock h2 { margin: 8px 0 0; font-size: 20px; }
-.wx-lock p { margin: 0; max-width: 280px; color: var(--text-muted, #9a9aa0); font-size: 14px; line-height: 1.5; }
+.wx-lock-mid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; }
+.wx-lock-tile {
+  width: 96px; height: 96px; display: grid; place-items: center; margin-bottom: 14px; border-radius: 28px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, .08), rgba(255, 255, 255, .02)); border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: 0 10px 40px rgba(255, 123, 61, .18);
+}
+.wx-lock h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+.wx-lock p { margin: 0; color: var(--text-muted, #9a9aa0); font-size: 14px; }
+.wx-lock-bottom { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .wx-lock button {
-  display: inline-flex; align-items: center; gap: 10px; margin-top: 14px; padding: 14px 28px; border: 0; border-radius: 14px;
+  width: 100%; min-height: 54px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border: 0; border-radius: 16px;
   background: var(--accent, #ff7b3d); color: #111; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer;
 }
-.wx-lock button:disabled { opacity: .6; }
-.wx-lock small { color: #e58d80; font-size: 13px; }
+.wx-lock button:disabled { opacity: .65; }
+.wx-lock small { color: #e58d80; font-size: 13px; text-align: center; }
+.wx-lock small.dim { color: var(--text-dim, #6b6b72); }
+
+/* ── Installed-app feel: instant ghost splash, no pull-to-refresh, no tap flash ── */
+#wx-boot { position: fixed; inset: 0; z-index: 2147483000; display: none; place-items: center; background: #0c0c0d; transition: opacity .25s ease; }
+#wx-boot img { width: 60px; height: auto; }
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+  #wx-boot { display: grid; }
+  html, body { overscroll-behavior: none; }
+  * { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+  html { background: #0c0c0d; }
+}
+#wx-boot.out { opacity: 0; pointer-events: none; }
+#wx-boot[hidden] { display: none !important; }
 
 /* B/S toggle never wraps */
 .wx-chart-toolbar .wx-icon-btn { white-space: nowrap; }

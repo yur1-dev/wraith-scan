@@ -9,7 +9,8 @@ export default function BootSplash() {
     if (!el) return;
     const t1 = setTimeout(() => el.classList.add("out"), 250);
     const t2 = setTimeout(() => { el.hidden = true; }, 600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const t3 = setTimeout(() => document.documentElement.classList.remove("wx-prelock"), 6000); // safety: never stay hidden
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, []);
   return null;
 }

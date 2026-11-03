@@ -22,12 +22,10 @@ const KEY = "wraith_notifs_v1";
 const SEEN = "wraith_notifs_seen_v1";
 const KNOWN = "wraith_notifs_known_v1";
 const BASE = "wraith_notifs_pxbase_v1";
-const PREFS = "wraith_notifs_prefs_v1";
 const POLL_MS = 60_000;
 const SAVED_MOVE = 0.25; // alert when a saved token moves 25% from its last alert price
 const SOL_MINT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-const LABEL: Record<Kind, string> = { trader: "Traders", callout: "Callouts", saved: "Saved", signal: "Scanner" };
 const DEFAULT_PREFS: Prefs = { trader: true, callout: true, saved: true, signal: true };
 
 function read<T>(k: string, d: T): T {
@@ -67,16 +65,13 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notif[]>([]);
   const [seen, setSeen] = useState(0);
-  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
-  const prefsRef = useRef(prefs);
-  prefsRef.current = prefs;
+  const prefsRef = useRef<Prefs>(DEFAULT_PREFS); // everything is on; no filters
   const busy = useRef(false);
 
   useEffect(() => {
     setMounted(true);
     setItems(read<Notif[]>(KEY, []));
     setSeen(read<number>(SEEN, 0));
-    setPrefs({ ...DEFAULT_PREFS, ...read<Partial<Prefs>>(PREFS, {}) });
   }, []);
 
   const poll = useCallback(async () => {
@@ -197,11 +192,6 @@ export default function NotificationBell() {
       return next;
     });
   };
-  const setPref = (kind: Kind) => {
-    const next = { ...prefs, [kind]: !prefs[kind] };
-    setPrefs(next);
-    write(PREFS, next);
-  };
   const clearAll = () => { setItems([]); write(KEY, []); };
   const go = (n: Notif) => { setOpen(false); router.push(n.href); };
 
@@ -224,12 +214,6 @@ export default function NotificationBell() {
                 <button type="button" onClick={() => setOpen(false)} aria-label="Close"><X size={16} /></button>
               </span>
             </header>
-            <div className="wx-notif-prefs" role="group" aria-label="What to notify me about">
-              {(Object.keys(LABEL) as Kind[]).map((kind) => (
-                <button key={kind} type="button" className={prefs[kind] ? "on" : ""} aria-pressed={prefs[kind]} onClick={() => setPref(kind)}>{LABEL[kind]}</button>
-              ))}
-            </div>
-            <PushToggle prefs={prefs} />
             <div className="wx-notif-list">
               {items.length === 0 ? (
                 <p className="wx-notif-empty">Nothing yet. You will see buys from traders you follow, their callouts, big moves on tokens you saved, and fresh scanner calls here.</p>

@@ -2035,8 +2035,8 @@ function touchLastActive() {
 
 function isPinLockDue(): boolean {
   try {
-    if (!readPinEnabled()) return false;
-    if (!localStorage.getItem(PIN_HASH_KEY)) return false;
+    const pinOn = readPinEnabled() && !!localStorage.getItem(PIN_HASH_KEY);
+    if (!pinOn && !biometricReady()) return false;
     const timeout = readPinTimeout();
     if (timeout === 0) return false; // "Never" lock
     const last = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) ?? "0", 10);
@@ -2048,6 +2048,9 @@ function isPinLockDue(): boolean {
 
 // ── PIN lock overlay ──────────────────────────────────────────────────────────
 function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout?: () => void }) {
+  // Fingerprint-only lock (no passcode set): no keypad, just the fingerprint button.
+  const [pinSet] = useState(() => { try { return readPinEnabled() && !!localStorage.getItem(PIN_HASH_KEY); } catch { return false; } });
+  useEffect(() => { const r = requestAnimationFrame(() => document.documentElement.classList.remove("wx-prelock")); return () => cancelAnimationFrame(r); }, []);
   const [pin, setPin] = useState("");
   const [error, setError] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -2086,7 +2089,7 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
   }, []);
 
   useEffect(() => {
-    if (pin.length !== 6 || checking || unlocked) return;
+    if (!pinSet || pin.length !== 6 || checking || unlocked) return;
     setChecking(true);
     void hashPin(pin).then((h) => {
       const stored = localStorage.getItem(PIN_HASH_KEY);
@@ -2168,9 +2171,11 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
       </div>
       <h1>The veil is down</h1>
       <div className="wpl-sub" style={{ color: error ? "#ff6b6b" : unlocked ? "#55cf91" : undefined }}>
-        {error ? "Wrong sigil. Try again." : unlocked ? "Welcome back." : touch ? "Speak your sigil to cross." : "Type your sigil to cross."}
+        {error ? "Wrong sigil. Try again." : unlocked ? "Welcome back." : !pinSet ? "Touch the sensor to cross." : touch ? "Speak your sigil to cross." : "Type your sigil to cross."}
       </div>
 
+      {pinSet ? (
+        <>
       <div className={`wpl-orbs${error ? " shake" : ""}`} style={{ ["--c" as string]: tone }}>
         {Array.from({ length: 6 }, (_, i) => (
           <span key={i} className={`wpl-orb${pin.length > i ? " on" : ""}`} />
@@ -2204,10 +2209,15 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
         style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 1, height: 1 }}
       />
 
-      <div className="wpl-foot">
+        </>
+      ) : (
+        <button type="button" className="wpl-bio" onPointerDown={(e) => { e.preventDefault(); void tryBio(); }} aria-label="Use fingerprint"><Fingerprint size={36} /></button>
+      )}
+
+      {pinSet && <div className="wpl-foot">
         Lost your sigil?{" "}
         {onLogout ? <button type="button" onClick={onLogout}>Log out and sign in again</button> : "Log out and sign in again."}
-      </div>
+      </div>}
     </div>,
     document.body,
   );
@@ -3209,6 +3219,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
       setPinLocked(true);
     } else {
       touchLastActive();
+      document.documentElement.classList.remove("wx-prelock");
     }
 
     // Poll for auto-lock timeout while the tab is open

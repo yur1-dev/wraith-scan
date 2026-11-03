@@ -92,5 +92,12 @@ export function biometricReady(): boolean {
 export async function biometricVerify(): Promise<boolean> {
   const s = load();
   if (!s?.on) return false;
+  // The page asks the phone for the fingerprint before React loads (see layout), so the prompt is already up.
+  const w = window as unknown as { __wxBio?: Promise<Credential | null> };
+  const early = w.__wxBio;
+  if (early) {
+    delete w.__wxBio;
+    try { return !!(await early); } catch { return false; }
+  }
   try { return await verify(s.id); } catch { return false; }
 }

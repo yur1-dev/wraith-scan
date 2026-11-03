@@ -25,11 +25,11 @@ export default function AppLockMenuItem() {
     if (busy) return;
     setMsg("");
     if (on) { disableAppLock(); return; }
-    if (localStorage.getItem("wraith_pin_enabled") !== "true") { setMsg("Turn on passcode first"); return; }
     setBusy(true);
     try {
       const done = await enableAppLock();
       if (!done) setMsg("Not enabled");
+      else { try { localStorage.setItem("wraith_last_active", String(Date.now())); } catch {} }
     } catch (e) {
       const name = (e as { name?: string })?.name;
       setMsg(name === "NotAllowedError" ? "Cancelled" : "Set a screen lock on your phone first");

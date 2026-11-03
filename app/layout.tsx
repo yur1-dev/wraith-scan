@@ -37,10 +37,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={mono.variable}>
+    <html lang="en" className={mono.variable} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{var L=localStorage,d=document.documentElement;if(location.pathname.indexOf("/app")!==0)return;var b=null;try{b=JSON.parse(L.getItem("wraith_applock_v1")||"null")}catch(e){}var bo=!!(b&&b.on&&window.PublicKeyCredential),pn=L.getItem("wraith_pin_enabled")==="true"&&!!L.getItem("wraith_pin_hash");if(!bo&&!pn)return;var t=parseInt(L.getItem("wraith_pin_timeout_ms")||"300000",10);if(t===0)return;var la=parseInt(L.getItem("wraith_last_active")||"0",10);if(Date.now()-la<=t)return;d.classList.add("wx-prelock");if(bo){var s=b.id.replace(/-/g,"+").replace(/_/g,"/")+"===".slice((b.id.length+3)%4),r=atob(s),u=new Uint8Array(r.length);for(var i=0;i<r.length;i++)u[i]=r.charCodeAt(i);window.__wxBio=navigator.credentials.get({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),rpId:location.hostname,allowCredentials:[{id:u,type:"public-key",transports:["internal"]}],userVerification:"required",timeout:60000}});window.__wxBio.catch(function(){})}}catch(e){}})();` }} />
+      </head>
       <body>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <div id="wx-boot" aria-hidden="true"><img src="/logo.png" alt="" width="60" height="67" /></div>
+        <div id="wx-boot" aria-hidden="true"><img src="/ghost.png" alt="" /></div>
         <BootSplash />
         <WalletProvider>
           <WraithTierProvider>{children}</WraithTierProvider>

@@ -18,6 +18,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
   const [state, setState] = useState<State>("checking");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [perm, setPerm] = useState("");
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
 
@@ -38,14 +39,24 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     } catch { /* retry next change */ }
   }, [payload]);
 
-  useEffect(() => {
+  const check = useCallback(() => {
     if (!VAPID || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) { setState("unsupported"); return; }
+    setPerm(Notification.permission);
     if (Notification.permission === "denied") { setState("blocked"); return; }
     navigator.serviceWorker.getRegistration("/sw.js")
       .then((r) => r?.pushManager.getSubscription())
       .then((s) => setState(s && Notification.permission === "granted" ? "on" : "off"))
       .catch(() => setState("off"));
   }, []);
+
+  useEffect(() => {
+    check();
+    // re-check when you come back from the phone's Settings
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", check);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", check); };
+  }, [check]);
 
   // keep the server in step when you change categories or save / unsave a token
   useEffect(() => {
@@ -115,7 +126,13 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     return <p className="wx-push-note">Phone notifications need a supported browser. On iPhone, add Wraith to your Home Screen first.</p>;
   }
   if (state === "blocked") {
-    return <p className="wx-push-note">Notifications are blocked for Wraith. Switch them on in Settings → Apps → Wraith → Notifications (one time), then come back.</p>;
+    return (
+      <div className="wx-push-note">
+        <p style={{ margin: 0 }}>Notifications are blocked for Wraith. Switch them on in Settings → Apps → Wraith → Notifications, then come back here.</p>
+        <p style={{ margin: "6px 0 0", opacity: 0.7, fontSize: 12 }}>Phone says: {perm || "denied"}</p>
+        <button type="button" onClick={check} style={{ marginTop: 8, padding: "7px 14px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface-2)", color: "var(--text)", fontWeight: 700, fontSize: 12.5 }}>Check again</button>
+      </div>
+    );
   }
   return (
     <div className="wx-push">

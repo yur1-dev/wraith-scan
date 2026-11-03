@@ -19,6 +19,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [perm, setPerm] = useState("");
+  const fcmRef = useRef(false); // native Android push is linked
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
 
@@ -40,6 +41,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
   }, [payload]);
 
   const check = useCallback(() => {
+    if (fcmRef.current) { setState("on"); return; }
     if (!VAPID || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) { setState("unsupported"); return; }
     setPerm(Notification.permission);
     if (Notification.permission === "denied") { setState("blocked"); return; }
@@ -47,6 +49,18 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
       .then((r) => r?.pushManager.getSubscription())
       .then((s) => setState(s && Notification.permission === "granted" ? "on" : "off"))
       .catch(() => setState("off"));
+  }, []);
+
+  // native Android push (Firebase): when the app has linked this phone, that is what "on" means
+  useEffect(() => {
+    const probe = () => {
+      fetch("/api/push/fcm").then((r) => r.json()).then((d: { linked?: boolean }) => {
+        if (d.linked) { fcmRef.current = true; setState("on"); }
+      }).catch(() => undefined);
+    };
+    probe();
+    window.addEventListener("wraith:fcm-linked", probe);
+    return () => window.removeEventListener("wraith:fcm-linked", probe);
   }, []);
 
   useEffect(() => {
@@ -74,6 +88,11 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
   const enable = async () => {
     setBusy(true); setMsg("");
     try {
+      if (localStorage.getItem("wraith_fcm_token")) {
+        // native app: link the phone for Firebase push instead of web push
+        window.dispatchEvent(new Event("wraith:fcm-relink"));
+        return;
+      }
       const r = await enablePush(prefsRef.current, true);
       if (r !== "on") { setState(r === "blocked" ? "blocked" : "off"); return; }
       setState("on");
@@ -90,7 +109,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     try {
       const r = await fetch("/api/push/test", { method: "POST" });
       let d = (await r.json().catch(() => ({}))) as { sent?: number; error?: string };
-      if (r.ok && !d.sent) {
+      if (r.ok && !d.sent && !fcmRef.current) {
         // the server dropped this phone: register it again and retry once
         await enablePush(prefsRef.current, true);
         const r2 = await fetch("/api/push/test", { method: "POST" });
@@ -109,6 +128,13 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
   const disable = async () => {
     setBusy(true); setMsg("");
     try {
+      if (fcmRef.current) {
+        await fetch("/api/push/fcm", { method: "DELETE" }).catch(() => undefined);
+        try { localStorage.setItem("wraith_fcm_off", "1"); localStorage.removeItem("wraith_fcm_linked"); } catch { /* blocked */ }
+        fcmRef.current = false;
+        setState("off");
+        return;
+      }
       const reg = await navigator.serviceWorker.getRegistration("/sw.js");
       const sub = await reg?.pushManager.getSubscription();
       if (sub) {

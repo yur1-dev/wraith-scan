@@ -7,6 +7,7 @@ import "./wraith-responsive.css";
 import "./wraith-mobile.css";
 import WalletProvider from "@/components/WalletProvider";
 import BootSplash from "@/components/BootSplash";
+import FcmLink from "@/components/FcmLink";
 import { WraithTierProvider } from "@/hooks/useWraithTier";
 
 const mono = IBM_Plex_Mono({
@@ -46,6 +47,7 @@ export default function RootLayout({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <div id="wx-boot" aria-hidden="true"><img src="/ghost.png" alt="" /></div>
         <BootSplash />
+        <FcmLink />
         <WalletProvider>
           <WraithTierProvider>{children}</WraithTierProvider>
         </WalletProvider>

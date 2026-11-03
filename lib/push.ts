@@ -2,6 +2,7 @@
 // Needs env: NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (mailto:you@example.com).
 import webpush from "web-push";
 import { getDb } from "@/lib/mongoClient";
+import { fcmConfigured, sendFcm } from "@/lib/fcm";
 import type { SignalCall } from "@/lib/signalCalls";
 
 export interface PushPrefs { trader: boolean; callout: boolean; saved: boolean; signal: boolean }
@@ -15,6 +16,7 @@ export interface PushSub {
   base: Record<string, number>;
   cursor: number;
   createdAt: number;
+  fcm?: boolean; // native Android push; _id is "fcm:<token>"
 }
 interface Msg { title: string; body: string; url: string; tag: string }
 
@@ -23,6 +25,9 @@ const SAVED_MOVE = 0.25;
 const MAX_PER_RUN = 5;
 
 let ready: boolean | null = null;
+/** true when either web push or native push can send */
+export function pushAnyConfigured(): boolean { return pushConfigured() || fcmConfigured(); }
+
 export function pushConfigured(): boolean {
   if (ready !== null) return ready;
   const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY, priv = process.env.VAPID_PRIVATE_KEY;
@@ -47,6 +52,8 @@ const k = (n?: number | null) => {
 
 /** returns false when the subscription is dead and should be removed */
 async function deliver(sub: PushSub, msg: Msg): Promise<boolean> {
+  if (sub.fcm) return sendFcm(sub._id.slice(4), msg);
+  if (!pushConfigured()) return true;
   try {
     await webpush.sendNotification({ endpoint: sub._id, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify(msg), { TTL: 3600, urgency: "high" });
     return true;
@@ -59,9 +66,10 @@ async function deliver(sub: PushSub, msg: Msg): Promise<boolean> {
 }
 
 export async function sendTest(userId: string): Promise<number> {
-  if (!pushConfigured()) return 0;
+  if (!pushAnyConfigured()) return 0;
   const db = await getDb();
-  const subs = await db.collection<PushSub>(COLLECTION).find({ userId }).toArray();
+  const all = await db.collection<PushSub>(COLLECTION).find({ userId }).toArray();
+  const subs = all.some((s) => s.fcm) ? all.filter((s) => s.fcm) : all; // native push wins over web push
   let n = 0;
   for (const s of subs) {
     const ok = await deliver(s, { title: "Wraith notifications are on", body: "You will get calls, trader buys and saved-token moves here.", url: "/app", tag: "test" });
@@ -86,10 +94,12 @@ async function jupPrices(mints: string[]): Promise<Record<string, number>> {
 /** Called every minute by the cron. Sends each subscriber only what happened since their last run. */
 export async function runPushAlerts(): Promise<{ subs: number; sent: number; removed: number }> {
   const res = { subs: 0, sent: 0, removed: 0 };
-  if (!pushConfigured()) return res;
+  if (!pushAnyConfigured()) return res;
   const db = await getDb();
   const col = db.collection<PushSub>(COLLECTION);
-  const subs = await col.find({}).limit(3000).toArray();
+  const allSubs = await col.find({}).limit(3000).toArray();
+  const fcmUsers = new Set(allSubs.filter((s) => s.fcm).map((s) => s.userId));
+  const subs = allSubs.filter((s) => s.fcm || !fcmUsers.has(s.userId)); // one channel per user: no double alerts
   res.subs = subs.length;
   if (!subs.length) return res;
   const now = Date.now();

@@ -19,7 +19,11 @@ export async function GET(req: NextRequest) {
     const ok = req.headers.get("authorization") === `Bearer ${secret}` || req.nextUrl.searchParams.get("key") === secret;
     if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (!process.env.TELEGRAM_BOT_TOKEN) return NextResponse.json({ error: "no bot token" }, { status: 503 });
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    // No Telegram bot configured: phone push notifications still run.
+    const push = await runPushAlerts().catch((e) => { console.error("[push alerts]", e); return null; });
+    return NextResponse.json({ ok: true, telegram: false, push });
+  }
 
   const db = await getDb();
   const state = db.collection<{ _id: string; at: Date }>("tg_state");

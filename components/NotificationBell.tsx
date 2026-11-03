@@ -214,6 +214,7 @@ export default function NotificationBell() {
                 <button type="button" onClick={() => setOpen(false)} aria-label="Close"><X size={16} /></button>
               </span>
             </header>
+            <PushToggle prefs={DEFAULT_PREFS} />
             <div className="wx-notif-list">
               {items.length === 0 ? (
                 <p className="wx-notif-empty">Nothing yet. You will see buys from traders you follow, their callouts, big moves on tokens you saved, and fresh scanner calls here.</p>

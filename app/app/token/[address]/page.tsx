@@ -43,6 +43,7 @@ export default function TokenPage() {
   const [isMobile, setIsMobile] = useState<boolean | null>(null);
   const [sideTab, setSideTab] = useState<SideTab>("tokens");
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
+  const [sheet, setSheet] = useState<null | "buy" | "sell">(null);
   const [favorites, setFavorites] = useState<MemeTrend[]>([]);
   const isEvm = EVM_ADDR_RE.test(address);
   const validMint = SOLANA_MINT_RE.test(address) || isEvm;
@@ -195,28 +196,28 @@ export default function TokenPage() {
         {isMobile ? (
           <>
             <div className="wx-mobile-body">
-              <div style={{ display: mobileTab === "chart" ? "block" : "none", height: "100%" }}>
+              <div style={{ display: mobileTab === "market" ? "none" : "block", height: "100%" }}>
                 <TokenPanel selectedMeme={meme} />
-              </div>
-              <div style={{ display: mobileTab === "trade" ? "block" : "none", height: "100%" }}>
-                <TokenTradeDock meme={meme} />
               </div>
               <div style={{ display: mobileTab === "market" ? "flex" : "none", height: "100%", flexDirection: "column" }}>{sidebar}</div>
             </div>
-            <nav className="wx-mobile-nav" aria-label="Token sections">
-              {(
-                [
-                  ["chart", "Chart", <Activity key="c" size={18} />],
-                  ["trade", "Trade", <Wallet key="t" size={18} />],
-                  ["market", "Market", <Flame key="m" size={18} />],
-                ] as const
-              ).map(([key, label, icon]) => (
-                <button key={key} type="button" className={mobileTab === key ? "on" : ""} onClick={() => setMobileTab(key)}>
-                  {icon}
-                  <span>{label}</span>
-                </button>
-              ))}
-            </nav>
+            <div className="wx-mbar" role="toolbar" aria-label="Trade">
+              <button type="button" className="wx-mbar-nav" onClick={() => setMobileTab(mobileTab === "market" ? "chart" : "market")}>
+                {mobileTab === "market" ? <Activity size={18} /> : <Flame size={18} />}
+                <span>{mobileTab === "market" ? "Chart" : "Market"}</span>
+              </button>
+              <button type="button" className="wx-mbar-buy" onClick={() => setSheet("buy")}>Buy</button>
+              <button type="button" className="wx-mbar-sell" onClick={() => setSheet("sell")}>Sell</button>
+            </div>
+            {sheet && (
+              <div className="wx-sheet-back" onClick={() => setSheet(null)}>
+                <div className="wx-sheet" role="dialog" aria-label={sheet === "buy" ? "Buy" : "Sell"} onClick={(e) => e.stopPropagation()}>
+                  <div className="wx-sheet-grab" aria-hidden="true" />
+                  <button type="button" className="wx-sheet-x" onClick={() => setSheet(null)} aria-label="Close">×</button>
+                  <TokenTradeDock meme={meme} initialMode={sheet} />
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="wx-workspace">

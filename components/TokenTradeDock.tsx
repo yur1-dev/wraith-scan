@@ -31,7 +31,7 @@ const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
 const CASH_PRESETS_USD = [5, 10, 25, 50];
 const SELL_PRESETS = [25, 50, 100];
 
-type Props = { meme: MemeTrend | null };
+type Props = { meme: MemeTrend | null; initialMode?: "buy" | "sell" };
 type Mode = "buy" | "sell";
 type MarketSnapshot = {
   name: string | null;
@@ -82,9 +82,9 @@ function formatAge(timestamp: number | null): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export default function TokenTradeDock({ meme }: Props) {
+export default function TokenTradeDock({ meme, initialMode }: Props) {
   if (!PRIVY_WALLETS_ENABLED) return <UnconfiguredDock meme={meme} />;
-  return <EmbeddedTradeDock meme={meme} />;
+  return <EmbeddedTradeDock meme={meme} initialMode={initialMode} />;
 }
 
 function UnconfiguredDock({ meme }: Props) {
@@ -97,7 +97,7 @@ function UnconfiguredDock({ meme }: Props) {
   );
 }
 
-function EmbeddedTradeDock({ meme }: Props) {
+function EmbeddedTradeDock({ meme, initialMode }: Props) {
   const mint = meme?.contractAddress || "";
   const symbol = (meme?.keyword || "TOKEN").toUpperCase();
   const sandboxToken = useSandboxToken(mint);
@@ -111,7 +111,7 @@ function EmbeddedTradeDock({ meme }: Props) {
   const [srcId, setSrcId] = useState("");
   useEffect(() => { setSrcId((c) => (c && cash.sources.some((h) => h.id === c) ? c : cash.sources[0]?.id ?? "")); }, [cash.sources]);
   const src = cash.sources.find((x) => x.id === srcId) ?? null;
-  const [mode, setMode] = useState<Mode>("buy");
+  const [mode, setMode] = useState<Mode>(initialMode ?? "buy");
   const [amountCash, setAmountCash] = useState("10");
   const [sellPercent, setSellPercent] = useState(100);
   const [warnOpen, setWarnOpen] = useState(false);

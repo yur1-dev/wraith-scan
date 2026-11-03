@@ -64,6 +64,7 @@ export function Magnetic({ children }: { children: ReactNode }) {
       style={{ display: "inline-block", transform: `translate(${p.x}px, ${p.y}px)`, transition: "transform .2s cubic-bezier(.22,1,.36,1)" }}
       onMouseMove={(e) => {
         if (reduce) return;
+        if (typeof window !== "undefined" && window.matchMedia("(hover: none), (pointer: coarse)").matches) return;
         const r = e.currentTarget.getBoundingClientRect();
         setP({ x: (e.clientX - r.left - r.width / 2) * 0.18, y: (e.clientY - r.top - r.height / 2) * 0.28 });
       }}

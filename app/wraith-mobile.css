@@ -1,0 +1,190 @@
+/* ───────────────────────────────────────────────────────────────────────
+   Wraith mobile layer — loaded after every other stylesheet.
+   Goal: compact, app-like, TradingView-feeling screens on phones.
+   ─────────────────────────────────────────────────────────────────────── */
+
+/* Touch devices: no sticky-hover "jumping" after a tap */
+@media (hover: none) {
+  .ws-btn:hover, .ws-card:hover, .wl2-chains span:hover, .sg-card:hover, .wb-card:hover,
+  .wx-tcard:hover, .wc:hover, .lp-nav-cta:hover, .trader-card:hover, .fb-send:hover { transform: none !important; }
+}
+
+/* ── Token page: sticky Buy / Sell bar + trade sheet ─────────────────── */
+.wx-mbar {
+  flex: 0 0 auto; display: flex; align-items: stretch; gap: 8px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg, #0c0c0d); border-top: 1px solid var(--border);
+}
+.wx-mbar button { font-family: inherit; cursor: pointer; border: 0; -webkit-tap-highlight-color: transparent; }
+.wx-mbar-nav {
+  flex: 0 0 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border-radius: 12px !important; background: var(--surface-2, #1a1a1c); color: var(--text-muted); font-size: 10px; font-weight: 700;
+}
+.wx-mbar-buy, .wx-mbar-sell {
+  flex: 1; min-height: 48px; border-radius: 12px !important; color: #fff; font-size: 16px; font-weight: 800; letter-spacing: .01em;
+}
+.wx-mbar-buy { background: #1fa67a; }
+.wx-mbar-sell { background: #e5484d; }
+.wx-mbar-buy:active, .wx-mbar-sell:active, .wx-mbar-nav:active { filter: brightness(.88); }
+
+.wx-sheet-back {
+  position: fixed; inset: 0; z-index: 2000; display: flex; align-items: flex-end;
+  background: rgba(0, 0, 0, .62); backdrop-filter: blur(2px); animation: wx-fade .18s ease-out;
+}
+.wx-sheet {
+  position: relative; width: 100%; max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain;
+  border-radius: 20px 20px 0 0; border-top: 1px solid var(--border); background: var(--bg, #0c0c0d);
+  padding: 20px 0 env(safe-area-inset-bottom, 0px); animation: wx-sheet-up .24s cubic-bezier(.2, .8, .2, 1);
+}
+.wx-sheet aside { border-left: 0 !important; height: auto !important; overflow: visible !important; }
+.wx-sheet-grab { position: absolute; top: 8px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: rgba(255, 255, 255, .22); }
+.wx-sheet-x {
+  position: absolute; top: 8px; right: 10px; z-index: 3; width: 32px; height: 32px; border: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .08); color: var(--text); font-size: 20px; line-height: 1; cursor: pointer;
+}
+
+/* ── Wraith "spotted" popup: bottom sheet on phones ───────────────────── */
+.wx-spot-sheet-back {
+  position: fixed; inset: 0; z-index: 2100; display: flex; align-items: flex-end;
+  background: rgba(0, 0, 0, .55); animation: wx-fade .16s ease-out;
+}
+.wx-spot-sheet {
+  position: relative; width: 100%; max-height: 80dvh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 22px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  border-radius: 20px 20px 0 0; border-top: 1px solid rgba(255, 123, 61, .5); background: #0e0e12;
+  box-shadow: 0 -18px 50px rgba(0, 0, 0, .6); animation: wx-sheet-up .22s cubic-bezier(.2, .8, .2, 1);
+}
+.wx-spot-sheet [role="tooltip"] {
+  width: 100% !important; padding: 0 !important; border: 0 !important; background: transparent !important;
+  box-shadow: none !important; zoom: 1.12;
+}
+.wx-spot-sheet-x {
+  position: absolute; top: 8px; right: 10px; z-index: 2; width: 32px; height: 32px; border: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .08); color: #fff; font-size: 20px; line-height: 1; cursor: pointer;
+}
+
+@media (max-width: 767px) {
+  /* ── Token page: chart first, TradingView feel ───────────────────── */
+  .wraith-dashboard .wx-panel { padding: 0 !important; gap: 0 !important; }
+  .wraith-dashboard .wx-token-head { flex-wrap: wrap; gap: 4px 8px; padding: 8px 12px 2px; }
+  .wx-token-id { gap: 9px; }
+  .wx-token-id > :first-child { width: 34px !important; height: 34px !important; flex: 0 0 34px; }
+  .wx-token-name h1 { font-size: 18px; }
+  .wx-token-name .wx-badge { padding: 1px 7px; font-size: 10px; }
+  .wx-token-sub { margin-top: 1px; font-size: 11px; }
+  .wx-token-actions { flex: 1 1 100%; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+  .wx-token-actions::-webkit-scrollbar { display: none; }
+  .wx-token-actions .wx-icon-btn { flex: 0 0 auto; width: 28px; height: 28px; min-height: 0; }
+
+  .wraith-dashboard .wx-pricebar {
+    flex-wrap: nowrap; align-items: center; gap: 8px; padding: 6px 12px 6px;
+    border: 0; border-radius: 0; background: transparent;
+  }
+  .wx-pricebar .wx-kicker { font-size: 9px; }
+  .wx-pricebar .wx-age-chip { display: none; }
+  .wx-mcap { margin-top: 1px; font-size: 24px; }
+  .wx-changes { flex-wrap: nowrap; gap: 2px; margin-left: auto; }
+  .wraith-dashboard .wx-change { min-width: 0; padding: 2px 5px; border: 0; background: transparent; border-radius: 6px; }
+  .wx-change span { margin-bottom: 0; font-size: 9px; }
+  .wx-change b { font-size: 12px; }
+
+  .wb-spot { margin: 0 12px 6px; padding: 3px 10px; font-size: 11px; }
+
+  .wraith-dashboard .wx-chart-card {
+    height: calc(100dvh - 300px); min-height: 340px; max-height: none;
+    border-left: 0; border-right: 0; border-radius: 0 !important; background: #0c0e12;
+  }
+  .wx-chart-toolbar {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 4px 6px 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wx-chart-toolbar::-webkit-scrollbar { display: none; }
+  .wx-chart-toolbar > * { flex: 0 0 auto; }
+  .wx-chart-toolbar > div[style] { display: none; }
+  .wraith-dashboard .wx-chart-toolbar .wx-seg { padding: 0; gap: 0; border: 0; background: transparent; }
+  .wraith-dashboard .wx-chart-toolbar .wx-seg button { padding: 6px 9px; font-size: 12px; border-radius: 6px !important; }
+  .wx-chart-toolbar .wx-seg + .wx-seg { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--border); border-radius: 0; }
+  .wx-chart-toolbar .wx-icon-btn { width: 30px; height: 30px; border: 0; background: transparent; }
+  .wx-legend { flex-wrap: nowrap; gap: 8px; overflow: hidden; white-space: nowrap; padding: 0 10px 2px; font-size: 10.5px; }
+  .wx-legend .wx-src { display: none; }
+
+  /* Tabs under the chart: tighter */
+  .wraith-dashboard .wx-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 10px 12px 0; }
+  .wx-stat { padding: 8px 9px; gap: 3px; border-radius: 10px; }
+  .wx-stat > b { font-size: 13px; }
+  .wx-stat > span { font-size: 9.5px; }
+  .wx-stat > small { display: none; }
+
+  /* ── Market board ───────────────────────────────────────────────── */
+  .wraith-dashboard .wx-board { border-radius: 0 !important; border-left: 0; border-right: 0; }
+  .wx-board-bar > .wx-seg.lg button { padding: 6px 11px; font-size: 12.5px; }
+  .wx-board-bar .wx-search input { height: 32px; }
+  .wx-trow { padding: 7px 6px !important; gap: 6px !important; }
+  .wx-trow-id strong { font-size: 13.5px; }
+
+  /* ── Scanner ────────────────────────────────────────────────────── */
+  .wx-scanner-layout { margin: 0 !important; gap: 0 !important; overflow: visible; }
+  .wx-scanner-rail.sg-rail { display: none !important; }
+  .wraith-dashboard .wx-scanner-main { border-radius: 0 !important; border-left: 0; border-right: 0; border-top: 0; }
+  .sg-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px 8px; }
+  .sg-head p { margin: 4px 0 0; font-size: 11px; }
+  .sg-head-actions { gap: 6px; flex-wrap: nowrap; }
+  .sg-head-actions .wx-seg { flex: 0 0 auto; }
+  .sg-btn { flex: 1 1 0; justify-content: center; padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+  .sg-filters {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 6px; padding: 0 12px 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sg-filters::-webkit-scrollbar { display: none; }
+  .sg-filters button { flex: 0 0 auto; padding: 6px 12px; font-size: 12px; white-space: nowrap; }
+  .sg-body { padding: 10px 10px 16px; }
+  .sg-grid { grid-template-columns: 1fr; gap: 8px; }
+  .sg-card { gap: 10px; padding: 12px; border-radius: 14px; }
+  .sg-id strong { font-size: 15px; }
+
+  /* ── Wins ───────────────────────────────────────────────────────── */
+  .wx-wins-wrap { padding: 10px 10px 40px !important; }
+  .wb { gap: 12px; }
+  .wb-head { gap: 10px; padding-bottom: 10px; }
+  .wb-head h2 { font-size: 16px; }
+  .wb-head p { margin-top: 3px; font-size: 12px; }
+  .wb-head-actions { width: 100%; }
+  .wb-head-actions .wx-seg { flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
+  .wb-head-actions .wx-seg::-webkit-scrollbar { display: none; }
+  .wb-head-actions .wx-seg button { flex: 1 0 auto; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+  .wb-stats {
+    display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    margin: 0 -10px; padding: 0 10px;
+  }
+  .wb-stats::-webkit-scrollbar { display: none; }
+  .wb-stats > div { flex: 0 0 auto; min-width: 92px; gap: 3px; padding: 9px 12px; border-radius: 12px; }
+  .wb-stats small { font-size: 9.5px; }
+  .wb-stats b { font-size: 17px; }
+  .wb-grid { grid-template-columns: 1fr; gap: 8px; }
+  .wb-card { gap: 10px; padding: 12px; border-radius: 14px; }
+  .wb-id strong { font-size: 14.5px; }
+  .wb-mult { padding: 4px 10px; font-size: 16px; border-radius: 10px; }
+  .wb-row b { font-size: 13px; }
+
+  /* ── Traders ────────────────────────────────────────────────────── */
+  .traders-shell { gap: 10px; padding-top: 6px; }
+  .traders-heading h1 { margin: 2px 0 0; font-size: 22px; }
+  .traders-heading p { display: none; }
+  .traders-grid { grid-template-columns: 1fr; gap: 8px; }
+  .trader-card {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 10px;
+    padding: 12px; border-radius: 14px;
+  }
+  .trader-card-top { grid-column: 1 / -1; gap: 10px; }
+  .trader-avatar { width: 40px; height: 40px; flex-basis: 40px; }
+  .trader-card > p { display: none; }
+  .trader-card-stats { grid-column: 1; gap: 0; }
+  .trader-card-stats > div { padding: 2px 10px; gap: 2px; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: transparent; }
+  .trader-card-stats > div:first-child { padding-left: 0; border-left: 0; }
+  .trader-card-stats span { font-size: 8.5px; white-space: nowrap; }
+  .trader-card-stats strong { font-size: 12.5px; white-space: nowrap; }
+  .trader-card > div:last-child { grid-column: 2; margin: 0 !important; }
+  .trader-card-open { grid-column: 1 / -1; }
+  .trader-card-open.is-empty { display: none; }
+  .trader-card-skeleton { min-height: 96px; }
+}

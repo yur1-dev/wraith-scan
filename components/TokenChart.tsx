@@ -13,6 +13,7 @@ import {
   ColorType,
   CrosshairMode,
   HistogramSeries,
+  LineStyle,
   createChart,
   type IChartApi,
   type ISeriesApi,
@@ -47,8 +48,8 @@ type Metric = "mcap" | "price";
 type Style = "candles" | "line";
 
 const ACCENT = "#ff7b3d";
-const UP = "#22c55e";
-const DOWN = "#ef4444";
+const UP = "#26a69a";
+const DOWN = "#ef5350";
 const POLL_MS = 10_000;
 const rowCache = new Map<string, ChartCandle[]>(); // last good series per token+timeframe: instant repaint on switch/revisit
 const EMPTY_POLL_MS = 2_500;
@@ -215,25 +216,25 @@ export default function TokenChart({
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#8b8b92",
+        textColor: "#787b86",
         fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: "rgba(255,255,255,0.03)" },
-        horzLines: { color: "rgba(255,255,255,0.045)" },
+        vertLines: { color: "rgba(42,46,57,0.55)" },
+        horzLines: { color: "rgba(42,46,57,0.55)" },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "rgba(255,123,61,0.45)", labelBackgroundColor: ACCENT },
-        horzLine: { color: "rgba(255,123,61,0.45)", labelBackgroundColor: ACCENT },
+        vertLine: { color: "#758696", width: 1, style: LineStyle.Dashed, labelBackgroundColor: "#2a2e39" },
+        horzLine: { color: "#758696", width: 1, style: LineStyle.Dashed, labelBackgroundColor: "#2a2e39" },
       },
       rightPriceScale: {
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: "rgba(42,46,57,0.9)",
         scaleMargins: { top: 0.08, bottom: 0.24 },
       },
       timeScale: {
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: "rgba(42,46,57,0.9)",
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 6,
@@ -620,7 +621,7 @@ export default function TokenChart({
       style === "candles"
         ? { time: chartTime(c.t), open: c.o * mult, high: c.h * mult, low: c.l * mult, close: c.c * mult }
         : { time: chartTime(c.t), value: c.c * mult };
-    const mkVol = (c: ChartCandle) => ({ time: chartTime(c.t), value: c.v, color: c.c >= c.o ? "rgba(34,197,94,0.38)" : "rgba(239,68,68,0.38)" });
+    const mkVol = (c: ChartCandle) => ({ time: chartTime(c.t), value: c.v, color: c.c >= c.o ? "rgba(38,166,154,0.42)" : "rgba(239,83,80,0.42)" });
 
     // Same series, only the tail changed (the 10s poll): update the last bars in place.
     // No full redraw, no flicker, and the viewport and any measure box stay put.
@@ -987,6 +988,7 @@ export default function TokenChart({
         {spotPos && status === "ready" && (
           <div
             onMouseEnter={(e) => { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); }}
+            onClick={(e) => { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); }}
             onMouseLeave={() => setSpotHover(false)}
             style={{ position: "absolute", left: spotPos.x, top: Math.max(4, spotPos.y - 34), transform: "translateX(-50%)", pointerEvents: "auto", cursor: "help", display: "flex", flexDirection: "column", alignItems: "center", zIndex: 5 }}
           >
@@ -994,6 +996,16 @@ export default function TokenChart({
               (() => {
                 // Rendered on <body> so the chart frame can never clip it; flips above/below by available room.
                 const vh = window.innerHeight, vw = window.innerWidth;
+                if (vw < 768) {
+                  return (
+                    <div className="wx-spot-sheet-back" onClick={(e) => { e.stopPropagation(); setSpotHover(false); }}>
+                      <div className="wx-spot-sheet" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="wx-spot-sheet-x" onClick={() => setSpotHover(false)} aria-label="Close">×</button>
+                        {spotCard}
+                      </div>
+                    </div>
+                  );
+                }
                 const cx = Math.min(vw - 200, Math.max(200, spotRect.left + spotRect.width / 2));
                 const above = spotRect.top > vh / 2;
                 const pos = above

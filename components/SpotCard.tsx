@@ -76,7 +76,7 @@ export default function SpotCard({ info }: { info: SpotInfo }) {
   ];
 
   return (
-    <div role="tooltip" style={{ width: 316, padding: 14, borderRadius: 14, background: "rgba(14,14,18,.97)", border: "1px solid rgba(255,123,61,.5)", boxShadow: "0 18px 50px rgba(0,0,0,.7), 0 0 24px rgba(255,123,61,.18)", color: "var(--text)", textAlign: "left", ...MONO }}>
+    <div role="tooltip" style={{ width: "min(316px, calc(100vw - 24px))", padding: 14, borderRadius: 14, background: "rgba(14,14,18,.97)", border: "1px solid rgba(255,123,61,.5)", boxShadow: "0 18px 50px rgba(0,0,0,.7), 0 0 24px rgba(255,123,61,.18)", color: "var(--text)", textAlign: "left", ...MONO }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ color: "var(--orange-hot)", fontSize: 10, fontWeight: 800, letterSpacing: ".12em" }}>WRAITH SPOTTED THIS</div>

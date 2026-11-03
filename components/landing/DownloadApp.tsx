@@ -1,15 +1,18 @@
 "use client";
 // "Download app" button + sheet: Android APK (until Play Store), Play Store (soon), iPhone via Add to Home Screen.
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 const APK_URL = "/downloads/wraith.apk";
 
 export default function DownloadApp({ className = "ws-btn lg", label = "Download app" }: { className?: string; label?: string }) {
   const [open, setOpen] = useState(false);
   const [os, setOs] = useState<"android" | "ios" | "other">("other");
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const ua = navigator.userAgent || "";
+    setMounted(true);
     setOs(/android/i.test(ua) ? "android" : /iphone|ipad|ipod/i.test(ua) ? "ios" : "other");
   }, []);
   useEffect(() => {
@@ -46,7 +49,7 @@ export default function DownloadApp({ className = "ws-btn lg", label = "Download
   return (
     <>
       <button type="button" className={className} onClick={() => setOpen(true)}>{label}</button>
-      {open && (
+      {open && mounted && createPortal(
         <div className="dl-overlay" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
           <div className="dl-sheet" role="dialog" aria-modal="true" aria-label="Download the WRAITH app">
             <button type="button" className="dl-x" aria-label="Close" onClick={() => setOpen(false)}>×</button>
@@ -54,7 +57,8 @@ export default function DownloadApp({ className = "ws-btn lg", label = "Download
             <p className="dl-sub">Same account, same wallets. Install it now, store listings are coming.</p>
             {os === "ios" ? <>{ios}{android}</> : <>{android}{ios}</>}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

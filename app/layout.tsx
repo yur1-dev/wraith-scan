@@ -4,6 +4,7 @@ import "./globals.css";
 import "./wraith-ui.css";
 import "./wraith-polish.css";
 import "./wraith-responsive.css";
+import "./wraith-mobile.css";
 import WalletProvider from "@/components/WalletProvider";
 import { WraithTierProvider } from "@/hooks/useWraithTier";
 

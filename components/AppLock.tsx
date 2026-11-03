@@ -1,11 +1,8 @@
 "use client";
 
-// Fingerprint / face / screen-lock for the app, using the phone's built-in biometrics (WebAuthn platform authenticator).
-// It locks the screen when the app opens and when you come back to it after a short while away.
-// This is a privacy lock for the device the app is on: it keeps someone who picks up your phone out of your account.
+// Fingerprint / face / screen-lock helpers (WebAuthn platform authenticator).
+// They let the existing passcode screen ("The veil is down") be opened with the phone's fingerprint instead of typing the passcode.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Fingerprint } from "lucide-react";
 
 const KEY = "wraith_applock_v1";
 const LOCK_AFTER_MS = 30_000; // locks again after being in the background this long
@@ -86,57 +83,14 @@ export async function enableAppLock(): Promise<boolean> {
 export function disableAppLock() { save(null); }
 export function appLockEnabled() { return !!load()?.on; }
 
-/** Mount once. Shows the lock screen when the lock is on. */
-export default function AppLock() {
-  const [locked, setLocked] = useState(false);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const hiddenAt = useRef(0);
+/** Is a fingerprint / face credential registered on this device? */
+export function biometricReady(): boolean {
+  return appLockSupported() && !!load()?.on;
+}
 
-  const unlock = useCallback(async () => {
-    const s = load();
-    if (!s?.on || !isInstalledApp()) { setLocked(false); document.documentElement.classList.remove("wx-prelock"); return; }
-    setBusy(true); setErr("");
-    try {
-      if (await verify(s.id)) { setLocked(false); document.documentElement.classList.remove("wx-prelock"); }
-      else setErr("Could not verify. Try again.");
-    } catch (e) {
-      const name = (e as { name?: string })?.name;
-      setErr(name === "NotAllowedError" ? "Cancelled. Tap to try again." : "Could not unlock. Tap to try again.");
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (load()?.on && isInstalledApp()) { setLocked(true); void unlock(); } else { document.documentElement.classList.remove("wx-prelock"); }
-    const onVis = () => {
-      if (document.visibilityState === "hidden") { hiddenAt.current = Date.now(); return; }
-      if (load()?.on && isInstalledApp() && hiddenAt.current && Date.now() - hiddenAt.current > LOCK_AFTER_MS) { setLocked(true); void unlock(); }
-    };
-    const onChange = () => { if (!load()?.on) { setLocked(false); document.documentElement.classList.remove("wx-prelock"); } };
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("wraith:applock-changed", onChange);
-    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("wraith:applock-changed", onChange); };
-  }, [unlock]);
-
-  if (!locked) return null;
-  return (
-    <div className="wx-lock" role="dialog" aria-modal="true" aria-label="App locked">
-      <div className="wx-lock-mid">
-        <div className="wx-lock-tile">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" width={44} height={49} />
-        </div>
-        <h2>Wraith</h2>
-        <p>Locked</p>
-      </div>
-      <div className="wx-lock-bottom">
-        <button type="button" onClick={() => void unlock()} disabled={busy}>
-          <Fingerprint size={22} /> {busy ? "Waiting…" : "Unlock with fingerprint"}
-        </button>
-        {err ? <small>{err}</small> : <small className="dim">Use your fingerprint, face or screen lock</small>}
-      </div>
-    </div>
-  );
+/** Ask the phone for fingerprint / face / screen lock. Resolves true when the owner is verified. */
+export async function biometricVerify(): Promise<boolean> {
+  const s = load();
+  if (!s?.on) return false;
+  try { return await verify(s.id); } catch { return false; }
 }

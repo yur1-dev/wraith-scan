@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import Image from "next/image";
 import NotificationBell from "@/components/NotificationBell";
 import AppLockMenuItem from "@/components/AppLockMenuItem";
+import { biometricReady, biometricVerify } from "@/components/AppLock";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cacheTokenNav } from "@/lib/tokenNav";
@@ -2058,12 +2059,30 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
     setTouch(window.matchMedia("(hover: none) and (pointer: coarse)").matches);
   }, []);
 
-  // Keep the hidden input focused so typing (or paste) works anywhere.
+  // Desktop only: keep the hidden input focused so typing (or paste) works anywhere.
+  // On phones the on-screen keypad is used, and focusing an input there makes the keypad laggy.
   useEffect(() => {
+    if (window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
     inputRef.current?.focus();
     const refocus = () => inputRef.current?.focus();
     window.addEventListener("click", refocus);
     return () => window.removeEventListener("click", refocus);
+  }, []);
+
+  // Fingerprint / face: opens the lock without typing the passcode.
+  const [bio] = useState(() => (typeof window !== "undefined" ? biometricReady() : false));
+  const tryBio = useCallback(async () => {
+    if (unlocked) return;
+    if (await biometricVerify()) {
+      setUnlocked(true);
+      touchLastActive();
+      window.setTimeout(onUnlock, 220);
+    }
+  }, [unlocked, onUnlock]);
+  useEffect(() => {
+    if (bio) void tryBio();
+    // run once when the lock screen appears
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -2130,6 +2149,7 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
         .wpl-out{position:absolute;top:20px;right:22px;display:inline-flex;align-items:center;gap:7px;color:#9a8e85;font-weight:600;font-size:13px}
         .wpl-out:hover{color:#fff}
         @media (max-width:480px){.wpl-pad{grid-template-columns:repeat(3,64px);gap:12px}.wpl-key{height:64px}.wpl-orbs{gap:13px}}
+        @media (hover:none){.wpl-mist,.wpl-logo,.wpl-logo::before,.wpl-logo::after{animation:none}.wpl-key{transition:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.wpl-key:active{transform:none;box-shadow:none;background:rgba(255,123,61,.22);border-color:rgba(255,123,61,.6)}.wpl-orb{transition:none}}
         @media (prefers-reduced-motion:reduce){.wpl-mist,.wpl-logo,.wpl-logo::before,.wpl-logo::after{animation:none}}
       `}</style>
       <div className="wpl-mist" />
@@ -2159,11 +2179,13 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
 
       <div className="wpl-pad" hidden={!touch}>
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
-          <button key={d} type="button" className="wpl-key" onClick={() => press(d)}>{d}</button>
+          <button key={d} type="button" className="wpl-key" onPointerDown={(e) => { e.preventDefault(); press(d); }}>{d}</button>
         ))}
-        <span />
-        <button type="button" className="wpl-key" onClick={() => press("0")}>0</button>
-        <button type="button" className="wpl-key ghost" onClick={back} aria-label="Delete">⌫</button>
+        {bio ? (
+          <button type="button" className="wpl-key ghost" onPointerDown={(e) => { e.preventDefault(); void tryBio(); }} aria-label="Use fingerprint"><Fingerprint size={26} /></button>
+        ) : <span />}
+        <button type="button" className="wpl-key" onPointerDown={(e) => { e.preventDefault(); press("0"); }}>0</button>
+        <button type="button" className="wpl-key ghost" onPointerDown={(e) => { e.preventDefault(); back(); }} aria-label="Delete">⌫</button>
       </div>
 
       <input

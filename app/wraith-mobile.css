@@ -260,7 +260,7 @@
 .wx-notif header { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 8px; font-size: 15px; }
 .wx-notif header span { display: flex; align-items: center; gap: 6px; }
 .wx-notif header button { border: 0; background: transparent; color: var(--text-muted); font-size: 13px; cursor: pointer; padding: 6px 8px; border-radius: 8px; display: inline-flex; }
-.wx-notif-prefs { display: flex; gap: 8px; padding: 4px 16px 12px; overflow-x: auto; scrollbar-width: none; }
+.wx-notif-prefs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 4px 16px 12px; }
 .wx-notif-prefs::-webkit-scrollbar { display: none; }
 .wx-notif-prefs button {
   flex: 0 0 auto; padding: 7px 13px; border: 1px solid var(--border); border-radius: 999px; background: transparent;
@@ -342,3 +342,6 @@ html.wx-prelock .wx-lock { visibility: visible; }
 .wx-push button.primary { background: var(--accent, #ff7b3d); border-color: var(--accent, #ff7b3d); color: #111; }
 .wx-push small { flex: 1 0 100%; color: #e58d80; }
 .wx-push-note { margin: 0 16px 12px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+.wx-notif-prefs button { min-width: 0; padding-left: 4px; padding-right: 4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wpl-key { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }

@@ -107,7 +107,7 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
     return <p className="wx-push-note">Phone notifications need a supported browser. On iPhone, add Wraith to your Home Screen first.</p>;
   }
   if (state === "blocked") {
-    return <p className="wx-push-note">Notifications are blocked for Wraith. Turn them on in your phone's app settings, then come back.</p>;
+    return <p className="wx-push-note">Notifications are off for this app. Open your phone Settings → Apps → Wraith → Notifications, switch them on, then reopen Wraith.</p>;
   }
   return (
     <div className="wx-push">

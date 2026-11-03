@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Fingerprint } from "lucide-react";
-import { appLockEnabled, appLockSupported, disableAppLock, enableAppLock, isInstalledApp } from "@/components/AppLock";
+import { appLockEnabled, appLockSupported, disableAppLock, enableAppLock } from "@/components/AppLock";
 
 /** Profile-menu row: turn the fingerprint / face / screen-lock on or off. */
 export default function AppLockMenuItem() {
@@ -12,7 +12,7 @@ export default function AppLockMenuItem() {
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    setOk(appLockSupported() && isInstalledApp()); // only offered inside the installed app
+    setOk(appLockSupported());
     const sync = () => setOn(appLockEnabled());
     sync();
     window.addEventListener("wraith:applock-changed", sync);
@@ -25,6 +25,7 @@ export default function AppLockMenuItem() {
     if (busy) return;
     setMsg("");
     if (on) { disableAppLock(); return; }
+    if (localStorage.getItem("wraith_pin_enabled") !== "true") { setMsg("Turn on passcode first"); return; }
     setBusy(true);
     try {
       const done = await enableAppLock();
@@ -40,7 +41,7 @@ export default function AppLockMenuItem() {
   return (
     <button className="wraith-profile-menu-item" type="button" role="menuitem" onClick={() => void toggle()} disabled={busy}>
       <Fingerprint size={17} strokeWidth={1.8} />
-      <span className="wraith-profile-menu-label">App lock</span>
+      <span className="wraith-profile-menu-label">Fingerprint unlock</span>
       <span className="wraith-profile-menu-detail">{busy ? "…" : msg || (on ? "On" : "Off")}</span>
     </button>
   );

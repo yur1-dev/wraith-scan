@@ -10,6 +10,7 @@ import TierGlyph from "@/components/TierGlyph";
 import { useEffect, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { CallsTable, ChartReal, HeroStage, PaperExample, TelegramPhone, Ticker, WinsReal, type LandingData } from "./Mocks";
+import DownloadApp from "./DownloadApp";
 import { CursorGlow, Magnetic, Reveal, TiltFrame } from "./Motion";
 import { BOT, CHAINS, FAQ, HERO, PORTAL, SHOWCASE, SOON, TELEGRAM_STEPS } from "./content";
 
@@ -145,6 +146,7 @@ export default function Landing() {
               <div className="ws-cta lp-left-cta">
                 <Magnetic><Link className="ws-btn primary lg" href="/app">Launch app</Link></Magnetic>
                 <Magnetic><a className="ws-btn lg" href={PORTAL} target="_blank" rel="noreferrer">Join Telegram</a></Magnetic>
+                <Magnetic><DownloadApp /></Magnetic>
               </div>
               <p className="ws-note lp-left">{HERO.note}</p>
             </div>
@@ -276,6 +278,7 @@ export default function Landing() {
               <div className="ws-cta">
                 <Magnetic><Link className="ws-btn primary lg" href="/app">Launch app</Link></Magnetic>
                 <a className="ws-btn lg" href={PORTAL} target="_blank" rel="noreferrer">Join Telegram</a>
+                <DownloadApp />
               </div>
             </div>
             <footer className="ws-foot">

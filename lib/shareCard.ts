@@ -20,7 +20,9 @@ export const SHARE_MOTIFS = 5;
 export const SHARE_CHARS = 9; // classic, crown, degen shades, halo, horns, laser eyes, top hat, money eyes, gold chain
 const SHARE_BASE = SHARE_LAYOUTS * SHARE_MOTIFS * 2;
 export const SHARE_VARIANTS = SHARE_BASE * SHARE_CHARS;
-export const randomVariant = () => Math.floor(Math.random() * SHARE_VARIANTS);
+// most shuffles stay clean (no accessory); ~1 in 4 gets one
+// accessories are retired: shuffles only vary layout / background / mirror
+export const randomVariant = () => Math.floor(Math.random() * SHARE_BASE);
 
 export interface ShareParams {
   symbol: string;
@@ -42,6 +44,7 @@ export interface ShareParams {
   resText?: string; // overrides the result line
   subText?: string; // overrides the 'x -> y UNIT' line
   chipText?: string; // overrides '0.5 SOL in · TP'
+  hue?: number; // degrees; recolours the ghost art (used by banners)
   label?: string; // overrides REALIZED / FROM THE CALL
   sealText?: string; // overrides the multiplier inside the seal
   sealLabel?: string;
@@ -63,7 +66,7 @@ const W = SHARE_W, H = SHARE_H;
 
 const fmtMcap = (n: number) => (n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(0)}`);
 const bigTxt = (p: ShareParams, t: number) => p.bigText ?? pctText(p.pnl * t);
-const subOf = (p: ShareParams, u: string) => p.subText ?? `${p.amountSol} → ${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`;
+const subOf = (p: ShareParams, u: string) => p.subText ?? `${p.amountSol} › ${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`;
 const pctText = (v: number) => `${v >= 0 ? "+" : "-"}${Math.abs(v) >= 1000 ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(1)}%`;
 const amt = (v: number, dec: number, unit: string) => `${v >= 0 ? "+" : "-"}${Math.abs(v).toFixed(dec)} ${unit}`;
 
@@ -119,10 +122,10 @@ function aurora(ctx: C, k: number, p: ShareParams, x: number, y: number, r: numb
 }
 
 // image-px geometry (794x930 art): tip of hood, eye line, half eye spread
-const GEO: Record<string, { tip: number; eye: number; sp: number }> = {
-  "/shade.png": { tip: 104, eye: 390, sp: 47 },
-  "/specter.png": { tip: 56, eye: 376, sp: 78 },
-  "/tier-wraith.png": { tip: 28, eye: 350, sp: 70 },
+const GEO: Record<string, { tip: number; eye: number; sp: number; fw: number }> = {
+  "/shade.png": { tip: 104, eye: 390, sp: 47, fw: 87 },
+  "/specter.png": { tip: 56, eye: 376, sp: 44, fw: 99 },
+  "/tier-wraith.png": { tip: 28, eye: 350, sp: 39, fw: 83 },
 };
 const GOLD = "#ffc94a";
 function accessory(ctx: C, k: number, p: ShareParams, ch: number, flip: boolean) {
@@ -136,12 +139,17 @@ function accessory(ctx: C, k: number, p: ShareParams, ch: number, flip: boolean)
     ctx.moveTo(cx - w / 2, y); ctx.lineTo(cx - w / 2 - 12, y - h); ctx.lineTo(cx - w / 4, y - h * 0.55); ctx.lineTo(cx, y - h * 1.12); ctx.lineTo(cx + w / 4, y - h * 0.55); ctx.lineTo(cx + w / 2 + 12, y - h); ctx.lineTo(cx + w / 2, y); ctx.closePath(); ctx.fill();
     ctx.shadowBlur = 0; ctx.fillStyle = "#b8741a"; ctx.fillRect(cx - w / 2, y - 14, w, 14);
     [[cx, y - h * 1.12 - 10, "#ff4d5a"], [cx - w / 2 - 12, y - h - 10, "#2fe0c0"], [cx + w / 2 + 12, y - h - 10, "#2fe0c0"]].forEach(([x, yy, c]) => { ctx.fillStyle = c as string; ctx.beginPath(); ctx.arc(x as number, yy as number, 9, 0, 7); ctx.fill(); });
-  } else if (ch === 2) { // degen shades
-    const w = 88, h = 52, y = ey - h / 2 + 6; ctx.shadowColor = "#000"; ctx.shadowBlur = 14; ctx.fillStyle = "#050505";
-    const rr = (x: number) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w - 10, y + h); ctx.lineTo(x + 12, y + h); ctx.closePath(); ctx.fill(); };
-    const lx = cx - ex - w / 2 - 24 + (ex - 47) * 0.2, rx = cx + ex - w / 2 + 24 - (ex - 47) * 0.2; rr(lx); rr(rx); ctx.shadowBlur = 0;
-    ctx.fillRect(lx + w - 4, y + 4, rx - lx - w + 8, 10);
-    ctx.strokeStyle = p.rank.accent; ctx.lineWidth = 3; ctx.globalAlpha *= 0.9; ctx.beginPath(); [lx, rx].forEach((x) => { ctx.moveTo(x + 16, y + 12); ctx.lineTo(x + 50, y + 12); ctx.moveTo(x + 22, y + 24); ctx.lineTo(x + 38, y + 24); }); ctx.stroke();
+  } else if (ch === 2) { // degen shades: glossy rimmed lenses that stay visible against the dark hood opening
+    const lw = g.fw * 0.94, lh = 64, y = ey - lh / 2;
+    ctx.shadowColor = p.rank.accent; ctx.shadowBlur = 22;
+    const lens = (x: number) => {
+      ctx.beginPath(); ctx.roundRect(x, y, lw, lh, [8, 8, 26, 26]);
+      const gr = ctx.createLinearGradient(0, y, 0, y + lh); gr.addColorStop(0, "#2a2a3a"); gr.addColorStop(1, "#050508");
+      ctx.fillStyle = gr; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = "#f4f4ff"; ctx.stroke();
+      ctx.save(); ctx.clip(); ctx.shadowBlur = 0; ctx.fillStyle = "rgba(255,255,255,.28)"; ctx.beginPath(); ctx.moveTo(x + lw * 0.18, y); ctx.lineTo(x + lw * 0.42, y); ctx.lineTo(x + lw * 0.2, y + lh); ctx.lineTo(x - 6, y + lh); ctx.closePath(); ctx.fill(); ctx.restore();
+    };
+    lens(cx - lw - 4); lens(cx + 4);
+    ctx.shadowBlur = 0; ctx.fillStyle = "#f4f4ff"; ctx.fillRect(cx - 8, y + 12, 16, 8);
   } else if (ch === 3) { // halo
     const y = tip - 26 + Math.sin(k * 2) * 6; ctx.shadowColor = GOLD; ctx.shadowBlur = 38; ctx.strokeStyle = GOLD; ctx.lineWidth = 16; ctx.beginPath(); ctx.ellipse(cx, y, 88, 24, 0, 0, 7); ctx.stroke();
     ctx.shadowBlur = 0; ctx.strokeStyle = "#fff5c4"; ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(cx, y - 3, 88, 24, 0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
@@ -175,6 +183,7 @@ function ghost(ctx: C, k: number, p: ShareParams, cx: number, bottom: number, h:
     if (flip) ctx.scale(-1, 1);
     ctx.globalAlpha = ease((k - 0.05) / 0.6) * (tint ? 0.55 : 1);
     if (p.rank.grey && !tint) ctx.filter = "grayscale(1) brightness(.6) contrast(1.1)";
+    else if (p.hue && !tint) ctx.filter = `hue-rotate(${p.hue}deg)`;
     if (!tint) { ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 60; }
     if (tint) ctx.globalCompositeOperation = "lighter";
     ctx.drawImage(im, -w / 2, bottom - h + dy, w, h);
@@ -246,7 +255,7 @@ function seal(ctx: C, k: number, p: ShareParams, cx: number, cy: number, r: numb
 function footer(ctx: C, k: number, p: ShareParams, left = 40, right = W - 40) {
   ctx.save(); ctx.globalAlpha = ease((k - 1.7) / 0.5); ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
   ctx.fillStyle = "#ffffff88"; ctx.font = `600 15px ${MONO}`;
-  ctx.fillText(`${p.chainName ? p.chainName.toUpperCase() + "  ·  " : ""}${fmtMcap(p.entryMcap)} → ${fmtMcap(p.exitMcap ?? 0)}  ·  ${p.ago}`, left, H - 30);
+  ctx.fillText(`${p.chainName ? p.chainName.toUpperCase() + "  ·  " : ""}${fmtMcap(p.entryMcap)} › ${fmtMcap(p.exitMcap ?? 0)}${p.ago ? "  ·  " + p.ago : ""}`, left, H - 30);
   ctx.textAlign = "right"; ctx.fillStyle = "#ff7b3d"; ctx.font = `900 18px ${MONO}`;
   ctx.fillText("W R A I T H . F A R M", right, H - 30);
   ctx.restore();
@@ -430,7 +439,7 @@ export function drawShareCard(ctx: C, k: number, p: ShareParams) {
   p = { ...p, char: Math.floor(vv / SHARE_BASE) % SHARE_CHARS };
   const layout = v % SHARE_LAYOUTS, motif = Math.floor(v / SHARE_LAYOUTS) % SHARE_MOTIFS, flip = v >= SHARE_LAYOUTS * SHARE_MOTIFS;
   ctx.save(); ctx.clearRect(0, 0, W, H);
-  const R = 24; ctx.beginPath(); ctx.moveTo(R, 0); ctx.arcTo(W, 0, W, H, R); ctx.arcTo(W, H, 0, H, R); ctx.arcTo(0, H, 0, 0, R); ctx.arcTo(0, 0, W, 0, R); ctx.closePath(); ctx.clip();
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip(); ctx.fillStyle = "#08080a"; ctx.fillRect(0, 0, W, H); // sharp rectangle, fully opaque (no transparent corners)
   background(ctx, k, p, motif);
   LAYOUTS[layout](ctx, k, p, flip);
   ctx.restore();

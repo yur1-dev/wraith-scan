@@ -1343,7 +1343,7 @@ function ShareModal({ data, onClose }: { data: ShareCardData; onClose: () => voi
           ref={canvasRef}
           width={SHARE_W}
           height={SHARE_H}
-          style={{ width: "100%", maxWidth: 640, aspectRatio: "16 / 9", borderRadius: 14, boxShadow: `0 16px 48px #000a, 0 0 40px ${rank.glow}` }}
+          style={{ width: "100%", maxWidth: 640, aspectRatio: "16 / 9", boxShadow: `0 16px 48px #000a, 0 0 40px ${rank.glow}` }}
         />
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>

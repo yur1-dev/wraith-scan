@@ -25,6 +25,16 @@ function fonts() {
 const clean = (v: string | null, max: number) => (v ?? "").replace(/[^\p{L}\p{N} ._$-]/gu, "").slice(0, max);
 const usd = (n: number) => (n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(0)}`);
 const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+/** Rotate a #rrggbb colour's hue by `deg` (keeps the card's accent in step with the recoloured ghost art). */
+function rotate(hex: string, deg: number): string {
+  const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  let h = 0, sat = 0;
+  if (d) { sat = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; }
+  h = (h + deg) % 360;
+  const f = (n: number) => { const k = (n + h / 30) % 12, a = sat * Math.min(l, 1 - l); return Math.round((l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255).toString(16).padStart(2, "0"); };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
 const CHAINS: Record<string, string> = { solana: "Solana", ethereum: "Ethereum", base: "Base", bsc: "BNB Chain", monad: "Monad", arc: "Arc", robinhood: "Robinhood" };
 
 async function img(url: string | null, same: string | null): Promise<Image | null> {
@@ -51,14 +61,18 @@ export async function GET(req: NextRequest) {
   const variant = sp.get("v") ? Number(sp.get("v")) : hash(sym + (sp.get("kind") ?? ""));
   const [rankImg, tokenImg] = await Promise.all([img(`${origin}${art}`, "1"), img(sp.get("img"), null)]);
 
+  // every token gets its own colourway: the rank art is hue-rotated by a per-token amount
+  const hue = [0, 0, 165, 205, 262, 330][hash(sym) % 6];
+  const rk = SHARE_RANKS[rankIdx];
+  const rank = hue ? { ...rk, accent: rotate(rk.accent, hue), glow: `${rotate(rk.accent, hue)}55` } : rk;
   const base: ShareParams = {
     symbol: sym, amountSol: 1, unit: "SOL", chainName: chain, entryMcap: called || now, exitMcap: now, pnl: (x - 1) * 100, solPnl: 1,
-    mult: x, ago: "", rank: SHARE_RANKS[rankIdx], variant: variant % SHARE_VARIANTS, rankImg: rankImg as unknown as HTMLImageElement | null,
+    mult: x, ago: "", rank, hue, variant: variant % 60, rankImg: rankImg as unknown as HTMLImageElement | null,
     tokenImg: tokenImg as unknown as CanvasImageSource | null, call: true, chipText: `${chain}${kind === "win" ? " · win" : " · signal"}`,
   };
   const p: ShareParams = kind === "win"
-    ? { ...base, resText: `${x.toFixed(x >= 10 ? 1 : 2)}x`, subText: `${usd(called)} → ${usd(now)}${peak > now * 1.05 ? `  ·  peak ${usd(peak)}` : ""}` }
-    : { ...base, rank: SHARE_RANKS[rankIdx], pnl: 0, mult: 1, entryMcap: now, exitMcap: now, bigText: `${score}`, resText: hot ? "HOT SIGNAL" : "WATCH SIGNAL", label: "WRAITH SCORE / 100", subText: `MCap ${usd(now)}  ·  ${chain}`, sealText: `${score}`, sealLabel: hot ? "HOT" : "WATCH" };
+    ? { ...base, resText: `${x.toFixed(x >= 10 ? 1 : 2)}x`, subText: `${usd(called)} › ${usd(now)}${peak > now * 1.05 ? `  ·  peak ${usd(peak)}` : ""}` }
+    : { ...base, pnl: 0, mult: 1, entryMcap: now, exitMcap: now, bigText: `${score}`, resText: hot ? "HOT SIGNAL" : "WATCH SIGNAL", label: "WRAITH SCORE / 100", subText: `MCap ${usd(now)}  ·  ${chain}`, sealText: `${score}`, sealLabel: hot ? "HOT" : "WATCH" };
 
   const S = 1.5;
   const canvas = createCanvas(960 * S, 540 * S);

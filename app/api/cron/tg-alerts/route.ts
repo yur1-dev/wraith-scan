@@ -45,10 +45,10 @@ export async function GET(req: NextRequest) {
   const fresh = await calls.find({ spottedAt: { $gt: Date.now() - 20 * 60_000 }, shadow: { $ne: true }, engine: 2 }).toArray();
   const feed = new Map(signals.map((s) => [s.token.address, s]));
   for (const c of fresh) {
-    if (!(await claim(`entry:${c.address}`))) continue;
-    if (first) continue;
     const sig = feed.get(c.address);
-    if (!sig) continue;
+    if (!first && !sig) continue; // feed missed it this run: don't burn the claim, retry next run
+    if (!(await claim(`entry:${c.address}`))) continue;
+    if (first || !sig) continue;
     const r = await broadcast("signal", signalMessage(sig), { chain: c.chain ?? "solana", score: sig.score, markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: sig.token.imageUrl });
     out.entries++; out.sent += r.sent;
   }

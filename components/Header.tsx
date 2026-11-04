@@ -495,6 +495,16 @@ function CoinSearch({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<TokenResult[]>([]);
+  const [isPhone, setIsPhone] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const f = () => setIsPhone(mq.matches);
+    f();
+    mq.addEventListener("change", f);
+    return () => mq.removeEventListener("change", f);
+  }, []);
+  const wrapDrop = (el: React.ReactElement) =>
+    isPhone && typeof document !== "undefined" ? createPortal(el, document.body) : el;
   const [traderResults, setTraderResults] = useState<TraderSearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
@@ -774,7 +784,8 @@ function CoinSearch({
     const handler = (e: MouseEvent) => {
       if (
         containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current.contains(e.target as Node) &&
+        !(listRef.current && listRef.current.contains(e.target as Node))
       ) {
         setOpen(false);
       }
@@ -967,7 +978,7 @@ function CoinSearch({
       </button>
 
       {/* ── Dropdown ── */}
-      {open && (
+      {open && wrapDrop(
         <div
           className="wx-cs-drop"
           ref={listRef}
@@ -1087,8 +1098,20 @@ function CoinSearch({
                     : "Search traders by name or @username..."
               }
               autoFocus
+              type="text"
+              name="wx-coin-search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               style={{
                 flex: 1,
+                minWidth: 0,
                 background: "transparent",
                 border: "none",
                 outline: "none",

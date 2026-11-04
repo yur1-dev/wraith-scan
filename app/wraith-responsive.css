@@ -102,6 +102,10 @@ pre, code { overflow-wrap: anywhere; }
     border: 1px solid var(--border-strong, var(--border)) !important; border-radius: 999px; background: var(--surface-2) !important; padding: 8px 10px 8px 16px !important;
   }
   .wx-cs-inputrow input { font-size: 16px !important; }
+  .wx-cs-drop { box-sizing: border-box; overflow-x: hidden !important; }
+  .wx-cs-tabs { flex-wrap: wrap; }
+  .wx-cs-inputrow { box-sizing: border-box; min-width: 0; align-self: stretch; }
+  .wx-cs-inputrow input { min-width: 0; }
   .wx-cs-mob { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border: 0; cursor: pointer; }
   .wx-cs-paste { height: 34px; padding: 0 14px; border-radius: 999px; background: var(--surface); color: var(--text); font-weight: 700; font-size: 13px; border: 1px solid var(--border); }
   .wx-cs-close { width: 36px; height: 36px; border-radius: 50%; background: transparent; color: var(--text); border: 1px solid var(--border); font-size: 15px; }

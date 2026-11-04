@@ -13,6 +13,12 @@ import { runPushAlerts, pushBroadcast } from "@/lib/push";
 
 export const maxDuration = 60;
 
+function bannerUrl(origin: string, q: Record<string, string | number | undefined>) {
+  const u = new URL("/api/banner", origin);
+  for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") u.searchParams.set(k, String(v));
+  return u.toString();
+}
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (secret) {
@@ -64,7 +70,7 @@ export async function GET(req: NextRequest) {
     if (!first && !sig) continue; // feed missed it this run: don't burn the claim, retry next run
     if (!(await claim(`entry:${c.address}`))) continue;
     if (first || !sig) continue;
-    const r = await broadcast("signal", signalMessage(sig), { chain: c.chain ?? "solana", score: sig.score, markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: sig.token.imageUrl });
+    const r = await broadcast("signal", signalMessage(sig), { chain: c.chain ?? "solana", score: sig.score, markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "signal", sym: sig.token.symbol, now: sig.token.mcap, score: sig.score, tier: sig.tier, chain: c.chain ?? "solana", img: sig.token.imageUrl }) });
     out.entries++; out.sent += r.sent;
   }
 
@@ -75,7 +81,7 @@ export async function GET(req: NextRequest) {
     if (!m) continue;
     if (!(await claim(`win:${c.address}:${m}`))) continue;
     if (first) continue;
-    const r = await broadcast("win", winMessage(c, m), { chain: c.chain ?? "solana", markup: tokenKeyboard(c.address, c.chain ?? "solana") });
+    const r = await broadcast("win", winMessage(c, m), { chain: c.chain ?? "solana", markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "win", sym: c.symbol, x: c.lastMcap / c.spottedMcap, called: c.spottedMcap, now: c.lastMcap, peak: c.peakMcap, chain: c.chain ?? "solana" }) });
     out.wins++; out.sent += r.sent;
     await pushBroadcast({ title: `🏆 ${m}x $${c.symbol}`, body: `${(c.lastMcap / c.spottedMcap).toFixed(2)}x from the call`, url: `/app/token/${c.address}`, tag: `w:${c.address}:${m}` }, "signal").catch(() => 0);
   }

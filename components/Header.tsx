@@ -59,6 +59,7 @@ import {
   makePresetId,
   DEFAULT_PRESETS,
 } from "@/lib/quickBuyPresets";
+import { readCurrency, symbolOf } from "@/lib/cash";
 import {
   DISPLAY_CURRENCIES,
   DisplayCurrency,
@@ -1821,7 +1822,7 @@ function PresetCard({
                   ...MONO,
                 }}
               />
-              <span style={{ fontSize: 8, color: "#444", ...MONO }}>SOL</span>
+              <span style={{ fontSize: 8, color: "#444", ...MONO }}>{readCurrency()}</span>
             </div>
           ))}
         </div>
@@ -1836,7 +1837,7 @@ function PresetCard({
             <div
               style={{ color: "#888", fontSize: 11, fontWeight: 700, ...MONO }}
             >
-              {preset.amounts[0]} SOL
+              {symbolOf(readCurrency())}{preset.amounts[0]}
             </div>
           </div>
           <div>
@@ -1848,7 +1849,7 @@ function PresetCard({
             <div
               style={{ color: "#888", fontSize: 11, fontWeight: 700, ...MONO }}
             >
-              {preset.amounts[1]} SOL
+              {symbolOf(readCurrency())}{preset.amounts[1]}
             </div>
           </div>
         </div>

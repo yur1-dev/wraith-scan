@@ -507,3 +507,41 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   .profile-body-aside .fi-token { background: rgba(255,255,255,.04); }
   .profile-flat > div:not(.profile-panel-heading) > * { border-left: 0; border-right: 0; }
 }
+
+/* nav: glass only — no dark slab behind the buttons */
+@media (max-width: 767px) {
+  .wx-tabbar::before {
+    background: linear-gradient(to top, rgba(9,9,10,.55) 0%, rgba(9,9,10,.25) 55%, rgba(9,9,10,0) 100%) !important;
+    -webkit-backdrop-filter: blur(6px) !important; backdrop-filter: blur(6px) !important;
+  }
+  .wx-tabbar-pill, .wx-tabbar-search {
+    background: rgba(255, 255, 255, 0.05) !important;
+    -webkit-backdrop-filter: blur(22px) saturate(1.5) !important; backdrop-filter: blur(22px) saturate(1.5) !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28) !important;
+  }
+  .wx-tabbar-pill a { background: transparent !important; box-shadow: none !important; }
+  .wx-tabbar-pill a.on { background: rgba(255, 255, 255, 0.12) !important; }
+}
+
+/* nav, final: no scrim slab at all — only two frosted-glass shapes floating over the content (Fomo style) */
+@media (max-width: 767px) {
+  .wx-tabbar::before { display: none !important; content: none !important; }
+  .wx-tabbar-pill, .wx-tabbar-search {
+    background: rgba(96, 96, 112, 0.26) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(1.9) brightness(1.08) !important;
+    backdrop-filter: blur(30px) saturate(1.9) brightness(1.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.16) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 8px 26px rgba(0,0,0,.25) !important;
+  }
+  .wx-tabbar-pill a.on { background: rgba(255, 255, 255, 0.16) !important; }
+}
+
+/* nav overlap: scrolling areas run all the way to the bottom of the screen so the list really scrolls UNDER the glass nav;
+   the end of each list gets its own bottom padding instead of an empty slab above the nav */
+@media (max-width: 767px) {
+  .wx-page:not(.wraith-token-page) { padding-bottom: 0 !important; }
+  .wx-board-body, .wx-scan-list, .wx-wins, .wx-wins-wrap, .wx-center { padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px)) !important; }
+  .wx-scanner-layout { margin-bottom: 0 !important; border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important; border-bottom: 0 !important; }
+  .wx-scanner-main { border-radius: 0 !important; }
+}

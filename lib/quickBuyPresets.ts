@@ -5,7 +5,11 @@
 // stay in sync — editing a preset in one place is reflected everywhere,
 // because both just read/write this same localStorage-backed store.
 
+import { defaultCashAmounts, readCurrency } from "@/lib/cash";
+
 export interface QuickBuyPreset {
+  // amounts are CASH in the display currency (₱/$…), converted to SOL when the buy fires
+  unit?: "cash";
   id: string;
   name: string;
   // Two fixed-SOL buy buttons. The 50%/100%-of-balance buttons are computed
@@ -17,7 +21,7 @@ const PRESETS_KEY = "wraith_quickbuy_presets_v1";
 const ACTIVE_KEY = "wraith_quickbuy_active_preset_v1";
 
 export const DEFAULT_PRESETS: QuickBuyPreset[] = [
-  { id: "preset-1", name: "Preset 1", amounts: [0.1, 0.25] },
+  { id: "preset-1", name: "Preset 1", unit: "cash", amounts: [5, 20] },
 ];
 
 function isValidPreset(p: unknown): p is QuickBuyPreset {
@@ -34,16 +38,18 @@ function isValidPreset(p: unknown): p is QuickBuyPreset {
 
 export function loadPresets(): QuickBuyPreset[] {
   if (typeof window === "undefined") return DEFAULT_PRESETS;
+  const fresh: QuickBuyPreset[] = [{ ...DEFAULT_PRESETS[0], amounts: defaultCashAmounts(readCurrency()) }];
   try {
     const raw = localStorage.getItem(PRESETS_KEY);
-    if (!raw) return DEFAULT_PRESETS;
+    if (!raw) return fresh;
     const parsed = JSON.parse(raw);
     if (
       Array.isArray(parsed) &&
       parsed.length > 0 &&
       parsed.every(isValidPreset)
     ) {
-      return parsed as QuickBuyPreset[];
+      // old presets were SOL sizes; reset them to sensible cash sizes for the user's currency
+      return (parsed as QuickBuyPreset[]).map((p) => (p.unit === "cash" ? p : { ...p, unit: "cash" as const, amounts: defaultCashAmounts(readCurrency()) }));
     }
     return DEFAULT_PRESETS;
   } catch {
@@ -54,7 +60,7 @@ export function loadPresets(): QuickBuyPreset[] {
 export function savePresets(presets: QuickBuyPreset[]) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets.map((p) => ({ ...p, unit: "cash" }))));
   } catch {}
 }
 

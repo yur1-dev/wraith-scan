@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useCash } from "@/lib/cash";
+import { getActivePreset } from "@/lib/quickBuyPresets";
 import { Zap, Check, X, Loader2 } from "lucide-react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { usePrivy } from "@privy-io/react-auth";
@@ -41,6 +43,24 @@ interface Props {
   size?: "compact" | "large";
 }
 
+/** Quick-buy size comes from the active preset in the user's cash currency; converted to SOL for the swap. */
+function useQuickSize(fallbackSol: number) {
+  const cash = useCash();
+  const [cashAmt, setCashAmt] = useState(0);
+  useEffect(() => {
+    const read = () => setCashAmt(getActivePreset().amounts[0] || 0);
+    read();
+    window.addEventListener("focus", read);
+    return () => window.removeEventListener("focus", read);
+  }, []);
+  const sol = cashAmt > 0 ? cash.toSol(cashAmt) : null;
+  return {
+    // while the SOL price is still loading, a cash-sized buy has no SOL amount yet: 0 blocks the click instead of buying the wrong size
+    sol: cashAmt > 0 ? (sol && sol > 0 ? Number(sol.toFixed(sol < 0.01 ? 5 : 4)) : 0) : fallbackSol,
+    label: cashAmt > 0 ? cash.fmt(cashAmt) : `${fallbackSol} SOL`,
+  };
+}
+
 type Status = "idle" | "buying" | "success" | "error";
 
 export function QuickBuyButton({
@@ -55,15 +75,18 @@ export function QuickBuyButton({
 function UnconfiguredQuickBuyButton({
   contractAddress,
   symbol,
-  amountSol,
+  amountSol: fallbackSol,
   size = "compact",
 }: Props) {
   const { push } = useToast();
+  const quick = useQuickSize(fallbackSol);
+  const amountSol = quick.sol;
   const [busy, setBusy] = useState(false);
   const dim = size === "large" ? 38 : 26;
   const handleClick = async (event: React.MouseEvent) => {
     event.stopPropagation();
     if (busy) return;
+    if (!(amountSol > 0)) { push("Loading price, try again in a second", "warning"); return; }
     if (localStorage.getItem("wraith_paper_mode_v1") === "true") {
       setBusy(true);
       try {
@@ -93,7 +116,7 @@ function UnconfiguredQuickBuyButton({
       type="button"
       onClick={handleClick}
       disabled={busy}
-      title={busy ? "Submitting paper buy" : `Quick buy ${amountSol} SOL`}
+      title={busy ? "Submitting paper buy" : `Quick buy ${quick.label}`}
       style={{
         position: "absolute",
         right: 0,
@@ -117,10 +140,12 @@ function UnconfiguredQuickBuyButton({
 function EmbeddedWalletQuickBuyButton({
   contractAddress,
   symbol,
-  amountSol,
+  amountSol: fallbackSol,
   size = "compact",
 }: Props) {
   const { push } = useToast();
+  const quick = useQuickSize(fallbackSol);
+  const amountSol = quick.sol;
   const { user } = usePrivy();
   const { wallets: solanaWallets } = useSolanaWallets();
   const { signTransaction } = useSignTransaction();
@@ -163,6 +188,7 @@ function EmbeddedWalletQuickBuyButton({
     async (e: React.MouseEvent) => {
       e.stopPropagation(); // don't also trigger row selection
       if (status === "buying") return;
+      if (!(amountSol > 0)) { push("Loading price, try again in a second", "warning"); return; }
 
       if (paperMode) {
         setStatus("buying");
@@ -217,7 +243,7 @@ function EmbeddedWalletQuickBuyButton({
           connection,
         );
         setStatus("success");
-        push(`Bought ${symbol} — ${amountSol} SOL`, "success", {
+        push(`Bought ${symbol} — ${quick.label}`, "success", {
           actionLabel: "VIEW TX",
           onAction: () => window.open(explorerUrl(signature), "_blank"),
           timeoutMs: 6000,
@@ -263,7 +289,7 @@ function EmbeddedWalletQuickBuyButton({
       onMouseLeave={() => setHover(false)}
       onClick={handleBuy}
       disabled={isBuying}
-      title={`${paperMode ? "Paper buy" : "Quick buy"} ${amountSol} SOL`}
+      title={`${paperMode ? "Paper buy" : "Quick buy"} ${quick.label}`}
       style={{
         position: "absolute",
         right: 0,
@@ -315,7 +341,7 @@ function EmbeddedWalletQuickBuyButton({
       {(hover || isSuccess || isError) && !isBuying && (
         <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
           <span style={{ fontSize, fontWeight: 700, ...MONO }}>
-            {isSuccess ? "BOUGHT" : isError ? "FAILED" : amountSol}
+            {isSuccess ? "BOUGHT" : isError ? "FAILED" : quick.label}
           </span>
           {!isSuccess && !isError && (
             <svg

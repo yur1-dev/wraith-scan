@@ -19,6 +19,7 @@ import {
   getActivePreset,
   saveActivePresetAmounts,
 } from "@/lib/quickBuyPresets";
+import { useCash, readCurrency } from "@/lib/cash";
 
 const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
 
@@ -273,19 +274,19 @@ function ChartSurface({
 // resolved against the LIVE paper balance at click time, not when the card
 // mounted — someone could've bought something else in the meantime.
 type QuickBuyPreset =
-  | { kind: "fixed"; label: string; amountSol: number }
+  | { kind: "fixed"; label: string; cashAmt: number }
   | { kind: "pct"; label: string; pct: number };
 
-const DEFAULT_FIXED_AMOUNTS: [number, number] = [0.1, 0.25];
+const DEFAULT_FIXED_AMOUNTS: [number, number] = [5, 20];
 
 // Amounts now live in the shared preset store (lib/quickBuyPresets.ts) so
 // they're the same ones shown/edited in the header's Presets panel — only
 // the two fixed-SOL slots are editable here, the percent presets stay
 // relative to live paper balance.
-function buildPresets(fixed: [number, number]): QuickBuyPreset[] {
+function buildPresets(fixed: [number, number], fmt: (n: number) => string): QuickBuyPreset[] {
   return [
-    { kind: "fixed", label: fixed[0].toString(), amountSol: fixed[0] },
-    { kind: "fixed", label: fixed[1].toString(), amountSol: fixed[1] },
+    { kind: "fixed", label: fmt(fixed[0]), cashAmt: fixed[0] },
+    { kind: "fixed", label: fmt(fixed[1]), cashAmt: fixed[1] },
     { kind: "pct", label: "50%", pct: 0.5 },
     { kind: "pct", label: "100%", pct: 1 },
   ];
@@ -355,7 +356,7 @@ function PresetEditor({
               ...MONO,
             }}
           />
-          <span style={{ fontSize: 8, color: "#555", ...MONO }}>SOL</span>
+          <span style={{ fontSize: 8, color: "#555", ...MONO }}>{readCurrency()}</span>
         </div>
       ))}
       <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
@@ -434,13 +435,19 @@ function QuickBuyRow({ mint, symbol, imageUrl }: QuickBuyRowProps) {
     };
   }, []);
 
-  const presets = buildPresets(fixedAmounts);
+  const cash = useCash();
+  const presets = buildPresets(fixedAmounts, cash.fmt);
 
   async function fire(preset: QuickBuyPreset) {
     if (pendingLabel) return; // one buy in flight at a time
+    const solFromCash = preset.kind === "fixed" ? cash.toSol(preset.cashAmt) : null;
+    if (preset.kind === "fixed" && !(solFromCash && solFromCash > 0)) {
+      setFeedback({ ok: false, msg: "Loading price, try again in a second" });
+      return;
+    }
     const amountSol =
       preset.kind === "fixed"
-        ? preset.amountSol
+        ? parseFloat((solFromCash as number).toFixed(5))
         : parseFloat((getPaperBalance() * preset.pct).toFixed(4));
 
     if (!amountSol || amountSol <= 0) {

@@ -301,6 +301,10 @@ function EmbeddedWalletQuickBuyButton({
         gap: 5,
         height: dim,
         width: dim,
+        minHeight: dim,
+        minWidth: dim,
+        maxHeight: dim,
+        boxSizing: "border-box",
         padding: 0,
         background: isError
           ? "rgba(255,82,82,.12)"

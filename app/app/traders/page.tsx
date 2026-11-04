@@ -12,6 +12,7 @@ import { useCash } from "@/lib/cash";
 import { fmtHold, fmtMult, type TraderStatsResult } from "@/lib/traderStats";
 
 type Trader = {
+  isFollowing?: boolean;
   userId: string;
   username?: string | null;
   displayName: string;
@@ -131,7 +132,7 @@ export default function TradersPage() {
               const s = trader.stats;
               const pnl = gain(trader, period);
               const tone = pnl > 0 ? "up" : pnl < 0 ? "down" : "flat";
-              const podium = index < 3 && sort === "pnl" && pnl > 0 ? ` podium-${index + 1}` : "";
+              const podium = index < 3 ? ` podium-${index + 1}` : "";
               return (
                 <article className={`tc${podium}`} key={trader.userId}>
                   <div className="tc-main">
@@ -149,7 +150,7 @@ export default function TradersPage() {
                         ))}
                       </span>
                     </Link>
-                    <span className="trader-follow"><TraderFollowButton traderId={trader.userId} compact /></span>
+                    <span className="trader-follow"><TraderFollowButton traderId={trader.userId} compact initialFollowing={trader.isFollowing === true} statusKnown={typeof trader.isFollowing === "boolean"} /></span>
                   </div>
 
                   <div className="tc-body">

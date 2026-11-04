@@ -18,6 +18,7 @@ export default function TraderFollowButton({
 }) {
   const [following, setFollowing] = useState(initialFollowing);
   const [followers, setFollowers] = useState<number | null>(null);
+  const [known, setKnown] = useState(statusKnown);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,6 +32,7 @@ export default function TraderFollowButton({
         if (active) {
           setFollowing(result.following === true);
           setFollowers(typeof result.followers === "number" ? result.followers : null);
+          setKnown(true);
         }
       })
       .catch(() => {});
@@ -67,7 +69,7 @@ export default function TraderFollowButton({
       <button
         type="button"
         onClick={() => void toggle()}
-        disabled={busy}
+        disabled={busy || !known}
         title={error || (following ? "Unfollow trader" : "Follow trader")}
         aria-label={following ? "Unfollow trader" : "Follow trader"}
         style={{
@@ -81,10 +83,10 @@ export default function TraderFollowButton({
           justifyContent: "center",
           gap: 7,
           padding: compact ? "0 10px" : "0 15px",
-          border: `1px solid ${following ? "var(--border)" : "var(--orange)"}`,
+          border: `1px solid ${!known || following ? "var(--border)" : "var(--orange)"}`,
           borderRadius: 9,
-          background: following ? "var(--surface-raised)" : "var(--orange)",
-          color: following ? "var(--text)" : "#fff7f2",
+          background: !known || following ? "var(--surface-raised)" : "var(--orange)",
+          color: !known ? "transparent" : following ? "var(--text)" : "#fff7f2",
           fontSize: compact ? 11 : 13,
           fontWeight: 700,
           cursor: busy ? "wait" : "pointer",

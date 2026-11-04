@@ -911,3 +911,24 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 /* quick buy: the inner button was being stretched by a global min-height, so it overflowed the row and hit the card edge */
 .wx-qb > button { min-height: 0 !important; min-width: 0 !important; width: 26px !important; height: 26px !important; padding: 0 !important; }
 .wx-tcard-meta .wx-qb { margin-bottom: 0; }
+
+/* photo viewer: backdrop takes its colours from the photo (blurred), like Instagram */
+.wx-photo-viewer { background: #070708; -webkit-backdrop-filter: none; backdrop-filter: none; overflow: hidden; }
+.wx-photo-bg {
+  position: absolute; inset: -12%; background-size: cover; background-position: center;
+  filter: blur(64px) saturate(1.6) brightness(.62); transform: scale(1.15);
+}
+.wx-photo-viewer::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(6,6,8,.45) 0%, rgba(6,6,8,.15) 40%, rgba(6,6,8,.7) 100%);
+}
+.wx-photo-img, .wx-photo-close { position: relative; z-index: 1; }
+.wx-photo-close { position: absolute; }
+
+/* traders: top 3 get a quiet metallic border */
+.tc.podium-1 { border-color: rgba(232,184,74,.5); background: linear-gradient(180deg, rgba(232,184,74,.06), var(--surface) 45%); }
+.tc.podium-2 { border-color: rgba(184,192,204,.4); background: linear-gradient(180deg, rgba(184,192,204,.05), var(--surface) 45%); }
+.tc.podium-3 { border-color: rgba(192,129,74,.45); background: linear-gradient(180deg, rgba(192,129,74,.055), var(--surface) 45%); }
+
+/* stat strip labels stay on one line */
+.profile-stat-card > span, .profile-stat-card > small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

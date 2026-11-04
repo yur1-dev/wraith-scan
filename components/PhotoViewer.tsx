@@ -29,13 +29,14 @@ export default function PhotoViewer({ src, alt = "", onClose }: { src: string; a
       className="wx-photo-viewer"
       role="dialog"
       aria-modal="true"
-      style={{ background: `rgba(6,6,8,${0.94 * fade})` }}
+      style={{ opacity: fade }}
       onClick={onClose}
       onPointerDown={(e) => { start.current = e.clientY; }}
       onPointerMove={(e) => { if (start.current !== null) setDy(e.clientY - start.current); }}
       onPointerUp={() => { if (Math.abs(dy) > 110) onClose(); start.current = null; setDy(0); }}
       onPointerCancel={() => { start.current = null; setDy(0); }}
     >
+      <div className="wx-photo-bg" style={{ backgroundImage: `url("${src}")` }} aria-hidden="true" />
       <button type="button" className="wx-photo-close" aria-label="Close photo" onClick={(e) => { e.stopPropagation(); onClose(); }}>
         <X size={20} />
       </button>

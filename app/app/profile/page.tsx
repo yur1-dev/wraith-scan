@@ -1361,12 +1361,12 @@ export default function ProfilePage() {
             <small>{completedTrades.length} closed trades</small>
           </article>
           <article className="profile-stat-card">
-            <span>OPEN POSITIONS</span>
+            <span>POSITIONS</span>
             <strong>{positions.length}</strong>
             <small className={openPositionPnl >= 0 ? "is-positive" : "is-negative"}>
               {positions.length
                 ? `${openPositionPnlDisplay} unrealized`
-                : "No open positions"}
+                : "None open"}
             </small>
           </article>
           {bestTrade && <article className="profile-stat-card">

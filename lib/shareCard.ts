@@ -37,6 +37,14 @@ export interface ShareParams {
   tag?: string;
   rank: ShareRank;
   variant?: number;
+  call?: boolean; // a scanner call / signal banner (no trade amounts)
+  bigText?: string; // overrides the big % headline
+  resText?: string; // overrides the result line
+  subText?: string; // overrides the 'x -> y UNIT' line
+  chipText?: string; // overrides '0.5 SOL in · TP'
+  label?: string; // overrides REALIZED / FROM THE CALL
+  sealText?: string; // overrides the multiplier inside the seal
+  sealLabel?: string;
   char?: number; // accessory index (derived from variant)
   tokenImg?: CanvasImageSource | null;
   rankImg?: HTMLImageElement | null;
@@ -54,12 +62,14 @@ const HEAVY = "Impact, 'Arial Black', system-ui, sans-serif";
 const W = SHARE_W, H = SHARE_H;
 
 const fmtMcap = (n: number) => (n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${n.toFixed(0)}`);
+const bigTxt = (p: ShareParams, t: number) => p.bigText ?? pctText(p.pnl * t);
+const subOf = (p: ShareParams, u: string) => p.subText ?? `${p.amountSol} → ${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`;
 const pctText = (v: number) => `${v >= 0 ? "+" : "-"}${Math.abs(v) >= 1000 ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(1)}%`;
 const amt = (v: number, dec: number, unit: string) => `${v >= 0 ? "+" : "-"}${Math.abs(v).toFixed(dec)} ${unit}`;
 
 const fmtUsd = (v: number) => `${v >= 0 ? "+" : "-"}$${Math.abs(v) >= 1000 ? Math.round(Math.abs(v)).toLocaleString("en-US") : Math.abs(v).toFixed(2)}`;
 /** Headline result: dollars when we know the rate, otherwise the native amount. */
-const res = (p: ShareParams, v: number) => (p.usdRate ? fmtUsd(v * p.usdRate) : `${v >= 0 ? "+" : "-"}${Math.abs(v).toFixed(Math.abs(p.solPnl) >= 10 ? 2 : Math.abs(p.solPnl) >= 1 ? 3 : 4)} ${p.unit ?? "SOL"}`);
+const res = (p: ShareParams, v: number) => p.resText ?? (p.usdRate ? fmtUsd(v * p.usdRate) : `${v >= 0 ? "+" : "-"}${Math.abs(v).toFixed(Math.abs(p.solPnl) >= 10 ? 2 : Math.abs(p.solPnl) >= 1 ? 3 : 4)} ${p.unit ?? "SOL"}`);
 
 type C = CanvasRenderingContext2D;
 
@@ -198,7 +208,7 @@ function tokenChip(ctx: C, k: number, p: ShareParams, x: number, y: number, size
   ctx.fillStyle = "#fff"; ctx.font = `800 ${size * 1.12}px ${MONO}`;
   ctx.fillText(p.symbol, cx + size + 14, cy - size * 0.2);
   ctx.fillStyle = "#ffffff77"; ctx.font = `600 15px ${MONO}`;
-  ctx.fillText(`${p.amountSol} ${unit} in${p.tag ? "  ·  " + p.tag : ""}`, cx + size + 14, cy + size * 0.72);
+  ctx.fillText(p.chipText ?? `${p.amountSol} ${unit} in${p.tag ? "  ·  " + p.tag : ""}`, cx + size + 14, cy + size * 0.72);
   ctx.restore();
 }
 
@@ -228,8 +238,8 @@ function seal(ctx: C, k: number, p: ShareParams, cx: number, cy: number, r: numb
   const s = r / 92;
   ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.font = `900 ${(m >= 100 ? 30 : m >= 10 ? 36 : 44) * s}px ${HEAVY}`; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 24;
-  ctx.fillText(`${mv >= 100 ? mv.toFixed(0) : mv.toFixed(2)}×`, 0, -2 * s);
-  ctx.shadowBlur = 0; ctx.fillStyle = A; ctx.font = `700 ${11 * s}px ${MONO}`; ctx.fillText("FROM CALL", 0, 28 * s);
+  ctx.fillText(p.sealText ?? `${mv >= 100 ? mv.toFixed(0) : mv.toFixed(2)}×`, 0, -2 * s);
+  ctx.shadowBlur = 0; ctx.fillStyle = A; ctx.font = `700 ${11 * s}px ${MONO}`; ctx.fillText(p.sealLabel ?? "FROM CALL", 0, 28 * s);
   ctx.restore();
 }
 
@@ -256,7 +266,7 @@ function layoutPoster(ctx: C, k: number, p: ShareParams, flip: boolean) {
   aurora(ctx, k, p, flip ? 260 : 700, 240, 420);
   ctx.save(); ctx.globalAlpha = 0.34 * ease((k - 0.15) / 0.8);
   ctx.font = `900 ${Math.abs(p.pnl) >= 1000 ? 200 : 250}px ${HEAVY}`; ctx.lineWidth = 3; ctx.strokeStyle = A; ctx.lineJoin = "round"; ctx.textAlign = flip ? "right" : "left";
-  ctx.strokeText(pctText(p.pnl * ease((k - 0.3) / 1.8)), flip ? W + 12 : -12, 372); ctx.restore();
+  ctx.strokeText(bigTxt(p, ease((k - 0.3) / 1.8)), flip ? W + 12 : -12, 372); ctx.restore();
   ghost(ctx, k, p, flip ? 220 : W - 190, H + 56, 560, flip);
   embers(ctx, k, p);
   const L = flip ? 560 : 0; // content shifts right when ghost is mirrored to the left
@@ -265,11 +275,11 @@ function layoutPoster(ctx: C, k: number, p: ShareParams, flip: boolean) {
   seal(ctx, k, p, flip ? W - 168 : 168, 344, 92);
   const a2 = ease((k - 1.1) / 0.5); ctx.save(); ctx.globalAlpha = a2; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
   const x0 = (flip ? 760 : 290) - (flip ? 0 : 0);
-  ctx.fillStyle = "#ffffff88"; ctx.font = `700 15px ${MONO}`; ctx.fillText(p.pnl >= 0 ? "REALIZED" : "LOST", flip ? 440 : 290, 322);
+  ctx.fillStyle = "#ffffff88"; ctx.font = `700 15px ${MONO}`; ctx.fillText(p.label ?? (p.call ? "FROM THE CALL" : p.pnl >= 0 ? "REALIZED" : "LOST"), flip ? 440 : 290, 322);
   ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 26; ctx.font = `900 44px ${HEAVY}`;
   ctx.fillText(res(p, p.solPnl * ease((k - 0.6) / 1.8)), flip ? 438 : 286, 372);
   ctx.shadowBlur = 0; ctx.fillStyle = "#ffffffaa"; ctx.font = `600 16px ${MONO}`;
-  ctx.fillText(`${p.amountSol} → ${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`, flip ? 440 : 290, 404);
+  ctx.fillText(subOf(p, u), flip ? 440 : 290, 404);
   void x0; ctx.restore();
   footer(ctx, k, p);
 }
@@ -285,8 +295,8 @@ function layoutBigNumber(ctx: C, k: number, p: ShareParams, flip: boolean) {
   ctx.save(); ctx.textAlign = al; ctx.textBaseline = "alphabetic";
   ctx.globalAlpha = ease((k - 0.3) / 0.5);
   ctx.fillStyle = "#ffffff77"; ctx.font = `700 16px ${MONO}`; ctx.fillText(p.pnl >= 0 ? "TOTAL RETURN" : "TOTAL LOSS", rx, 178);
-  ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 40; fitFont(ctx, pctText(p.pnl), flip ? 520 : 480, 190);
-  ctx.fillText(pctText(p.pnl * ease((k - 0.35) / 1.8)), rx, 330); ctx.shadowBlur = 0;
+  ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 40; fitFont(ctx, bigTxt(p, 1), flip ? 520 : 480, 190);
+  ctx.fillText(bigTxt(p, ease((k - 0.35) / 1.8)), rx, 330); ctx.shadowBlur = 0;
   ctx.globalAlpha = ease((k - 1.1) / 0.5);
   ctx.fillStyle = "#fff"; ctx.font = `800 40px ${MONO}`; ctx.fillText(res(p, p.solPnl * ease((k - 0.6) / 1.8)), rx, 392);
   if (p.usdRate) { ctx.fillStyle = "#ffffff88"; ctx.font = `600 14px ${MONO}`; ctx.fillText(amt(p.solPnl, decOf(p), u), rx, 414); }
@@ -319,11 +329,11 @@ function layoutTomb(ctx: C, k: number, p: ShareParams, flip: boolean) {
   tokenChip(ctx, k, p, cx, 80);
   stamp(ctx, k, p, flip ? 392 : W - 58, 50);
   ctx.save(); ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-  ctx.globalAlpha = ease((k - 0.35) / 0.5); ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 36; fitFont(ctx, pctText(p.pnl), (flip ? 330 : W - 440 - 30), 140);
-  ctx.fillText(pctText(p.pnl * ease((k - 0.35) / 1.8)), cx, 270); ctx.shadowBlur = 0;
+  ctx.globalAlpha = ease((k - 0.35) / 0.5); ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 36; fitFont(ctx, bigTxt(p, 1), (flip ? 330 : W - 440 - 30), 140);
+  ctx.fillText(bigTxt(p, ease((k - 0.35) / 1.8)), cx, 270); ctx.shadowBlur = 0;
   ctx.globalAlpha = ease((k - 1) / 0.5); ctx.fillStyle = "#fff"; ctx.font = `800 36px ${MONO}`;
   ctx.fillText(res(p, p.solPnl * ease((k - 0.6) / 1.8)), cx, 326);
-  const rows: [string, string][] = [["INVESTED", `${p.amountSol} ${u}`], ["POSITION", `${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`], ["MULTIPLE", `${(p.mult ?? 1 + p.pnl / 100).toFixed(2)}×`]];
+  const rows: [string, string][] = p.call ? [["CALLED", fmtMcap(p.entryMcap)], ["NOW", fmtMcap(p.exitMcap ?? 0)], ["RANK", p.rank.name]] : [["INVESTED", `${p.amountSol} ${u}`], ["POSITION", `${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`], ["MULTIPLE", `${(p.mult ?? 1 + p.pnl / 100).toFixed(2)}×`]];
   rows.forEach(([a, b], i) => { ctx.globalAlpha = ease((k - 1.3 - i * 0.15) / 0.4); ctx.fillStyle = "#ffffff77"; ctx.font = `700 14px ${MONO}`; ctx.fillText(a, cx, 376 + i * 30); ctx.fillStyle = "#fff"; ctx.font = `800 18px ${MONO}`; ctx.fillText(b, cx + 130, 376 + i * 30); });
   ctx.restore();
   footer(ctx, k, p, flip ? 40 : 40, W - 40);
@@ -338,7 +348,7 @@ function layoutTerminal(ctx: C, k: number, p: ShareParams, flip: boolean) {
     ["token", `$${p.symbol}`, "#fff", 26],
     ["called", fmtMcap(p.entryMcap), "#ffffffcc", 26],
     ["exited", fmtMcap(p.exitMcap ?? 0), "#ffffffcc", 26],
-    ["pnl", pctText(p.pnl), A, 70],
+    ["pnl", bigTxt(p, 1), A, 70],
     ["result", res(p, p.solPnl), A, 34],
     ["rank", p.rank.name.toLowerCase(), "#ffffffaa", 24],
   ];
@@ -377,12 +387,12 @@ function layoutSpot(ctx: C, k: number, p: ShareParams, flip: boolean) {
   tokenChip(ctx, k, p, 32, 62); stamp(ctx, k, p, W - 58, 50);
   seal(ctx, k, p, 150, 280, 82);
   ctx.save(); ctx.textBaseline = "alphabetic"; ctx.textAlign = "right";
-  ctx.globalAlpha = ease((k - 1) / 0.5); ctx.fillStyle = "#ffffff88"; ctx.font = `700 15px ${MONO}`; ctx.fillText(p.pnl >= 0 ? "REALIZED" : "LOST", W - 44, 250);
+  ctx.globalAlpha = ease((k - 1) / 0.5); ctx.fillStyle = "#ffffff88"; ctx.font = `700 15px ${MONO}`; ctx.fillText(p.label ?? (p.call ? "FROM THE CALL" : p.pnl >= 0 ? "REALIZED" : "LOST"), W - 44, 250);
   ctx.fillStyle = "#fff"; ctx.font = `800 36px ${MONO}`; ctx.fillText(res(p, p.solPnl * ease((k - 0.6) / 1.8)), W - 44, 292);
-  ctx.fillStyle = "#ffffffaa"; ctx.font = `600 16px ${MONO}`; ctx.fillText(`${p.amountSol} → ${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`, W - 44, 322);
+  ctx.fillStyle = "#ffffffaa"; ctx.font = `600 16px ${MONO}`; ctx.fillText(subOf(p, u), W - 44, 322);
   ctx.textAlign = "center"; ctx.globalAlpha = ease((k - 0.35) / 0.5);
-  ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 40; fitFont(ctx, pctText(p.pnl), 560, 130);
-  ctx.fillText(pctText(p.pnl * ease((k - 0.35) / 1.8)), W / 2, 470);
+  ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 40; fitFont(ctx, bigTxt(p, 1), 560, 130);
+  ctx.fillText(bigTxt(p, ease((k - 0.35) / 1.8)), W / 2, 470);
   ctx.restore();
   footer(ctx, k, p);
 }
@@ -404,10 +414,10 @@ function layoutRing(ctx: C, k: number, p: ShareParams, flip: boolean) {
   const x0 = flip ? 520 : 44;
   tokenChip(ctx, k, p, x0 - 12, 62); stamp(ctx, k, p, flip ? W - 58 : 380, 50);
   ctx.save(); ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-  ctx.globalAlpha = ease((k - 0.35) / 0.5); ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 36; fitFont(ctx, pctText(p.pnl), flip ? W - x0 - 30 : 390, 118);
-  ctx.fillText(pctText(p.pnl * ease((k - 0.35) / 1.8)), x0, 270); ctx.shadowBlur = 0;
+  ctx.globalAlpha = ease((k - 0.35) / 0.5); ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 36; fitFont(ctx, bigTxt(p, 1), flip ? W - x0 - 30 : 390, 118);
+  ctx.fillText(bigTxt(p, ease((k - 0.35) / 1.8)), x0, 270); ctx.shadowBlur = 0;
   ctx.globalAlpha = ease((k - 1) / 0.5); ctx.fillStyle = "#fff"; ctx.font = `800 34px ${MONO}`; ctx.fillText(res(p, p.solPnl * ease((k - 0.6) / 1.8)), x0, 326);
-  ctx.fillStyle = "#ffffffaa"; ctx.font = `600 16px ${MONO}`; ctx.fillText(`${p.amountSol} → ${(p.amountSol * (1 + p.pnl / 100)).toFixed(3)} ${u}`, x0, 356);
+  ctx.fillStyle = "#ffffffaa"; ctx.font = `600 16px ${MONO}`; ctx.fillText(subOf(p, u), x0, 356);
   ctx.restore();
   seal(ctx, k, p, x0 + 70, 440, 60);
   footer(ctx, k, p, flip ? 40 : 40, W - 40);

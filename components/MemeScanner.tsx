@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { cleanSym, cleanName } from "@/lib/cleanText";
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { MemeTrend } from "@/app/app/page";
@@ -192,8 +193,8 @@ export async function fetchTokenMeta(ca: string): Promise<TokenMeta | null> {
     }
     const best = pairs[0];
     const meta: TokenMeta = {
-      name: best.baseToken?.name || best.baseToken?.symbol || "",
-      symbol: (best.baseToken?.symbol || "").toUpperCase(),
+      name: cleanName(best.baseToken?.name || best.baseToken?.symbol || ""),
+      symbol: cleanSym((best.baseToken?.symbol || "").toUpperCase()),
       imageUrl: best.info?.imageUrl ?? undefined,
     };
     metaCache.set(ca, meta);

@@ -385,3 +385,8 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   }
   .wx-token-head .wx-token-id { flex: 1 1 0; min-width: 0; }
 }
+
+/* safety net: a spam token must never widen the page */
+@media (max-width: 767px) {
+  html, body { overflow-x: clip; max-width: 100vw; }
+}

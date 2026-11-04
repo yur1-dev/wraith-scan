@@ -1,6 +1,7 @@
 "use client";
 
 import { QRCodeSVG } from "qrcode.react";
+import { cleanSym, cleanName } from "@/lib/cleanText";
 import { defaultAvatar } from "@/lib/defaultArt";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
@@ -324,6 +325,9 @@ function TokenRow({
               fontWeight: 700,
               ...MONO,
               letterSpacing: ".04em",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}
           >
             {token.symbol}
@@ -602,8 +606,8 @@ function CoinSearch({
         if (!existing || liquidity > existing.liquidity) {
           seen.set(addr, {
             address: addr,
-            name: pair.baseToken?.name ?? "Unknown",
-            symbol: pair.baseToken?.symbol ?? "???",
+            name: cleanName(pair.baseToken?.name ?? "Unknown"),
+            symbol: cleanSym(pair.baseToken?.symbol ?? "???"),
             icon: pair.info?.imageUrl ?? undefined,
             priceUsd,
             marketCap: mcap,
@@ -746,8 +750,8 @@ function CoinSearch({
             if (!pair) return null;
             const t: TokenResult = {
               address: pair.baseToken?.address ?? addr,
-              name: pair.baseToken?.name ?? "Unknown",
-              symbol: pair.baseToken?.symbol ?? "???",
+              name: cleanName(pair.baseToken?.name ?? "Unknown"),
+              symbol: cleanSym(pair.baseToken?.symbol ?? "???"),
               icon: pair.info?.imageUrl ?? undefined,
               priceUsd: parseFloat(pair.priceUsd ?? "0"),
               // Do not seed the panel with FDV when circulating MCAP is absent.
@@ -2235,7 +2239,7 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
         .wpl-out{position:absolute;top:20px;right:22px;display:inline-flex;align-items:center;gap:7px;color:#9a8e85;font-weight:600;font-size:13px}
         .wpl-out:hover{color:#fff}
         @media (max-width:480px){.wpl-pad{grid-template-columns:repeat(3,64px);gap:12px}.wpl-key{height:64px}.wpl-orbs{gap:13px}}
-        @media (hover:none){.wpl-mist,.wpl-logo,.wpl-logo::before,.wpl-logo::after{animation:none}.wpl-key{transition:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.wpl-key:active{transform:none;box-shadow:none;background:rgba(255,123,61,.22);border-color:rgba(255,123,61,.6)}.wpl-orb{transition:none}}
+        @media (hover:none){.wpl-mist,.wpl-logo,.wpl-logo::before,.wpl-logo::after{animation:none}.wpl-key{transition:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;outline:none}.wpl-key:hover,.wpl-key:focus,.wpl-key:active{background:rgba(255,255,255,.025);border-color:#2a1f18;transform:none;box-shadow:none}.wpl-key.ghost:hover,.wpl-key.ghost:focus,.wpl-key.ghost:active{background:transparent;border-color:transparent}.wpl-key.hit{background:rgba(255,123,61,.22)!important;border-color:rgba(255,123,61,.6)!important}.wpl-orb{transition:none}}
         @media (prefers-reduced-motion:reduce){.wpl-mist,.wpl-logo,.wpl-logo::before,.wpl-logo::after{animation:none}}
       `}</style>
       <div className="wpl-mist" />
@@ -2267,12 +2271,12 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
 
       <div className="wpl-pad" hidden={!touch}>
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
-          <button key={d} type="button" className="wpl-key" onPointerDown={(e) => { e.preventDefault(); press(d); }}>{d}</button>
+          <button key={d} type="button" className="wpl-key" onPointerDown={(e) => { e.preventDefault(); const el = e.currentTarget; el.classList.add("hit"); window.setTimeout(() => el.classList.remove("hit"), 110); press(d); }}>{d}</button>
         ))}
         {bio ? (
           <button type="button" className="wpl-key ghost" onPointerDown={(e) => { e.preventDefault(); void tryBio(); }} aria-label="Use fingerprint"><Fingerprint size={26} /></button>
         ) : <span />}
-        <button type="button" className="wpl-key" onPointerDown={(e) => { e.preventDefault(); press("0"); }}>0</button>
+        <button type="button" className="wpl-key" onPointerDown={(e) => { e.preventDefault(); const el = e.currentTarget; el.classList.add("hit"); window.setTimeout(() => el.classList.remove("hit"), 110); press("0"); }}>0</button>
         <button type="button" className="wpl-key ghost" onPointerDown={(e) => { e.preventDefault(); back(); }} aria-label="Delete">⌫</button>
       </div>
 

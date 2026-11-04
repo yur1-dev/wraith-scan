@@ -10,6 +10,8 @@
 // empty board.
 
 import { NextRequest, NextResponse } from "next/server";
+import { cleanSym, cleanName } from "@/lib/cleanText";
+function scrub<T extends { symbol?: string; name?: string }>(t: T[]): T[] { return t.map((x) => ({ ...x, symbol: cleanSym(x.symbol), name: cleanName(x.name) })); }
 import { SOLANA_MINT_RE, type MarketCategory, type MarketToken } from "@/lib/market";
 import {
   arr,
@@ -141,7 +143,7 @@ export async function GET(req: NextRequest) {
 
   const hit = cache.get(category);
   if (hit && Date.now() - hit.ts < CACHE_MS) {
-    return NextResponse.json({ tokens: hit.tokens, category, source: hit.source, updatedAt: hit.ts, stale: false });
+    return NextResponse.json({ tokens: scrub(hit.tokens), category, source: hit.source, updatedAt: hit.ts, stale: false });
   }
 
   let job = inflight.get(category);
@@ -157,11 +159,11 @@ export async function GET(req: NextRequest) {
   const fresh = await job;
   if (fresh) {
     cache.set(category, fresh);
-    return NextResponse.json({ tokens: fresh.tokens, category, source: fresh.source, updatedAt: fresh.ts, stale: false });
+    return NextResponse.json({ tokens: scrub(fresh.tokens), category, source: fresh.source, updatedAt: fresh.ts, stale: false });
   }
 
   if (hit && Date.now() - hit.ts < STALE_MS) {
-    return NextResponse.json({ tokens: hit.tokens, category, source: hit.source, updatedAt: hit.ts, stale: true });
+    return NextResponse.json({ tokens: scrub(hit.tokens), category, source: hit.source, updatedAt: hit.ts, stale: true });
   }
   return NextResponse.json({ tokens: [], category, error: "Market data providers are unreachable right now." }, { status: 502 });
 }

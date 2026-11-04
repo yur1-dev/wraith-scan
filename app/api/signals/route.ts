@@ -5,6 +5,7 @@
 // No Gemini / Twitter / Rugcheck calls: this is cheap enough to poll.
 
 import { NextRequest, NextResponse } from "next/server";
+import { cleanSym, cleanName } from "@/lib/cleanText";
 import type { MarketCategory, MarketToken } from "@/lib/market";
 import { recordSignals, refreshCalls, type RecordInput } from "@/lib/signalCalls";
 import { enrichSignals, featuresOf, type SignalIntel } from "@/lib/signalIntel";
@@ -232,7 +233,10 @@ async function build(origin: string): Promise<Built> {
     features: featuresOf(sg.token, sg.meta ?? {}, sg.intel, now),
   }));
   // the wallet list is for the scoreboard only; never ship it to browsers
-  const signals = top.map((sg) => (sg.intel ? { ...sg, intel: { ...sg.intel, buyers: undefined } } : sg));
+  const signals = top.map((sg0) => {
+    const sg = { ...sg0, token: { ...sg0.token, symbol: cleanSym(sg0.token.symbol), name: cleanName(sg0.token.name) } };
+    return sg.intel ? { ...sg, intel: { ...sg.intel, buyers: undefined } } : sg;
+  });
   return { signals, records };
 }
 

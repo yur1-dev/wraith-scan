@@ -225,22 +225,60 @@ export function TelegramPhone({ data }: { data: LandingData | null }) {
   );
 }
 
-/** Shared fetch hook for /api/landing (public proof data). */
-export function useLandingData() {
-  const [data, setData] = useState<LandingData | null>(null);
+/**
+ * Shared feed for /api/landing (public proof data). Used by the landing page and the login page.
+ * One request at a time, never overlapping: a browser only opens ~6 connections per host, so slow answers that stacked up
+ * behind a fixed 30s interval used to starve every other call on the page, including the sign-in request. A request that
+ * hangs is cut after 10s so it gives its connection back, the loop pauses while the tab is hidden, and a failed attempt
+ * is retried quickly (6s) instead of waiting a whole minute.
+ */
+export function useLandingFeed(): { data: LandingData | null; loading: boolean } {
+  const [state, setState] = useState<{ data: LandingData | null; loading: boolean }>({ data: null, loading: true });
   useEffect(() => {
     let alive = true;
+    let busy = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let ctrl: AbortController | undefined;
     const run = async () => {
+      if (!alive || busy || document.hidden) return; // hidden: the visibilitychange handler restarts the loop
+      busy = true;
+      const c = new AbortController();
+      ctrl = c;
+      const kill = setTimeout(() => c.abort(), 10_000);
+      let ok = false;
       try {
-        const r = await fetch("/api/landing", { cache: "no-store" });
-        if (r.ok && alive) setData((await r.json()) as LandingData);
+        const r = await fetch("/api/landing", { cache: "no-store", signal: c.signal });
+        if (r.ok && alive) {
+          const d = (await r.json()) as LandingData;
+          setState({ data: d, loading: false });
+          ok = true;
+        }
       } catch { /* keep last */ }
+      clearTimeout(kill);
+      busy = false;
+      if (!alive) return;
+      if (!ok) setState((s) => (s.loading ? { ...s, loading: false } : s));
+      timer = setTimeout(run, ok ? 60_000 : 6_000);
     };
+    const onVisible = () => {
+      if (document.hidden || !alive || busy) return;
+      clearTimeout(timer);
+      void run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     void run();
-    const id = setInterval(run, 30_000);
-    return () => { alive = false; clearInterval(id); };
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      ctrl?.abort();
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
-  return data;
+  return state;
+}
+
+export function useLandingData(): LandingData | null {
+  return useLandingFeed().data;
 }
 
 /** Hero composition: the real call record, a real chart and a cycling real win. */

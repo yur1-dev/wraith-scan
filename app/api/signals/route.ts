@@ -4,7 +4,7 @@
 // pressure, buy/sell balance, liquidity health and freshness.
 // No Gemini / Twitter / Rugcheck calls: this is cheap enough to poll.
 
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { cleanSym, cleanName } from "@/lib/cleanText";
 import type { MarketCategory, MarketToken } from "@/lib/market";
 import { recordSignals, refreshCalls, type RecordInput } from "@/lib/signalCalls";
@@ -31,6 +31,16 @@ const CACHE_MS = 30_000;
 interface Built { signals: Signal[]; records: RecordInput[] }
 let cache: { ts: number; signals: Signal[]; records: RecordInput[] } | null = null;
 let inflight: Promise<Built> | null = null;
+let persisted: Built | null = null;
+// after() needs room to finish the database writes once the response has gone out
+export const maxDuration = 60;
+/** DB writes + price refresh happen once per build, not once per request that was waiting on it. */
+async function persistOnce(built: Built): Promise<void> {
+  if (persisted === built) return;
+  persisted = built;
+  await recordSignals(built.records).catch(() => undefined);
+  await refreshCalls().catch(() => undefined);
+}
 const HOT_MIN = Number(process.env.SIGNAL_HOT_MIN) || 72;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
@@ -257,9 +267,12 @@ export async function GET(req: NextRequest) {
     const built = await inflight;
     if (built.signals.length) cache = { ts: Date.now(), ...built };
     else if (!cache) throw new Error("scored zero candidates");
-    // Persist new calls and refresh tracked prices for everyone (awaited so serverless does not drop it).
-    await recordSignals(built.records).catch(() => undefined);
-    await refreshCalls().catch(() => undefined);
+    // Persist new calls and refresh tracked prices for everyone. after() keeps the function alive until the writes
+    // finish (serverless does not drop them) but the response no longer waits for the database: a slow or far-away
+    // Atlas used to add its latency to every single scanner poll.
+    // Server jobs (Telegram cron, tape) call this in-process and want the new calls in the database before they read it.
+    if (req.headers.get("x-wraith-internal") === "1") await persistOnce(built);
+    else after(() => persistOnce(built));
     return edge(NextResponse.json({ signals: cache.signals, updatedAt: cache.ts }), 10, 60);
   } catch {
     if (cache) return NextResponse.json({ signals: cache.signals, updatedAt: cache.ts, stale: true });

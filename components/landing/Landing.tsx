@@ -9,7 +9,7 @@ import { TIERS, TIER_ORDER, type TierKey } from "@/lib/tiers";
 import TierGlyph from "@/components/TierGlyph";
 import { useEffect, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { CallsTable, ChartReal, HeroStage, PaperExample, TelegramPhone, Ticker, WinsReal, type LandingData } from "./Mocks";
+import { CallsTable, ChartReal, HeroStage, PaperExample, TelegramPhone, Ticker, WinsReal, useLandingFeed } from "./Mocks";
 import DownloadApp from "./DownloadApp";
 import { CursorGlow, Magnetic, Reveal, TiltFrame } from "./Motion";
 import { BOT, CHAINS, FAQ, HERO, PORTAL, SHOWCASE, SOON, TELEGRAM_STEPS } from "./content";
@@ -102,24 +102,7 @@ function Nav() {
   );
 }
 
-function useLanding() {
-  const [data, setData] = useState<LandingData | null>(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let alive = true;
-    const run = async () => {
-      try {
-        const r = await fetch("/api/landing", { cache: "no-store" });
-        if (r.ok && alive) setData((await r.json()) as LandingData);
-      } catch { /* keep last data */ }
-      if (alive) setLoading(false);
-    };
-    void run();
-    const id = setInterval(run, 30_000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
-  return { data, loading };
-}
+const useLanding = useLandingFeed; // shared, non-overlapping poller (see Mocks.tsx)
 
 export default function Landing() {
   const { data, loading } = useLanding();

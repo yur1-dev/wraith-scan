@@ -22,6 +22,10 @@ const MONGO_OPTIONS = {
   minPoolSize: 0,
   maxIdleTimeMS: 30_000,
   heartbeatFrequencyMS: 15_000,
+  // The driver's default is to wait FOREVER for a free pooled connection. With a pool of 5 and a slow link to Atlas, a
+  // burst of requests could queue behind each other for minutes with no error at all. Fail after 15s instead; every
+  // caller already treats a DB error as "use the cache / show the empty state".
+  waitQueueTimeoutMS: 15_000,
 };
 
 // ─── CLIENT SINGLETON ─────────────────────────────────────────────────────────

@@ -11,7 +11,9 @@ export async function callGet<T>(load: () => Promise<GetModule>, url: string, ms
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const res = await Promise.race([
-      mod.GET(new NextRequest(url)),
+      // the header tells a route "a server job is calling you, not a browser": the scanner then finishes its database
+      // writes before answering, so the Telegram cron sees the calls it just recorded
+      mod.GET(new NextRequest(url, { headers: { "x-wraith-internal": "1" } })),
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), ms); }),
     ]);
     if (!res.ok) throw new Error(String(res.status));

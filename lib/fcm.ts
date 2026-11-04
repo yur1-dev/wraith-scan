@@ -29,29 +29,16 @@ const TRANSIENT = new Set(["messaging/internal-error", "messaging/server-unavail
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * Sends one alert to one phone. The message carries BOTH a ready-made notification (Android can show it by itself, with the
- * Wraith icon and the "Wraith alerts" channel, even when the app is not running) and the same text as data (so the app can
- * still draw it itself while it is open). A short hiccup on Google's side is retried once.
+ * Sends one alert to one phone as a high-priority DATA message: the Wraith app receives it and draws the notification itself
+ * (Wraith icon, "Wraith alerts" channel, tap opens the page). This is the path every installed app version handles.
+ * A short hiccup on Google's side is retried once.
  */
 export async function sendFcm(token: string, msg: FcmMsg): Promise<FcmResult> {
   if (!fcmConfigured()) return { status: "error", code: "fcm-not-configured" };
   const message: Message = {
     token,
-    notification: { title: msg.title, body: msg.body },
     data: { title: msg.title, body: msg.body, url: msg.url, tag: msg.tag },
-    android: {
-      priority: "high",
-      ttl: 3600 * 1000,
-      notification: {
-        channelId: "wraith_alerts",
-        icon: "ic_notification_icon",
-        color: "#FF7B3D",
-        tag: msg.tag,
-        priority: "high",
-        defaultSound: true,
-        visibility: "public",
-      },
-    },
+    android: { priority: "high", ttl: 3600 * 1000 },
   };
   for (let attempt = 0; ; attempt++) {
     try {

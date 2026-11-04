@@ -19,6 +19,16 @@ export async function GET(req: NextRequest) {
     const ok = req.headers.get("authorization") === `Bearer ${secret}` || req.nextUrl.searchParams.get("key") === secret;
     if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  if (req.nextUrl.searchParams.get("grouptest") === "1") {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const gid = process.env.TELEGRAM_GROUP_CHAT_ID;
+    const thread = Number(process.env.TELEGRAM_GROUP_THREAD_ID);
+    if (!token || !gid) return NextResponse.json({ ok: false, error: "missing env", hasToken: !!token, hasGroupId: !!gid, signals: process.env.TELEGRAM_GROUP_SIGNALS });
+    const body: Record<string, unknown> = { chat_id: gid, text: "Wraith group feed test" };
+    if (Number.isFinite(thread) && thread > 0) body.message_thread_id = thread;
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return NextResponse.json({ gid, thread, signals: process.env.TELEGRAM_GROUP_SIGNALS, telegram: await r.json() });
+  }
   if (!process.env.TELEGRAM_BOT_TOKEN) {
     // No Telegram bot configured: phone push notifications still run.
     const push = await runPushAlerts().catch((e) => { console.error("[push alerts]", e); return null; });

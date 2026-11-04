@@ -127,7 +127,7 @@ const GEO: Record<string, { tip: number; eye: number; sp: number; fw: number }> 
   "/tier-wraith.png": { tip: 28, eye: 350, sp: 39, fw: 83 },
 };
 const GOLD = "#ffc94a";
-function accessory(ctx: C, k: number, p: ShareParams, ch: number, flip: boolean) {
+export function accessory(ctx: C, k: number, p: ShareParams, ch: number, flip: boolean) {
   if (!ch) return;
   const g = GEO[p.rank.img] ?? GEO["/shade.png"], cx = 397, ex = g.sp, ey = g.eye, tip = g.tip;
   ctx.save(); ctx.globalAlpha = ease((k - 0.5) / 0.5) * (p.rank.grey ? 0.9 : 1);

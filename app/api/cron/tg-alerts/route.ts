@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
       if (!first && !sig) continue; // feed missed it this run: don't burn the claim, retry next run
       if (!(await claim(`entry:${c.address}`))) continue;
       if (first || !sig) continue;
-      const r = await broadcast("signal", signalMessage(sig), { chain: c.chain ?? "solana", score: sig.score, markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "signal", sym: sig.token.symbol, now: sig.token.mcap, score: sig.score, tier: sig.tier, chain: c.chain ?? "solana", img: sig.token.imageUrl }) });
+      const r = await broadcast("signal", signalMessage(sig), { chain: c.chain ?? "solana", score: sig.score, markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "signal", sym: sig.token.symbol, now: sig.token.mcap, score: sig.score, tier: sig.tier, chain: c.chain ?? "solana", liq: sig.token.liquidity, h1: sig.token.change.h1 ?? undefined, vol: sig.token.volume.h1, img: sig.token.imageUrl }) });
       out.entries++; out.sent += r.sent;
     }
 

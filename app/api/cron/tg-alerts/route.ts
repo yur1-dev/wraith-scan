@@ -37,6 +37,14 @@ export async function GET(req: NextRequest) {
     if (demo) await pushBroadcast({ title: "🧪 Wraith test alert", body: "$DEMO spotted at $48.2K · score 82", url: "/app", tag: "demo" }, "signal").catch(() => 0);
     const body: Record<string, unknown> = { chat_id: gid, text, parse_mode: "HTML" };
     if (Number.isFinite(thread) && thread > 0) body.message_thread_id = thread;
+    if (req.nextUrl.searchParams.get("banner") === "1") {
+      // photo test: Telegram downloads the banner itself, so this proves the public route + image work end to end
+      const photo = bannerUrl(req.nextUrl.origin, { kind: "win", sym: "DEMO", x: 3.51, called: 13000, now: 45500, peak: 45500, chain: "solana" });
+      const pb: Record<string, unknown> = { chat_id: gid, photo, caption: "🧪 <b>TEST — WRAITH WIN · 3x</b>  $DEMO\nBanner check", parse_mode: "HTML" };
+      if (body.message_thread_id) pb.message_thread_id = body.message_thread_id;
+      const pr = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(pb) });
+      return NextResponse.json({ photo, telegram: await pr.json() });
+    }
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return NextResponse.json({ gid, thread, signals: process.env.TELEGRAM_GROUP_SIGNALS, telegram: await r.json() });
   }

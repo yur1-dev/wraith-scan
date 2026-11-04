@@ -5,6 +5,7 @@
 //   2. the oldest pool across every DEX pair DexScreener knows (lower bound)
 // On-chain results never change, so they are stored in MongoDB permanently.
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { getDb } from "@/lib/mongoClient";
 import { SOLANA_MINT_RE } from "@/lib/market";
 import { arr, getJson, num, obj } from "@/lib/marketProviders";
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
   if (!SOLANA_MINT_RE.test(mint)) return NextResponse.json({ error: "Invalid mint" }, { status: 400 });
 
   const hot = mem.get(mint);
-  if (hot && (hot.age.source === "onchain" || Date.now() - hot.ts < 10 * 60_000)) return NextResponse.json(hot.age);
+  if (hot && (hot.age.source === "onchain" || Date.now() - hot.ts < 10 * 60_000)) return edge(NextResponse.json(hot.age), 600, 3600);
 
   try {
     const db = await getDb();
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
     if (saved && typeof saved.createdAt === "number") {
       const age: Age = { createdAt: saved.createdAt, source: "onchain" };
       mem.set(mint, { age, ts: Date.now() });
-      return NextResponse.json(age);
+      return edge(NextResponse.json(age), 600, 3600);
     }
   } catch { /* db optional */ }
 
@@ -91,12 +92,12 @@ export async function GET(req: NextRequest) {
     const age: Age = { createdAt, source: "onchain" };
     mem.set(mint, { age, ts: Date.now() });
     void getDb().then((db) => db.collection("token_birth").updateOne({ _id: mint as never }, { $set: { createdAt, ts: Date.now() } }, { upsert: true })).catch(() => undefined);
-    return NextResponse.json(age);
+    return edge(NextResponse.json(age), 600, 3600);
   }
   if (pair) {
     const age: Age = { createdAt: pair, source: "pairs" };
     mem.set(mint, { age, ts: Date.now() });
-    return NextResponse.json(age);
+    return edge(NextResponse.json(age), 600, 3600);
   }
   return NextResponse.json({ error: "Age unavailable" }, { status: 404 });
 }

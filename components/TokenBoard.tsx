@@ -4,7 +4,7 @@
 // Discover board — pump.fun-style cards or Fomo-style dense table.
 // Click a token to open its workspace (chart + trade dock).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, LayoutGrid, List, RefreshCw, Search } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
@@ -22,6 +22,7 @@ import {
 import { toMeme } from "@/lib/tokenMeme";
 import { prefetchChart } from "@/lib/prefetchChart";
 import { TokenIcon } from "@/components/TokenIcon";
+import { UpdatedAgo } from "@/components/UpdatedAgo";
 import { QuickBuyButton } from "@/components/QuickBuyButton";
 import { getActivePreset } from "@/lib/quickBuyPresets";
 import { HOVER_DELAY_MS, TokenHoverPreview } from "@/components/TokenHoverChart";
@@ -92,7 +93,7 @@ function safeName(name: string, symbol: string): string {
   return name;
 }
 
-function Card({ token, onOpen, quickSol }: { token: MarketToken; onOpen: () => void; quickSol: number }) {
+function CardBase({ token, onOpen, quickSol }: { token: MarketToken; onOpen: () => void; quickSol: number }) {
   return (
     <div
       className="wx-tcard"
@@ -145,7 +146,7 @@ function Card({ token, onOpen, quickSol }: { token: MarketToken; onOpen: () => v
   );
 }
 
-function Row({ token, onOpen, quickSol, hover }: { token: MarketToken; onOpen: () => void; quickSol: number; hover: HoverFns }) {
+function RowBase({ token, onOpen, quickSol, hover }: { token: MarketToken; onOpen: () => void; quickSol: number; hover: HoverFns }) {
   return (
     <div
       role="button"
@@ -177,6 +178,18 @@ function Row({ token, onOpen, quickSol, hover }: { token: MarketToken; onOpen: (
   );
 }
 
+// The board gets fresh token objects every few seconds. Re-render a card only when something it SHOWS changed
+// (onOpen is a new closure each render, so it is deliberately not compared: same token fields = same behaviour).
+const sameToken = (a: MarketToken, b: MarketToken) =>
+  a === b || (
+    a.address === b.address && a.priceUsd === b.priceUsd && a.mcap === b.mcap && a.liquidity === b.liquidity &&
+    a.imageUrl === b.imageUrl && a.onCurve === b.onCurve && a.graduated === b.graduated && a.curveProgress === b.curveProgress &&
+    a.volume.h24 === b.volume.h24 && a.change.m5 === b.change.m5 && a.change.h1 === b.change.h1 && a.change.h6 === b.change.h6 &&
+    a.change.h24 === b.change.h24 && a.txns.buys === b.txns.buys && a.txns.sells === b.txns.sells
+  );
+const Card = memo(CardBase, (p, n) => p.quickSol === n.quickSol && sameToken(p.token, n.token));
+const Row = memo(RowBase, (p, n) => p.quickSol === n.quickSol && p.hover === n.hover && sameToken(p.token, n.token));
+
 const PAGE_SIZE = { grid: 24, list: 25 } as const;
 
 function Pager({ page, pages, total, size, onPage }: { page: number; pages: number; total: number; size: number; onPage: (p: number) => void }) {
@@ -206,7 +219,6 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
   const [query, setQuery] = useState("");
   const [hideThin, setHideThin] = useState(true);
   const { tokens, loading, error, stale, updatedAt, refresh } = useMarket(category);
-  const [, setNow] = useState(0);
   const [quickSol, setQuickSol] = useState(0.1);
   const [page, setPage] = useState(0);
   const [hoverPreview, setHoverPreview] = useState<{ token: MarketToken; top: number; left: number } | null>(null);
@@ -239,11 +251,6 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
     window.addEventListener("storage", syncPreset);
     return () => window.removeEventListener("storage", syncPreset);
   }, []);
-  useEffect(() => {
-    const t = setInterval(() => setNow((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return tokens.filter((t) => {
@@ -264,8 +271,6 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
   const pages = Math.max(1, Math.ceil(shown.length / size));
   const curPage = Math.min(page, pages - 1);
   const pageRows = shown.slice(curPage * size, (curPage + 1) * size);
-
-  const secondsAgo = updatedAt ? Math.max(0, Math.round((Date.now() - updatedAt) / 1000)) : null;
 
   return (
     <section className="wx-board">
@@ -308,7 +313,7 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
         <span className="wx-live">
           <i className={stale ? "stale" : ""} />
           {stale ? "Delayed" : "Live"}
-          {secondsAgo !== null && <small> · {secondsAgo}s</small>}
+          {updatedAt ? <small> · <UpdatedAgo at={updatedAt} />s</small> : null}
         </span>
 
         <div className="wx-seg" aria-label="View">

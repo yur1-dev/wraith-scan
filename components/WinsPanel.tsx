@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { MemeTrend } from "@/app/app/page";
 import {
   Flame,
@@ -644,7 +645,7 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
   const staleNotifiedRef = useRef<Set<string>>(loadSet(STALE_NOTIFIED_KEY));
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 60_000);
+    const t = visibleInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
   }, []);
 
@@ -676,7 +677,8 @@ export default function WinsPanel({ onSelectMeme, onCountChange }: Props) {
     return () => window.removeEventListener("storage", h);
   }, []);
   useEffect(() => {
-    const t = setInterval(() => setBoughtKeys(loadSet(BOUGHT_KEY)), 5_000);
+    // only touch state when the set really changed: a fresh Set every 5s re-rendered this whole panel for nothing
+    const t = visibleInterval(() => setBoughtKeys((cur) => { const next = loadSet(BOUGHT_KEY); return next.size === cur.size && [...next].every((k) => cur.has(k)) ? cur : next; }), 5_000);
     return () => clearInterval(t);
   }, []);
 

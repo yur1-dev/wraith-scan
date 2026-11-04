@@ -16,6 +16,7 @@
 //   5. last good series is served (marked stale) if every provider fails
 
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { Connection } from "@solana/web3.js";
 import { fromPumpFunOnChain } from "@/lib/onchain-pumpfun";
 import { SOLANA_MINT_RE } from "@/lib/market";
@@ -351,7 +352,7 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
 // Every good provider result is merged into Mongo. After a restart / on a cold instance / when a provider is
 // rate-limited, the chart opens instantly from here and refreshes in the background.
 const SAVED_MAX_AGE_MS = 24 * 3600_000;
-const SAVED_KEEP = 1500;
+const SAVED_KEEP = 800; // ~70KB per saved chart; the UI never asks for more than 300 candles
 async function readSaved(key: string): Promise<{ candles: Candle[]; source: string; ts: number } | null> {
   try {
     const db = await Promise.race([getDb(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("db timeout")), 1500))]);
@@ -374,7 +375,7 @@ function persist(key: string, fresh: Candle[], source: string) {
       if (prev && Array.isArray(prev.candles)) for (const c of prev.candles as Candle[]) byT.set(c.t, c);
       for (const c of fresh) byT.set(c.t, c);
       const merged = [...byT.values()].sort((a, b) => a.t - b.t).slice(-SAVED_KEEP);
-      await col.updateOne({ _id: key as never }, { $set: { candles: merged, source, ts: Date.now() } }, { upsert: true });
+      await col.updateOne({ _id: key as never }, { $set: { candles: merged, source, ts: Date.now(), at: new Date() } }, { upsert: true });
     } catch { /* optional */ }
   })();
 }
@@ -400,7 +401,7 @@ export async function GET(req: NextRequest) {
     if (saved) { hit = saved; fromSaved = true; }
   }
   if (hit && Date.now() - hit.ts < CACHE_MS) {
-    return NextResponse.json({ candles: hit.candles, source: hit.source, intervalSec: tf.sec, updatedAt: hit.ts });
+    return edge(NextResponse.json({ candles: hit.candles, source: hit.source, intervalSec: tf.sec, updatedAt: hit.ts }), 5, 30);
   }
 
   // Stale-while-revalidate: anything we've seen in the last 30 min is served instantly, refreshed in the background.
@@ -444,7 +445,7 @@ export async function GET(req: NextRequest) {
     if (cache.size > 400) {
       for (const [k, v] of cache) if (Date.now() - v.ts > 120_000) cache.delete(k);
     }
-    return NextResponse.json({ candles: result.candles, source: result.source, intervalSec: tf.sec, updatedAt: entry.ts });
+    return edge(NextResponse.json({ candles: result.candles, source: result.source, intervalSec: tf.sec, updatedAt: entry.ts }), 5, 30);
   }
 
   const stale = lastGood.get(key);

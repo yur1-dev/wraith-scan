@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { SOLANA_MINT_RE } from "@/lib/market";
 import { listCalls, refreshCalls } from "@/lib/signalCalls";
 
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   try {
     await refreshCalls();
     const calls = await listCalls(mint ? 1 : 120, mint || undefined);
-    return NextResponse.json({ calls, updatedAt: Date.now() });
+    return edge(NextResponse.json({ calls, updatedAt: Date.now() }), 8, 30);
   } catch (e) {
     console.error("[signal-calls GET]", e);
     return NextResponse.json({ calls: [], error: "Could not load tracked calls." }, { status: 500 });

@@ -4,6 +4,7 @@
 // Auth: Vercel cron sends "Authorization: Bearer $CRON_SECRET"; external cron can use ?key=$CRON_SECRET.
 // Free option if your host only runs daily crons: ping this URL every minute from cron-job.org.
 import { NextRequest, NextResponse } from "next/server";
+import { callGet } from "@/lib/internalCall";
 import { getDb } from "@/lib/mongoClient";
 import { refreshCalls, type SignalCall } from "@/lib/signalCalls";
 import type { Signal } from "@/app/api/signals/route";
@@ -62,8 +63,9 @@ export async function GET(req: NextRequest) {
 
   let signals: Signal[] = [];
   try {
-    const r = await fetch(`${req.nextUrl.origin}/api/signals`, { cache: "no-store", signal: AbortSignal.timeout(40_000) });
-    if (r.ok) signals = ((await r.json()) as { signals?: Signal[] }).signals ?? [];
+    // in-process: fetching our own /api/signals over HTTP has no session cookie, so the sign-in gate answered 401 and no
+    // fresh-call alert could ever match the feed
+    signals = (await callGet<{ signals?: Signal[] }>(() => import("@/app/api/signals/route"), `${req.nextUrl.origin}/api/signals`, 40_000)).signals ?? [];
   } catch { /* feed down: still do wins */ }
   await refreshCalls(true).catch(() => undefined);
 

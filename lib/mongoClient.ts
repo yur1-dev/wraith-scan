@@ -144,6 +144,16 @@ const SCALE_INDEXES: IndexSpec[] = [
   ["token_activity", { userId: 1, mint: 1 }],
   ["telegram_links", { token: 1 }],
   ["positions", { userId: 1, mint: 1, status: 1 }],
+  // wallet intel: "which earlier calls did these wallets buy" + the scoreboard prune
+  ["signal_calls", { buyers: 1 }],
+  ["wallet_stats", { lastSeen: 1 }],
+  // one analysis thread per token; the TTL retires threads nobody opened for two weeks (the `at` Date is set on every write)
+  ["token_analysis", { mint: 1 }, { unique: true }],
+  ["token_analysis", { mint: 1 }],
+  ["token_analysis", { at: 1 }, { expireAfterSeconds: 14 * 24 * 3600 }],
+  // saved chart history is the biggest storage item (up to ~70KB per token x timeframe): readable for 24h, so keep 2 days
+  ["chart_candles", { at: 1 }, { expireAfterSeconds: 2 * 24 * 3600 }],
+  ["tokenHistory", { userId: 1, seenAt: -1 }],
   // dedupe markers for Telegram alerts: nothing reads them after a few weeks, so let Mongo delete them
   ["tg_sent", { at: 1 }, { expireAfterSeconds: 30 * 24 * 3600 }],
 ];
@@ -158,6 +168,15 @@ async function ensureScaleIndexes(): Promise<void> {
       catch (e) { console.warn(`[mongoClient] index ${col} ${JSON.stringify(spec)} skipped:`, e instanceof Error ? e.message : e); }
     }
     console.log(`[mongoClient] Scale indexes ensured (${ok}/${SCALE_INDEXES.length})`);
+    // one-off: chart history saved before the TTL field existed would never expire. Readers ignore it after 24h anyway.
+    try {
+      const state = db.collection<{ _id: string; at: Date }>("tg_state");
+      if (!(await state.findOne({ _id: "chart_candles_legacy_cleanup" }))) {
+        const r = await db.collection("chart_candles").deleteMany({ at: { $exists: false }, ts: { $lt: Date.now() - 24 * 3600_000 } });
+        await state.updateOne({ _id: "chart_candles_legacy_cleanup" }, { $set: { at: new Date() } }, { upsert: true });
+        if (r.deletedCount) console.log(`[mongoClient] removed ${r.deletedCount} stale saved charts`);
+      }
+    } catch { /* optional */ }
   } catch (e) {
     console.warn("[mongoClient] scale indexes failed:", e instanceof Error ? e.message : e);
   }

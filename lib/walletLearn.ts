@@ -5,6 +5,7 @@
 // Wallets that keep showing up in winners become "proven"; wallets that keep showing up in dumps become "repeat dumpers"
 // (insiders / snipers). lib/signalIntel.ts reads this at signal time. No network calls: pure Mongo.
 
+import type { Db } from "mongodb";
 import { getDb } from "@/lib/mongoClient";
 import type { SignalCall } from "@/lib/signalCalls";
 
@@ -23,6 +24,16 @@ export function outcomeOf(c: Pick<SignalCall, "spottedMcap" | "peakMcap" | "last
 
 let lastRun = 0;
 let running = false;
+let lastPrune = 0;
+
+/** Keeps the scoreboard collections bounded: shadow calls are only useful until they have been learned from, and a wallet seen once a month ago says nothing. */
+async function prune(db: Db): Promise<void> {
+  if (Date.now() - lastPrune < 6 * 3_600_000) return;
+  lastPrune = Date.now();
+  const now = Date.now();
+  await db.collection("signal_calls").deleteMany({ shadow: true, spottedAt: { $lt: now - 14 * 86_400_000 } });
+  await db.collection("wallet_stats").deleteMany({ n: { $lte: 1 }, lastSeen: { $lt: now - 30 * 86_400_000 } });
+}
 
 export async function learnMatured(limit = 25): Promise<{ calls: number; wallets: number } | null> {
   if (running || Date.now() - lastRun < 5 * 60_000) return null;
@@ -30,6 +41,7 @@ export async function learnMatured(limit = 25): Promise<{ calls: number; wallets
   lastRun = Date.now();
   try {
     const db = await getDb();
+    void prune(db).catch(() => undefined);
     const calls = db.collection<SignalCall & { learned?: boolean; buyers?: string[] }>("signal_calls");
     const now = Date.now();
     const due = await calls

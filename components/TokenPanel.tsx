@@ -6,6 +6,7 @@
 // every number on screen comes from one consistent snapshot.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { createPortal } from "react-dom";
 import { ArrowLeft, Bookmark, Check, Copy, ExternalLink, Globe, Link2, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -196,7 +197,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
       } catch { /* optional */ }
     };
     void run();
-    const t = setInterval(run, 60_000);
+    const t = visibleInterval(run, 60_000);
     return () => { alive = false; clearInterval(t); };
   }, [mint]);
 
@@ -365,7 +366,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
         .then((d: { solUsd?: number } | null) => { if (alive && d?.solUsd) solUsdRef.current = d.solUsd; })
         .catch(() => undefined);
     void load();
-    const t = setInterval(load, 60_000);
+    const t = visibleInterval(load, 60_000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 
@@ -452,7 +453,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
       }
     };
     void run();
-    const t = setInterval(run, 60_000);
+    const t = visibleInterval(run, 60_000);
     return () => {
       alive = false;
       clearInterval(t);

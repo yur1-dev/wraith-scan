@@ -1,6 +1,7 @@
 // GET /api/token-holders?mint= → top 20 holder wallets (owner-resolved, one RPC round trip each) + concentration.
 // Server side so the browser never hammers a public RPC with 20+ calls (that is why the tab said "unavailable").
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { SOLANA_MINT_RE } from "@/lib/market";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
   const mint = req.nextUrl.searchParams.get("mint") ?? "";
   if (!SOLANA_MINT_RE.test(mint)) return NextResponse.json({ error: "Invalid mint" }, { status: 400 });
   const hit = cache.get(mint);
-  if (hit && Date.now() - hit.ts < 30_000) return NextResponse.json(hit.body);
+  if (hit && Date.now() - hit.ts < 30_000) return edge(NextResponse.json(hit.body), 15, 60);
 
   type Largest = { value: { address: string; amount: string; decimals: number; uiAmount: number | null }[] };
   const [largest, supply] = await Promise.all([
@@ -49,5 +50,5 @@ export async function GET(req: NextRequest) {
   const holders = [...agg.entries()].map(([wallet, quantity]) => ({ wallet, quantity, share: total > 0 ? (quantity / total) * 100 : 0 })).sort((a, b) => b.quantity - a.quantity);
   const body = { holders, top10: holders.slice(0, 10).reduce((s, h) => s + h.share, 0), total };
   cache.set(mint, { ts: Date.now(), body });
-  return NextResponse.json(body);
+  return edge(NextResponse.json(body), 15, 60);
 }

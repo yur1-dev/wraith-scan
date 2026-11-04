@@ -3,7 +3,7 @@
 import "@/app/site.css";
 import "./landing.css";
 import Link from "next/link";
-import { Bricolage_Grotesque } from "next/font/google";
+import localFont from "next/font/local";
 import ChainLogo from "@/components/ChainLogo";
 import { TIERS, TIER_ORDER, type TierKey } from "@/lib/tiers";
 import TierGlyph from "@/components/TierGlyph";
@@ -14,7 +14,8 @@ import DownloadApp from "./DownloadApp";
 import { CursorGlow, Magnetic, Reveal, TiltFrame } from "./Motion";
 import { BOT, CHAINS, FAQ, HERO, PORTAL, SHOWCASE, SOON, TELEGRAM_STEPS } from "./content";
 
-const display = Bricolage_Grotesque({ subsets: ["latin"], weight: ["500", "700", "800"], display: "swap", variable: "--lp-display" });
+// Self-hosted (variable wght 200-800): Turbopack's next/font/google chokes on Google's new "fonts.gstatic.com/l/font?kit=..." URLs.
+const display = localFont({ src: "./fonts/bricolage-grotesque-latin-wght.woff2", weight: "200 800", style: "normal", display: "swap", variable: "--lp-display" });
 
 const TIER_COLOR: Record<TierKey, string> = { GHOST: "#8d8d99", SHADE: "#38bdf8", SPECTER: "#c084fc", WRAITH: "#ff7b3d" };
 const NEED: Record<TierKey, string> = { GHOST: "No OMEN needed", SHADE: "Hold 250,000 OMEN", SPECTER: "Hold 500,000 OMEN", WRAITH: "Hold 1,000,000 OMEN" };

@@ -1,18 +1,20 @@
 // GET /api/tape → Wraith's own live tape: top signals, recent winners, and the 7-day call record. 20s cache.
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { getDb } from "@/lib/mongoClient";
 import type { SignalCall } from "@/lib/signalCalls";
 import type { Signal } from "@/app/api/signals/route";
+import { callGet } from "@/lib/internalCall";
 
 let cache: { ts: number; body: unknown } | null = null;
 
 export async function GET(req: NextRequest) {
-  if (cache && Date.now() - cache.ts < 20_000) return NextResponse.json(cache.body);
+  if (cache && Date.now() - cache.ts < 20_000) return edge(NextResponse.json(cache.body), 20, 60);
 
   let signals: Signal[] = [];
   try {
-    const r = await fetch(`${req.nextUrl.origin}/api/signals`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-    if (r.ok) signals = ((await r.json()) as { signals?: Signal[] }).signals ?? [];
+    // in-process: a server-side fetch to our own URL has no session cookie and gets a 401 from the sign-in gate
+    signals = (await callGet<{ signals?: Signal[] }>(() => import("@/app/api/signals/route"), `${req.nextUrl.origin}/api/signals`, 20_000)).signals ?? [];
   } catch { /* tape still shows wins */ }
 
   let wins: { address: string; chain: string; symbol: string; x: number; mcap: number }[] = [];
@@ -36,5 +38,5 @@ export async function GET(req: NextRequest) {
     stats,
   };
   cache = { ts: Date.now(), body };
-  return NextResponse.json(body);
+  return edge(NextResponse.json(body), 20, 60);
 }

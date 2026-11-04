@@ -9,6 +9,7 @@
 // token cost ONE upstream request.
 
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { SOLANA_MINT_RE, type MarketToken } from "@/lib/market";
 import {
   arr,
@@ -155,7 +156,7 @@ export async function GET(request: NextRequest) {
   if (sandboxTok) return NextResponse.json(await sandboxSnapshot(sandboxTok));
 
   const hit = cache.get(mint);
-  if (hit && Date.now() - hit.ts < CACHE_MS) return NextResponse.json(hit.data);
+  if (hit && Date.now() - hit.ts < CACHE_MS) return edge(NextResponse.json(hit.data), 2, 3);
   // Stale-while-revalidate: answer instantly from the last good snapshot and refresh behind the scenes.
   if (hit && Date.now() - hit.ts < 10 * 60_000 && !inflight.has(mint)) {
     const bg = build(mint).then((d) => { if (d) cache.set(mint, { data: d, ts: Date.now() }); return d; }).catch(() => null).finally(() => inflight.delete(mint));
@@ -181,7 +182,7 @@ export async function GET(request: NextRequest) {
       const cutoff = Date.now() - 60_000;
       for (const [k, v] of cache) if (v.ts < cutoff) cache.delete(k);
     }
-    return NextResponse.json(data);
+    return edge(NextResponse.json(data), 2, 3);
   }
   // Serve a recent snapshot rather than an error flash while providers hiccup.
   if (hit && Date.now() - hit.ts < 120_000) return NextResponse.json({ ...hit.data, stale: true });

@@ -7,12 +7,13 @@
 // available behind "Deep scan".
 
 import { swrRead, swrWrite } from "@/lib/swrCache";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Flame, LayoutGrid, List, Lock, Radar, RefreshCw, Sparkles, Zap } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
 import { changeColor, fmtAge, fmtPct, fmtUsd, type MarketToken } from "@/lib/market";
 import { toMeme } from "@/lib/tokenMeme";
 import { TokenIcon } from "@/components/TokenIcon";
+import { UpdatedAgo } from "@/components/UpdatedAgo";
 import ChainLogo from "@/components/ChainLogo";
 import { CHAINS } from "@/lib/chains";
 import { useWraithTier } from "@/hooks/useWraithTier";
@@ -108,7 +109,7 @@ function ScoreRing({ score, tier, locked }: { score: number; tier: "HOT" | "WATC
   );
 }
 
-function Card({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; showScore: boolean }) {
+function CardBase({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; showScore: boolean }) {
   const t = s.token;
   return (
     <div className="sg-card" role="link" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}>
@@ -135,7 +136,7 @@ function Card({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; showSco
   );
 }
 
-function ListRow({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; showScore: boolean }) {
+function ListRowBase({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; showScore: boolean }) {
   const t = s.token;
   return (
     <div className="wx-trow sg-trow" role="link" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}>
@@ -156,7 +157,7 @@ function ListRow({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; show
   );
 }
 
-function RailRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
+function RailRowBase({ s, onOpen }: { s: Signal; onOpen: () => void }) {
   const t = s.token;
   return (
     <button type="button" className="sg-rail-row" onClick={onOpen}>
@@ -173,6 +174,54 @@ function RailRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
   );
 }
 
+// Re-render a row only when something it shows changed (onOpen is a new closure every render and is not compared).
+const sameSig = (a: Signal, b: Signal) =>
+  a === b || (
+    a.token.address === b.token.address && a.score === b.score && a.tier === b.tier &&
+    a.token.symbol === b.token.symbol && a.token.name === b.token.name && a.token.imageUrl === b.token.imageUrl &&
+    a.token.mcap === b.token.mcap && a.token.liquidity === b.token.liquidity && a.token.volume.h1 === b.token.volume.h1 &&
+    a.token.change.h1 === b.token.change.h1 && a.token.createdAt === b.token.createdAt &&
+    a.tags.join("|") === b.tags.join("|") && a.risks.join("|") === b.risks.join("|")
+  );
+const Card = memo(CardBase, (p, n) => p.showScore === n.showScore && sameSig(p.s, n.s));
+const ListRow = memo(ListRowBase, (p, n) => p.showScore === n.showScore && sameSig(p.s, n.s));
+const RailRow = memo(RailRowBase, (p, n) => sameSig(p.s, n.s));
+
+/**
+ * Live overlay: every ~4s refresh price / mcap / % for the best Solana rows. One call that every user shares
+ * (the endpoint is cached at the edge for 3s), so 1,000 open scanners cost a handful of upstream requests.
+ */
+function useLiveSignals(base: Signal[]): Signal[] {
+  const [live, setLive] = useState<Record<string, Partial<MarketToken>>>({});
+  const mintsKey = useMemo(
+    () => base.filter((s) => !s.token.chain || s.token.chain === "solana").slice(0, 30).map((s) => s.token.address).join(","),
+    [base],
+  );
+  useEffect(() => {
+    if (!mintsKey) return;
+    let alive = true;
+    const tick = async () => {
+      if (document.hidden) return;
+      try {
+        const r = await fetch(`/api/market-live?mints=${mintsKey}`, { cache: "no-store" });
+        if (!r.ok || !alive) return;
+        const d: { prices?: Record<string, Partial<MarketToken>> } = await r.json();
+        if (alive && d.prices && Object.keys(d.prices).length) setLive(d.prices);
+      } catch { /* keep the last values */ }
+    };
+    const t = setInterval(tick, 4000);
+    return () => { alive = false; clearInterval(t); };
+  }, [mintsKey]);
+  return useMemo(
+    () => base.map((s) => {
+      const p = live[s.token.address];
+      if (!p) return s;
+      return { ...s, token: { ...s.token, priceUsd: p.priceUsd || s.token.priceUsd, mcap: p.mcap || s.token.mcap, liquidity: p.liquidity || s.token.liquidity, change: p.change ?? s.token.change } };
+    }),
+    [base, live],
+  );
+}
+
 export default function SignalScanner({
   onSelectMeme,
   deepScan,
@@ -180,7 +229,8 @@ export default function SignalScanner({
   onSelectMeme: (meme: MemeTrend) => void;
   deepScan: ReactNode;
 }) {
-  const { signals, loading, error, updatedAt, reload } = useSignals();
+  const { signals: baseSignals, loading, error, updatedAt, reload } = useSignals();
+  const signals = useLiveSignals(baseSignals);
   const { canUse: can } = useWraithTier();
   const showScore = can("ai_score");
   const showRail = can("live_signals_view");
@@ -196,13 +246,6 @@ export default function SignalScanner({
     setViewState(v);
     try { localStorage.setItem("wraith_board_view", v); } catch { /* ignore */ }
   };
-  const [, force] = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(() => force((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-
   const byChain = useMemo(() => (chainFilter === "all" ? signals : signals.filter((s) => (s.token.chain ?? "solana") === chainFilter)), [signals, chainFilter]);
   const chainCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -233,7 +276,6 @@ export default function SignalScanner({
   }, [byChain, railTab]);
 
   const open = (s: Signal) => onSelectMeme(toMeme(s.token));
-  const secondsAgo = updatedAt ? Math.max(0, Math.round((Date.now() - updatedAt) / 1000)) : null;
   const hotCount = signals.filter((s) => s.tier === "HOT").length;
 
   return (
@@ -271,7 +313,7 @@ export default function SignalScanner({
         <header className="sg-head">
           <div>
             <div className="sg-title"><Radar size={15} /> Discover <span className="sg-live"><i />{error && !signals.length ? "Offline" : "Live"}</span></div>
-            <p>{signals.length ? `${signals.length} scored · ${hotCount} top picks${secondsAgo !== null ? ` · updated ${secondsAgo}s ago` : ""}` : loading ? "Scoring live markets…" : "No tokens passed the filters yet."}</p>
+            <p>{signals.length ? <>{`${signals.length} scored · ${hotCount} top picks`}{updatedAt ? <> · updated <UpdatedAgo at={updatedAt} />s ago</> : null}</> : loading ? "Scoring live markets…" : "No tokens passed the filters yet."}</p>
           </div>
           <div className="sg-head-actions">
             <div className="wx-seg" aria-label="View">

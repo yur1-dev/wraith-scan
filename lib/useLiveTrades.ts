@@ -31,6 +31,16 @@ export function useLiveTrades(mint: string, onTrade: (t: LiveTrade) => void, ena
     let alive = true;
     let retry = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A busy token can print 20+ trades a second. Handing each one to React separately means 20 renders a second of the
+    // whole token page. Collect them for ~120ms and deliver together: React batches every setState of one tick into
+    // a single render, so the page still updates ~8 times a second, which looks live but costs a fraction.
+    const queue: LiveTrade[] = [];
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      flushTimer = undefined;
+      if (!alive) { queue.length = 0; return; }
+      for (const t of queue.splice(0, queue.length)) cb.current(t);
+    };
 
     const connect = () => {
       if (!alive) return;
@@ -54,7 +64,7 @@ export function useLiveTrades(mint: string, onTrade: (t: LiveTrade) => void, ena
           const tokens = Number(m.tokenAmount);
           if (!(sol > 0) || !(tokens > 0)) return;
           const mc = Number(m.marketCapSol);
-          cb.current({
+          queue.push({
             id: String(m.signature ?? `${Date.now()}-${Math.random()}`),
             ts: Date.now(),
             side,
@@ -65,6 +75,8 @@ export function useLiveTrades(mint: string, onTrade: (t: LiveTrade) => void, ena
             wallet: String(m.traderPublicKey ?? ""),
             pool: typeof m.pool === "string" ? m.pool : null,
           });
+          if (queue.length > 300) queue.splice(0, queue.length - 300);
+          if (!flushTimer) flushTimer = setTimeout(flush, 120);
         } catch { /* ignore */ }
       };
       ws.onclose = () => {
@@ -78,6 +90,8 @@ export function useLiveTrades(mint: string, onTrade: (t: LiveTrade) => void, ena
     return () => {
       alive = false;
       if (timer) clearTimeout(timer);
+      if (flushTimer) clearTimeout(flushTimer);
+      queue.length = 0;
       try { ws?.close(); } catch { /* */ }
     };
   }, [mint, enabled]);

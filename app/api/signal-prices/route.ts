@@ -2,6 +2,7 @@
 // Batch market-cap lookup (DexScreener, up to 30 mints) for the Wins board.
 
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { SOLANA_MINT_RE } from "@/lib/market";
 import { arr, getJson, getSolUsd, obj, parseDexPair } from "@/lib/marketProviders";
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
       const old = best.get(t.address);
       if (!old || t.liquidity > old.liquidity) best.set(t.address, { mcap: t.mcap, priceUsd: t.priceUsd, liquidity: t.liquidity, symbol: t.symbol, name: t.name, imageUrl: t.imageUrl });
     }
-    return NextResponse.json({ prices: Object.fromEntries(best) });
+    return edge(NextResponse.json({ prices: Object.fromEntries(best) }), 3, 10);
   } catch {
     return NextResponse.json({ prices: {}, error: "price lookup failed" }, { status: 502 });
   }

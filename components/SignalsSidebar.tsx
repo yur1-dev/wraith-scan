@@ -3,6 +3,7 @@
 // Live signals for the token-page sidebar: same feed as the Scanner, one click to open, one click to save.
 
 import { useEffect, useState } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { Lock, Radar } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
 import type { Signal } from "@/app/api/signals/route";
@@ -25,7 +26,7 @@ export default function SignalsSidebar({ onSelectMeme, selectedMeme }: { onSelec
     let alive = true;
     const run = () => fetch("/api/signals", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d: { signals?: Signal[] } | null) => { if (alive && d?.signals) setSignals(d.signals); }).catch(() => undefined);
     void run();
-    const t = window.setInterval(run, 20_000);
+    const t = visibleInterval(run, 20_000);
     return () => { alive = false; window.clearInterval(t); };
   }, [allowed]);
 

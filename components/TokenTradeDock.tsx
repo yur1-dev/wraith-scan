@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { usePrivy, useWallets as useEthereumWallets } from "@privy-io/react-auth";
@@ -302,7 +303,7 @@ function EmbeddedTradeDock({ meme, initialMode }: Props) {
       }
     };
     void refreshPrices();
-    const timer = window.setInterval(() => void refreshPrices(), 5_000);
+    const timer = visibleInterval(() => void refreshPrices(), 5_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [mint]);
 

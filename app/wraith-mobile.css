@@ -958,3 +958,22 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 .dt-wi-fam em { font-style: normal; }
 .dt-wi-fam em.up { color: #37d58a; }
 .dt-wi-fam em.dn { color: #e5594a; }
+
+/* ── smoothness pass ───────────────────────────────────────────────────────────────────────────────────────────
+   The floating tab bar blurs everything that scrolls under it, every frame. A 30px blur with three filter functions is
+   the most expensive thing on screen on mid-range Android / WebView; 20px + saturate looks the same and costs about half. */
+@media (max-width: 767px) {
+  .wx-tabbar-pill, .wx-tabbar-search {
+    -webkit-backdrop-filter: blur(20px) saturate(1.8) !important;
+    backdrop-filter: blur(20px) saturate(1.8) !important;
+    transform: translateZ(0);
+  }
+}
+/* taps respond instantly (no 300ms double-tap wait) and never select text by accident while scrolling lists */
+a, button, [role="button"], [role="link"], [role="tab"], .wx-tcard, .sg-card, .wx-trow, .sg-trow { touch-action: manipulation; }
+/* long lists: don't let a scroll chain into the page behind it, and let the browser keep scrolling on the compositor */
+.wx-board-body, .sg-body, .wx-notif-list { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+/* people who ask their phone for less motion get none of the decorative looping animation (and a cooler battery) */
+@media (prefers-reduced-motion: reduce) {
+  .fp-live, .wx-live i, .wx-skel, .wsk-b::after { animation: none !important; }
+}

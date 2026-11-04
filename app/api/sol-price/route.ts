@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const solUsd = await getSolUsd();
-  return NextResponse.json({ solUsd }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ solUsd }, { headers: { "Cache-Control": "public, max-age=0, s-maxage=15, stale-while-revalidate=60" } });
 }

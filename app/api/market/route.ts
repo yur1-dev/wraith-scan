@@ -10,6 +10,7 @@
 // empty board.
 
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { cleanSym, cleanName } from "@/lib/cleanText";
 function scrub<T extends { symbol?: string; name?: string }>(t: T[]): T[] { return t.map((x) => ({ ...x, symbol: cleanSym(x.symbol), name: cleanName(x.name) })); }
 import { SOLANA_MINT_RE, type MarketCategory, type MarketToken } from "@/lib/market";
@@ -143,7 +144,7 @@ export async function GET(req: NextRequest) {
 
   const hit = cache.get(category);
   if (hit && Date.now() - hit.ts < CACHE_MS) {
-    return NextResponse.json({ tokens: scrub(hit.tokens), category, source: hit.source, updatedAt: hit.ts, stale: false });
+    return edge(NextResponse.json({ tokens: scrub(hit.tokens), category, source: hit.source, updatedAt: hit.ts, stale: false }), 15, 120);
   }
 
   let job = inflight.get(category);
@@ -159,7 +160,7 @@ export async function GET(req: NextRequest) {
   const fresh = await job;
   if (fresh) {
     cache.set(category, fresh);
-    return NextResponse.json({ tokens: scrub(fresh.tokens), category, source: fresh.source, updatedAt: fresh.ts, stale: false });
+    return edge(NextResponse.json({ tokens: scrub(fresh.tokens), category, source: fresh.source, updatedAt: fresh.ts, stale: false }), 15, 120);
   }
 
   if (hit && Date.now() - hit.ts < STALE_MS) {

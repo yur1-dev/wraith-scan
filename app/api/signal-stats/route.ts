@@ -1,5 +1,6 @@
 // GET /api/signal-stats → Wraith's real call record, computed from every tracked call (peak vs. market cap when spotted).
 import { NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { getDb } from "@/lib/mongoClient";
 import type { SignalCall } from "@/lib/signalCalls";
 
@@ -8,7 +9,7 @@ let cache: { ts: number; body: unknown } | null = null;
 const DAY = 86_400_000;
 
 export async function GET() {
-  if (cache && Date.now() - cache.ts < 30_000) return NextResponse.json(cache.body);
+  if (cache && Date.now() - cache.ts < 30_000) return edge(NextResponse.json(cache.body), 30, 120);
   try {
     const db = await getDb();
     const all = await db.collection<SignalCall>("signal_calls").find({ spottedAt: { $gt: Date.now() - 30 * DAY }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
@@ -33,7 +34,7 @@ export async function GET() {
     }));
     const body = { d1: windowOf(DAY), d7: windowOf(7 * DAY), d30: windowOf(30 * DAY), top, updatedAt: Date.now() };
     cache = { ts: Date.now(), body };
-    return NextResponse.json(body);
+    return edge(NextResponse.json(body), 30, 120);
   } catch (e) {
     console.error("[signal-stats]", e);
     return NextResponse.json({ error: "stats unavailable" }, { status: 500 });

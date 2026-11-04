@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowUpRight, Radio } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
@@ -57,7 +58,7 @@ export default function TraderFypFeed({ onSelectMeme }: { onSelectMeme: (meme: M
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 60_000);
+    const timer = visibleInterval(() => void refresh(), 60_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
 

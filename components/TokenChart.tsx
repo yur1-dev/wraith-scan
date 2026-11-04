@@ -6,6 +6,7 @@
 // loading / empty / error states. Data comes from /api/token-chart.
 
 import { createPortal } from "react-dom";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AreaSeries,
@@ -599,7 +600,7 @@ export default function TokenChart({
       } catch { /* optional */ }
     };
     void run();
-    const t = setInterval(run, 45_000);
+    const t = visibleInterval(run, 45_000);
     return () => { alive = false; clearInterval(t); };
   }, [mint, showTrades]);
 

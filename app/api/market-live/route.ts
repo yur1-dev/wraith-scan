@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { SOLANA_MINT_RE, type MarketToken } from "@/lib/market";
 import { arr, getJson, getSolUsd, obj, parseDexPair } from "@/lib/marketProviders";
 
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (!mints.length) return NextResponse.json({ prices: {} });
   const key = mints.join(",");
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.ts < CACHE_MS) return NextResponse.json({ prices: hit.data });
+  if (hit && Date.now() - hit.ts < CACHE_MS) return edge(NextResponse.json({ prices: hit.data }), 3, 6);
   try {
     const [solUsd, raw] = await Promise.all([
       getSolUsd(),
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
     }
     cache.set(key, { ts: Date.now(), data });
     if (cache.size > 200) cache.clear();
-    return NextResponse.json({ prices: data });
+    return edge(NextResponse.json({ prices: data }), 3, 6);
   } catch {
     return NextResponse.json({ prices: {} }, { status: 502 });
   }

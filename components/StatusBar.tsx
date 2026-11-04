@@ -1,6 +1,7 @@
 "use client";
 // Wraith live tape: the platform's own top signals and winners scrolling along the bottom, plus the 7-day record and Telegram.
 import { useEffect, useState } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { useRouter } from "next/navigation";
 import ChainLogo from "@/components/ChainLogo";
 import { changeColor, fmtPct, fmtUsd } from "@/lib/market";
@@ -28,7 +29,7 @@ export default function StatusBar() {
       } catch { if (alive) setOk(false); }
     };
     void load();
-    const t = window.setInterval(() => void load(), 30_000);
+    const t = visibleInterval(() => void load(), 30_000);
     return () => { alive = false; window.clearInterval(t); };
   }, []);
 

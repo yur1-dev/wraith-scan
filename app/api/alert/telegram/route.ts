@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { callGet } from "@/lib/internalCall";
 import { getAppSession } from "@/lib/session";
 
 import { chainName, esc, footer, fmtUsd, header, rule, scoreBar, tokenKeyboard } from "@/lib/telegramUi";
@@ -71,8 +72,8 @@ export async function POST(req: NextRequest) {
       // prefer the full scanner detail when this token is in the live feed
       let sig: Signal | undefined;
       try {
-        const r = await fetch(`${req.nextUrl.origin}/api/signals`, { cache: "no-store", signal: AbortSignal.timeout(8000) });
-        if (r.ok) sig = ((await r.json()) as { signals?: Signal[] }).signals?.find((x) => x.token.address === ca);
+        const feed = await callGet<{ signals?: Signal[] }>(() => import("@/app/api/signals/route"), `${req.nextUrl.origin}/api/signals`, 8000);
+        sig = feed.signals?.find((x) => x.token.address === ca);
       } catch { /* fall back to the client payload */ }
       const text = sig
         ? signalMessage(sig)

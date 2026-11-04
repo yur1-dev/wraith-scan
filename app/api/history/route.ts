@@ -19,6 +19,7 @@ export async function GET() {
     .collection<ITokenHistory>(TOKEN_HISTORY_COLLECTION)
     .find({ userId: session.user.id })
     .sort({ seenAt: -1 })
+    .limit(300)
     .toArray();
 
   return NextResponse.json({ entries });

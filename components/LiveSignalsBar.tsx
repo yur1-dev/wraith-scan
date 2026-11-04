@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { createPortal } from "react-dom";
 import { MemeTrend } from "@/app/app/page";
 import { useWraithTier } from "@/hooks/useWraithTier";
@@ -247,13 +248,13 @@ export default function LiveSignalsBar({
       }
     }
     read();
-    const t = setInterval(read, 12_000);
+    const t = visibleInterval(read, 12_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    const t = visibleInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
 

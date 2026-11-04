@@ -568,7 +568,8 @@ ${safeContext ? `\nAdditional context: ${safeContext}` : ""}`;
         const trimmed = entries.length > THREAD_MAX ? [entries[0], ...entries.slice(entries.length - (THREAD_MAX - 1))] : entries;
         doc = { ...stored, checkedAt: entry.ts, entries: trimmed };
       }
-      await col.updateOne({ mint: rawContract }, { $set: doc }, { upsert: true });
+      // `at` is a real Date so the TTL index (mongoClient.ts) can retire threads nobody has opened for two weeks
+      await col.updateOne({ mint: rawContract }, { $set: { ...doc, at: new Date() } }, { upsert: true });
       return NextResponse.json(threadPayload(doc));
     } catch {
       /* fall through to the plain response */

@@ -1,5 +1,6 @@
 // GET /api/ticker?t=<address>|<chain>,…  → majors (BTC, ETH, SOL, BNB) + live mcap/24h for pinned tokens. 30s cache.
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { arr, getJson, num, obj } from "@/lib/marketProviders";
 import { EVM_ADDR_RE, chainOf } from "@/lib/chains";
 import { SOLANA_MINT_RE } from "@/lib/market";
@@ -54,5 +55,5 @@ export async function GET(req: NextRequest) {
       return ok && chain ? [{ address, chain }] : [];
     });
   const [m, tokens] = await Promise.all([majors(), Promise.all(items.map((i) => pinned(i.address, i.chain)))]);
-  return NextResponse.json({ majors: m, tokens: tokens.filter(Boolean), ok: m.length > 0 });
+  return edge(NextResponse.json({ majors: m, tokens: tokens.filter(Boolean), ok: m.length > 0 }), 30, 120);
 }

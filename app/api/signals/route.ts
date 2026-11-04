@@ -11,7 +11,9 @@ import { recordSignals, refreshCalls, type RecordInput } from "@/lib/signalCalls
 import { enrichSignals, featuresOf, type SignalIntel } from "@/lib/signalIntel";
 import { getSolUsd, IGNORED_MINTS, IGNORED_SYMBOLS } from "@/lib/marketProviders";
 import { evmCandidates } from "@/lib/evmScan";
-import { dexCandidates, jupiterCandidates, jupiterEnrich, type Candidate, type ScanMeta } from "@/lib/scannerSources";
+import { dexCandidates, jupiterCandidates, jupiterEnrich, pumpCandidates, type Candidate, type ScanMeta } from "@/lib/scannerSources";
+import { callGet } from "@/lib/internalCall";
+import { edge } from "@/lib/edge";
 
 export type SignalTier = "HOT" | "WATCH";
 export interface Signal {
@@ -32,6 +34,8 @@ let inflight: Promise<Built> | null = null;
 const HOT_MIN = Number(process.env.SIGNAL_HOT_MIN) || 72;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+const withBudget = <T,>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
+  Promise.race([p.catch(() => fallback), new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
 const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n)));
 
 /**
@@ -144,17 +148,19 @@ async function build(origin: string): Promise<Built> {
   const solUsd = await getSolUsd();
   const cats: MarketCategory[] = ["trending", "new", "gainers", "volume"];
 
-  const [market, jup, dex, evm] = await Promise.all([
+  // The market lane is called in-process: a server-side fetch to our own URL hits the sign-in gate (no cookie) and 401s,
+  // which silently dropped this whole lane. A slow provider never holds the feed up: whatever has not answered in 6s is
+  // skipped this round (the market route keeps working in the background and has it cached next time).
+  const [market, jup, dex, pump, evm] = await Promise.all([
     Promise.allSettled(
       cats.map(async (c) => {
-        const res = await fetch(`${origin}/api/market?category=${c}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
-        if (!res.ok) throw new Error(String(res.status));
-        const data: { tokens?: MarketToken[] } = await res.json();
+        const data = await callGet<{ tokens?: MarketToken[] }>(() => import("@/app/api/market/route"), `${origin}/api/market?category=${c}`, 6_000);
         return data.tokens ?? [];
       }),
     ),
     jupiterCandidates(solUsd).catch(() => [] as Candidate[]),
     dexCandidates(solUsd).catch(() => [] as MarketToken[]),
+    withBudget(pumpCandidates(solUsd), 6_000, [] as MarketToken[]),
     evmCandidates().catch(() => [] as Candidate[]),
   ]);
 
@@ -174,8 +180,8 @@ async function build(origin: string): Promise<Built> {
       if (!have.token.createdAt) have.token.createdAt = c.token.createdAt;
     }
   }
-  // DexScreener: fill gaps.
-  for (const t of dex) {
+  // DexScreener + pump.fun live discovery (what is trading right now and the newest launches): fill gaps.
+  for (const t of [...dex, ...pump]) {
     const have = byAddr.get(t.address);
     if (!have) byAddr.set(t.address, { token: t, meta: {} });
     else if (!have.token.imageUrl && t.imageUrl) have.token.imageUrl = t.imageUrl;
@@ -242,7 +248,7 @@ async function build(origin: string): Promise<Built> {
 
 export async function GET(req: NextRequest) {
   if (cache && Date.now() - cache.ts < CACHE_MS) {
-    return NextResponse.json({ signals: cache.signals, updatedAt: cache.ts });
+    return edge(NextResponse.json({ signals: cache.signals, updatedAt: cache.ts }), 10, 60);
   }
   if (!inflight) {
     inflight = build(req.nextUrl.origin).finally(() => { inflight = null; });
@@ -254,7 +260,7 @@ export async function GET(req: NextRequest) {
     // Persist new calls and refresh tracked prices for everyone (awaited so serverless does not drop it).
     await recordSignals(built.records).catch(() => undefined);
     await refreshCalls().catch(() => undefined);
-    return NextResponse.json({ signals: cache.signals, updatedAt: cache.ts });
+    return edge(NextResponse.json({ signals: cache.signals, updatedAt: cache.ts }), 10, 60);
   } catch {
     if (cache) return NextResponse.json({ signals: cache.signals, updatedAt: cache.ts, stale: true });
     return NextResponse.json({ signals: [], error: "Signal sources unreachable" }, { status: 502 });

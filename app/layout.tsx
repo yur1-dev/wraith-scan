@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, Anton } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import "./wraith-ui.css";
 import "./wraith-polish.css";
@@ -11,16 +11,20 @@ import FcmLink from "@/components/FcmLink";
 import SwRegister from "@/components/SwRegister";
 import { WraithTierProvider } from "@/hooks/useWraithTier";
 
-const mono = IBM_Plex_Mono({
-  weight: ["400", "500", "700"],
-  subsets: ["latin"],
+// Self-hosted (latin subset). next/font/google downloads from Google at build/dev time, which broke Turbopack once Google
+// switched some families to "fonts.gstatic.com/l/font?kit=..." URLs, and makes every build depend on Google being up.
+const mono = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-mono-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/ibm-plex-mono-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/ibm-plex-mono-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
   display: "swap",
   variable: "--font-mono",
 });
 
-const display = Anton({
-  weight: "400",
-  subsets: ["latin"],
+const display = localFont({
+  src: [{ path: "./fonts/anton-latin-400-normal.woff2", weight: "400", style: "normal" }],
   display: "swap",
   variable: "--font-display",
 });

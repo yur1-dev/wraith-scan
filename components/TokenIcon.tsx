@@ -73,6 +73,8 @@ export function TokenIcon({
         alt={symbol}
         width={size}
         height={size}
+        loading="lazy"
+        decoding="async"
         onError={() => setFailedSource({ key: sourceKey, count: idx + 1 })}
         style={{
           width: size,

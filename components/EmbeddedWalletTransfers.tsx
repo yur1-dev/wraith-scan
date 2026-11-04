@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { useConnection } from "@solana/wallet-adapter-react";
 import {
   LAMPORTS_PER_SOL,
@@ -83,7 +84,7 @@ export default function EmbeddedWalletTransfers({
       } catch { /* ignore */ }
     };
     void refresh();
-    const t = window.setInterval(() => void refresh(), 10_000);
+    const t = visibleInterval(() => void refresh(), 10_000);
     return () => { active = false; window.clearInterval(t); };
   }, [connection, publicKey]);
 

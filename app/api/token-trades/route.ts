@@ -3,6 +3,7 @@
 // Feeds the "Swaps" tab + live trade tape on the token page.
 
 import { NextRequest, NextResponse } from "next/server";
+import { edge } from "@/lib/edge";
 import { SOLANA_MINT_RE } from "@/lib/market";
 import { arr, GECKO, GECKO_HEADERS, getJson, getSolUsd, num, obj, resolvePool } from "@/lib/marketProviders";
 import { getSandboxToken } from "@/lib/devnetTokens";
@@ -109,11 +110,11 @@ export async function GET(req: NextRequest) {
       wallet: String(d.wallet ?? ""),
       tx: String(d._id),
     }));
-    return NextResponse.json({ trades });
+    return edge(NextResponse.json({ trades }), 4, 15);
   }
 
   const hit = cache.get(mint);
-  if (hit && Date.now() - hit.ts < CACHE_MS) return NextResponse.json({ trades: hit.trades });
+  if (hit && Date.now() - hit.ts < CACHE_MS) return edge(NextResponse.json({ trades: hit.trades }), 4, 15);
 
   let job = inflight.get(mint);
   if (!job) {
@@ -123,7 +124,7 @@ export async function GET(req: NextRequest) {
   const trades = await job;
   if (trades) {
     cache.set(mint, { trades, ts: Date.now() });
-    return NextResponse.json({ trades });
+    return edge(NextResponse.json({ trades }), 4, 15);
   }
   if (hit) return NextResponse.json({ trades: hit.trades, stale: true });
   return NextResponse.json({ trades: [] });

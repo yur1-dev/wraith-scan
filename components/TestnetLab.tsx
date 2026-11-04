@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { Connection, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/react-auth/solana";
@@ -66,7 +67,7 @@ export default function TestnetLab() {
 
   useEffect(() => {
     void refresh();
-    const t = window.setInterval(() => void refresh(), 6000);
+    const t = visibleInterval(() => void refresh(), 6000);
     return () => window.clearInterval(t);
   }, [refresh]);
 

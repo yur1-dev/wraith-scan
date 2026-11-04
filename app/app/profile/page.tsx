@@ -1,6 +1,7 @@
 "use client";
 
 import { defaultAvatar, defaultCover } from "@/lib/defaultArt";
+import { visibleInterval } from "@/lib/visibleInterval";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -482,7 +483,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     void refreshWalletBalance();
-    const walletTimer = window.setInterval(() => void refreshWalletBalance(), 5_000);
+    const walletTimer = visibleInterval(() => void refreshWalletBalance(), 5_000);
     return () => window.clearInterval(walletTimer);
   }, [refreshWalletBalance]);
 
@@ -502,7 +503,7 @@ export default function ProfilePage() {
       }
     };
     void loadPrices();
-    const interval = window.setInterval(loadPrices, 3_000);
+    const interval = visibleInterval(loadPrices, 3_000);
     return () => {
       active = false;
       window.clearInterval(interval);

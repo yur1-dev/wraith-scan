@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, ExternalLink, ShieldAlert, ShieldCheck, Users } from "lucide-react";
 import { TokenCallouts } from "@/components/TokenCallouts";
@@ -141,8 +142,8 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
       } catch { /* optional */ }
     };
     void loadHolders(); void loadCount();
-    const a = window.setInterval(() => void loadHolders(), 30_000);
-    const b = window.setInterval(() => void loadCount(), 60_000);
+    const a = visibleInterval(() => void loadHolders(), 30_000);
+    const b = visibleInterval(() => void loadCount(), 60_000);
     return () => { alive = false; window.clearInterval(a); window.clearInterval(b); };
   }, [mint]);
 
@@ -152,7 +153,7 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
     let alive = true;
     const run = () => fetch(`/api/token-traders?mint=${encodeURIComponent(mint)}`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d: { traders?: Trader[] } | null) => { if (alive && d?.traders) setTraders(d.traders); }).catch(() => undefined);
     void run();
-    const t = window.setInterval(run, 20_000);
+    const t = visibleInterval(run, 20_000);
     window.addEventListener("wraith:trade-recorded", run);
     return () => { alive = false; window.clearInterval(t); window.removeEventListener("wraith:trade-recorded", run); };
   }, [mint]);

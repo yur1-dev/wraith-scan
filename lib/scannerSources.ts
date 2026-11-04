@@ -9,6 +9,7 @@ import { isNum, SOLANA_MINT_RE, type MarketToken } from "@/lib/market";
 import {
   arr, classify, getJson, IGNORED_MINTS, IGNORED_SYMBOLS, num, numOrNull, obj, parseDexPair, type Json,
 } from "@/lib/marketProviders";
+import { pumpJson } from "@/lib/signalIntel";
 
 export interface ScanMeta {
   holders?: number;
@@ -148,6 +149,48 @@ export async function dexCandidates(solUsd: number): Promise<MarketToken[]> {
       }
     } catch {
       /* skip this batch */
+    }
+  }
+  return [...best.values()];
+}
+
+// ── pump.fun live discovery ───────────────────────────────────────────────────────────────────────────────────
+// Aggregators (Jupiter / Gecko) index a launch 1-3 minutes late, and DexScreener's boost / profile lists are paid
+// promotions. pump.fun's own list API sees a coin the second it exists and can sort by "traded most recently".
+// We only take the MINT LIST from it and let DexScreener supply price / volume / txns, so every number has the same
+// shape as the other lanes and the scorer treats them identically. Fails soft: if pump.fun is unreachable or changes
+// shape, this lane just returns [].
+const PUMP_LISTS = [
+  "/coins?offset=0&limit=50&sort=last_trade_timestamp&order=DESC&includeNsfw=false", // trading right now
+  "/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false", // newest launches
+  "/coins?offset=0&limit=50&sort=market_cap&order=DESC&includeNsfw=false", // biggest on the curve (near graduation)
+];
+
+export async function pumpCandidates(solUsd: number): Promise<MarketToken[]> {
+  const lists = await Promise.allSettled(PUMP_LISTS.map((p) => pumpJson(p)));
+  const mints: string[] = [];
+  for (const r of lists) {
+    if (r.status !== "fulfilled" || !r.value) continue;
+    const rows = Array.isArray(r.value) ? r.value : arr(obj(r.value).coins);
+    for (const raw of rows) {
+      const m = obj(raw).mint;
+      if (typeof m === "string" && SOLANA_MINT_RE.test(m) && !mints.includes(m)) mints.push(m);
+    }
+  }
+  if (!mints.length) return [];
+  const batches: string[][] = [];
+  for (let i = 0; i < mints.length && i < 90; i += 30) batches.push(mints.slice(i, i + 30));
+  const settled = await Promise.allSettled(
+    batches.map((b) => getJson(`https://api.dexscreener.com/tokens/v1/solana/${b.join(",")}`, undefined, 8000)),
+  );
+  const best = new Map<string, MarketToken>();
+  for (const r of settled) {
+    if (r.status !== "fulfilled") continue;
+    for (const p of arr(r.value)) {
+      const t = parseDexPair(obj(p), solUsd);
+      if (!t) continue;
+      const old = best.get(t.address);
+      if (!old || t.liquidity > old.liquidity) best.set(t.address, t);
     }
   }
   return [...best.values()];

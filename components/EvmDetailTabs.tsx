@@ -1,6 +1,7 @@
 "use client";
 // Swaps / Holders / Analysis / Traders Intel for EVM tokens (same layout as the Solana TokenDetailTabs).
 import { useEffect, useState } from "react";
+import { visibleInterval } from "@/lib/visibleInterval";
 import { ExternalLink } from "lucide-react";
 import { C } from "@/lib/theme";
 import { TokenCallouts } from "@/components/TokenCallouts";
@@ -38,7 +39,7 @@ export default function EvmDetailTabs({ address, snap, trades, onHolderCount }: 
       } catch { /* keep */ }
     };
     void load();
-    const t = window.setInterval(load, 60_000);
+    const t = visibleInterval(load, 60_000);
     return () => { alive = false; window.clearInterval(t); };
   }, [address, snap.chain]); // eslint-disable-line react-hooks/exhaustive-deps
 

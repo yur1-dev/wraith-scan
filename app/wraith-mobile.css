@@ -376,7 +376,8 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 }
 
 /* Token page: back button (phones only) */
-.wx-back-btn { display: none; }
+.wx-back-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; margin-right: 6px; }
+.wx-back-btn:hover { background: rgba(255,255,255,.05); }
 @media (max-width: 767px) {
   .wx-token-head { flex-wrap: wrap; }
   .wx-back-btn {
@@ -389,4 +390,19 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 /* safety net: a spam token must never widen the page */
 @media (max-width: 767px) {
   html, body { overflow-x: clip; max-width: 100vw; }
+}
+
+
+/* token header, Binance-style: price on top, 4 equal timeframe columns, quiet icon row */
+@media (max-width: 767px) {
+  .wx-pricebar { flex-wrap: wrap !important; align-items: stretch !important; gap: 10px !important; }
+  .wx-pricebar > div:first-child { width: 100%; }
+  .wx-changes { display: grid !important; grid-template-columns: repeat(4, 1fr) !important; width: 100% !important; margin-left: 0 !important; gap: 0 !important; border-top: 1px solid var(--border); padding-top: 8px; }
+  .wx-change { display: flex !important; flex-direction: column !important; align-items: center !important; gap: 3px !important; padding: 0 !important; border: 0 !important; background: transparent !important; text-align: center; }
+  .wx-change + .wx-change { border-left: 1px solid var(--border) !important; border-radius: 0 !important; }
+  .wx-change span { font-size: 10px !important; color: var(--text-muted) !important; letter-spacing: .06em; text-transform: uppercase; }
+  .wx-change b { font-size: 13px !important; }
+  .wx-token-actions { width: 100%; justify-content: space-between !important; gap: 0 !important; padding: 4px 2px 0; }
+  .wx-token-actions .wx-icon-btn, .wraith-dashboard .wx-token-actions .wx-icon-btn { width: 40px !important; height: 34px !important; border: 0 !important; background: transparent !important; color: var(--text-muted); }
+  .wx-token-actions .wx-icon-btn.active { color: var(--accent-text, #ff9a63); }
 }

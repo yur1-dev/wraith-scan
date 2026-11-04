@@ -318,7 +318,7 @@ function TokenRow({
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div
+          <div className="wx-tr-sym"
             style={{
               color: "#d0d0d0",
               fontSize: 12,
@@ -338,7 +338,7 @@ function TokenRow({
               </span>
             )}
           </div>
-          <div
+          <div className="wx-tr-name"
             style={{
               color: "#2e2e2e",
               fontSize: 9,
@@ -370,7 +370,7 @@ function TokenRow({
           </div>
         </div>
 
-        <div
+        <div className="wx-tr-mc"
           style={{
             background: "#0d0d0d",
             border: "1px solid #161616",
@@ -388,7 +388,7 @@ function TokenRow({
         </div>
 
         {showOpenCta && (
-          <div
+          <div className="wx-tr-open"
             style={{
               background: "rgba(var(--accent-rgb),0.06)",
               border: "1px solid rgba(var(--accent-rgb),0.24)",
@@ -407,7 +407,7 @@ function TokenRow({
         )}
       </div>
 
-      <div
+      <div className="wx-tr-addr"
         style={{
           display: "flex",
           alignItems: "center",
@@ -1102,8 +1102,8 @@ function CoinSearch({
                     : "Search traders by name or @username..."
               }
               autoFocus
-              type="text"
-              name="wx-coin-search"
+              type="search"
+              name="q"
               inputMode="search"
               enterKeyHint="search"
               autoComplete="off"

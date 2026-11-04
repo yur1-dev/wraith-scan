@@ -966,3 +966,7 @@ a.hold-row:hover{background:rgba(255,255,255,.05)}
 .ew-gw-title{margin:6px 0 0;font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.65}
 .ew-gw-chains{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ew-gw-chains strong{margin-left:4px}
+
+/* spotted pill: wrap on phones, never shift layout */
+.wb-spot { flex-wrap: wrap; row-gap: 2px; min-height: 30px; box-sizing: border-box; }
+@media (max-width: 767px) { .wb-spot { border-radius: 14px; display: flex; } }

@@ -155,6 +155,7 @@ export default function TokenChart({
   const [, setViewTick] = useState(0);
   const [spotTick, setSpotTick] = useState(0);
   const [spotHover, setSpotHover] = useState(false);
+  const spotPinRef = useRef(false);
   const [showTrades, setShowTrades] = useState(true);
   const [dots, setDots] = useState<{ key: string; x: number; y: number; side: "buy" | "sell"; n: number; avatar: string; name: string; userId: string }[]>([]);
   const [wTraders, setWTraders] = useState<{ userId: string; displayName: string; avatar: string; lastSide: "buy" | "sell"; lastAt: number; count: number }[]>([]);
@@ -1023,10 +1024,15 @@ export default function TokenChart({
 
         {spotPos && status === "ready" && (
           <div
-            onMouseEnter={(e) => { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); }}
-            onClick={(e) => { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); }}
-            onMouseLeave={() => setSpotHover(false)}
-            style={{ position: "absolute", left: spotPos.x, top: Math.max(4, spotPos.y - 34), transform: "translateX(-50%)", pointerEvents: "auto", cursor: "help", display: "flex", flexDirection: "column", alignItems: "center", zIndex: 5 }}
+            onMouseEnter={(e) => { if (!spotPinRef.current) { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); } }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              if (spotPinRef.current) { spotPinRef.current = false; setSpotHover(false); }
+              else { spotPinRef.current = true; setSpotRect(r); setSpotHover(true); }
+            }}
+            onMouseLeave={() => { if (!spotPinRef.current) setSpotHover(false); }}
+            style={{ position: "absolute", left: spotPos.x, top: Math.max(4, spotPos.y - 34), transform: "translateX(-50%)", pointerEvents: "auto", cursor: "pointer", padding: "6px 8px", touchAction: "manipulation", display: "flex", flexDirection: "column", alignItems: "center", zIndex: 5 }}
           >
             {spotHover && spotCard && spotRect && typeof document !== "undefined" && createPortal(
               (() => {

@@ -697,10 +697,11 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
         </div>
       </div>
 
-      {spotted && mcap != null && spotted.spottedMcap > 0 && (
+      {spotted && spotted.spottedMcap > 0 && (
         <div className="wb-spot" title="Market cap when Wraith first flagged this token">
-          Spotted at <b>{fmtUsd(spotted.spottedMcap)}</b>
-          <i>now {fmtUsd(mcap)} · {(mcap / spotted.spottedMcap).toFixed(2)}x</i>
+          <span>Spotted {new Date(spotted.spottedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+          <span>at <b>{fmtUsd(spotted.spottedMcap)}</b></span>
+          <i>{mcap != null ? `now ${fmtUsd(mcap)} · ${(mcap / spotted.spottedMcap).toFixed(2)}x` : "now …"}</i>
         </div>
       )}
 

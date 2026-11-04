@@ -24,7 +24,12 @@ export async function GET(req: NextRequest) {
     const gid = process.env.TELEGRAM_GROUP_CHAT_ID;
     const thread = Number(process.env.TELEGRAM_GROUP_THREAD_ID);
     if (!token || !gid) return NextResponse.json({ ok: false, error: "missing env", hasToken: !!token, hasGroupId: !!gid, signals: process.env.TELEGRAM_GROUP_SIGNALS });
-    const body: Record<string, unknown> = { chat_id: gid, text: "Wraith group feed test" };
+    const demo = req.nextUrl.searchParams.get("demo") === "1";
+    const text = demo
+      ? "🧪 <b>TEST — HOT SIGNAL</b>  $DEMO\n💰 <b>MCap</b>  $48.2K    💧 <b>Liq</b>  $12.4K\n🟩 <b>1h</b>  +38.1%    📊 <b>Vol 1h</b>  $31.5K\n📈 <b>Score</b>  82/100\n\nThis is how Wraith calls and wins show up here."
+      : "Wraith group feed test";
+    if (demo) await pushBroadcast({ title: "🧪 Wraith test alert", body: "$DEMO spotted at $48.2K · score 82", url: "/app", tag: "demo" }, "signal").catch(() => 0);
+    const body: Record<string, unknown> = { chat_id: gid, text, parse_mode: "HTML" };
     if (Number.isFinite(thread) && thread > 0) body.message_thread_id = thread;
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return NextResponse.json({ gid, thread, signals: process.env.TELEGRAM_GROUP_SIGNALS, telegram: await r.json() });

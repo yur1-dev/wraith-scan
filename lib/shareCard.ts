@@ -21,7 +21,6 @@ export const SHARE_CHARS = 9; // classic, crown, degen shades, halo, horns, lase
 const SHARE_BASE = SHARE_LAYOUTS * SHARE_MOTIFS * 2;
 export const SHARE_VARIANTS = SHARE_BASE * SHARE_CHARS;
 // most shuffles stay clean (no accessory); ~1 in 4 gets one
-// accessories are retired: shuffles only vary layout / background / mirror
 export const randomVariant = () => Math.floor(Math.random() * SHARE_BASE);
 
 export interface ShareParams {
@@ -214,7 +213,10 @@ function tokenChip(ctx: C, k: number, p: ShareParams, x: number, y: number, size
   else { ctx.fillStyle = A + "33"; ctx.fillRect(cx - size, cy - size, size * 2, size * 2); ctx.fillStyle = A; ctx.font = `900 ${size * 0.9}px ${MONO}`; ctx.textAlign = "center"; ctx.fillText((p.symbol || "?")[0].toUpperCase(), cx, cy + 1); ctx.textAlign = "left"; }
   ctx.restore();
   ctx.lineWidth = 4; ctx.strokeStyle = A; ctx.beginPath(); ctx.arc(cx, cy, size, 0, 7); ctx.stroke();
-  ctx.fillStyle = "#fff"; ctx.font = `800 ${size * 1.12}px ${MONO}`;
+  let nameSize = size * 1.12;
+  ctx.font = `800 ${nameSize}px ${MONO}`;
+  while (ctx.measureText(p.symbol).width > 230 && nameSize > 16) { nameSize -= 1; ctx.font = `800 ${nameSize}px ${MONO}`; }
+  ctx.fillStyle = "#fff";
   ctx.fillText(p.symbol, cx + size + 14, cy - size * 0.2);
   ctx.fillStyle = "#ffffff77"; ctx.font = `600 15px ${MONO}`;
   ctx.fillText(p.chipText ?? `${p.amountSol} ${unit} in${p.tag ? "  ·  " + p.tag : ""}`, cx + size + 14, cy + size * 0.72);
@@ -274,8 +276,8 @@ function layoutPoster(ctx: C, k: number, p: ShareParams, flip: boolean) {
   const A = p.rank.accent, u = p.unit ?? "SOL";
   aurora(ctx, k, p, flip ? 260 : 700, 240, 420);
   ctx.save(); ctx.globalAlpha = 0.34 * ease((k - 0.15) / 0.8);
-  ctx.font = `900 ${Math.abs(p.pnl) >= 1000 ? 200 : 250}px ${HEAVY}`; ctx.lineWidth = 3; ctx.strokeStyle = A; ctx.lineJoin = "round"; ctx.textAlign = flip ? "right" : "left";
-  ctx.strokeText(bigTxt(p, ease((k - 0.3) / 1.8)), flip ? W + 12 : -12, 372); ctx.restore();
+  fitFont(ctx, bigTxt(p, 1), W - 40, 250); ctx.lineWidth = 3; ctx.strokeStyle = A; ctx.lineJoin = "round"; ctx.textAlign = flip ? "right" : "left";
+  ctx.strokeText(bigTxt(p, ease((k - 0.3) / 1.8)), flip ? W - 20 : 20, 372); ctx.restore();
   ghost(ctx, k, p, flip ? 220 : W - 190, H + 56, 560, flip);
   embers(ctx, k, p);
   const L = flip ? 560 : 0; // content shifts right when ghost is mirrored to the left
@@ -336,7 +338,7 @@ function layoutTomb(ctx: C, k: number, p: ShareParams, flip: boolean) {
   embers(ctx, k, p, 14);
   const cx = flip ? 60 : 440;
   tokenChip(ctx, k, p, cx, 80);
-  stamp(ctx, k, p, flip ? 392 : W - 58, 50);
+  stamp(ctx, k, p, flip ? 545 : W - 58, 50);
   ctx.save(); ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
   ctx.globalAlpha = ease((k - 0.35) / 0.5); ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 36; fitFont(ctx, bigTxt(p, 1), (flip ? 330 : W - 440 - 30), 140);
   ctx.fillText(bigTxt(p, ease((k - 0.35) / 1.8)), cx, 270); ctx.shadowBlur = 0;
@@ -381,7 +383,7 @@ function layoutTerminal(ctx: C, k: number, p: ShareParams, flip: boolean) {
   ctx.restore();
   // scanlines
   ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = "#000"; for (let yy = 0; yy < H; yy += 4) ctx.fillRect(0, yy, W, 2); ctx.restore();
-  stamp(ctx, k, p, flip ? 120 : W - 58, 50);
+  stamp(ctx, k, p, W - 58, 50);
   footer(ctx, k, p);
 }
 
@@ -421,7 +423,7 @@ function layoutRing(ctx: C, k: number, p: ShareParams, flip: boolean) {
   ctx.restore();
   embers(ctx, k, p, 14);
   const x0 = flip ? 520 : 44;
-  tokenChip(ctx, k, p, x0 - 12, 62); stamp(ctx, k, p, flip ? W - 58 : 380, 50);
+  tokenChip(ctx, k, p, x0 - 12, 62); stamp(ctx, k, p, x0 + 100, 124);
   ctx.save(); ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
   ctx.globalAlpha = ease((k - 0.35) / 0.5); ctx.fillStyle = A; ctx.shadowColor = p.rank.glow; ctx.shadowBlur = 36; fitFont(ctx, bigTxt(p, 1), flip ? W - x0 - 30 : 390, 118);
   ctx.fillText(bigTxt(p, ease((k - 0.35) / 1.8)), x0, 270); ctx.shadowBlur = 0;
@@ -439,7 +441,7 @@ export function drawShareCard(ctx: C, k: number, p: ShareParams) {
   p = { ...p, char: Math.floor(vv / SHARE_BASE) % SHARE_CHARS };
   const layout = v % SHARE_LAYOUTS, motif = Math.floor(v / SHARE_LAYOUTS) % SHARE_MOTIFS, flip = v >= SHARE_LAYOUTS * SHARE_MOTIFS;
   ctx.save(); ctx.clearRect(0, 0, W, H);
-  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip(); ctx.fillStyle = "#08080a"; ctx.fillRect(0, 0, W, H); // sharp rectangle, fully opaque (no transparent corners)
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip(); ctx.fillStyle = "#08080a"; ctx.fillRect(0, 0, W, H);
   background(ctx, k, p, motif);
   LAYOUTS[layout](ctx, k, p, flip);
   ctx.restore();

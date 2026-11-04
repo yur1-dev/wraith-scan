@@ -526,6 +526,28 @@ function CoinSearch({
     setRecent([]);
     try { localStorage.removeItem("wraith_recent_tokens"); } catch { /* ignore */ }
   };
+  const [recentQ, setRecentQ] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("wraith_recent_queries");
+      const list = raw ? (JSON.parse(raw) as string[]) : [];
+      if (Array.isArray(list)) setRecentQ(list.filter((q) => typeof q === "string" && q).slice(0, 8));
+    } catch { /* ignore */ }
+  }, [open]);
+  const pushRecentQ = (q: string) => {
+    const t = q.trim();
+    if (t.length < 2) return;
+    try {
+      const next = [t, ...recentQ.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(0, 8);
+      setRecentQ(next);
+      localStorage.setItem("wraith_recent_queries", JSON.stringify(next));
+    } catch { /* ignore */ }
+  };
+  const dropRecentQ = (q: string) => {
+    const next = recentQ.filter((x) => x !== q);
+    setRecentQ(next);
+    try { localStorage.setItem("wraith_recent_queries", JSON.stringify(next)); } catch { /* ignore */ }
+  };
   const trendingFetchedRef = useRef(false);
   const [quickTraders, setQuickTraders] = useState<QuickTraderResult[]>([]);
   const quickTradersDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -786,6 +808,7 @@ function CoinSearch({
   }, []);
 
   const handleSelectToken = (token: TokenResult) => {
+    pushRecentQ(query);
     pushRecent(token);
     // Build MemeTrend from the search result
     const meme: MemeTrend = {
@@ -962,6 +985,7 @@ function CoinSearch({
           }}
         >
           <div
+            className="wx-cs-tabs"
             style={{
               display: "flex",
               gap: 6,
@@ -1004,6 +1028,7 @@ function CoinSearch({
           </div>
           {/* Input row */}
           <div
+            className="wx-cs-inputrow"
             style={{
               display: "flex",
               alignItems: "center",
@@ -1105,6 +1130,19 @@ function CoinSearch({
                 ✕
               </button>
             )}
+            <button
+              type="button"
+              className="wx-cs-mob wx-cs-paste"
+              onClick={async () => {
+                try {
+                  const t = (await navigator.clipboard.readText()).trim();
+                  if (t) { setQuery(t); setActiveIdx(-1); }
+                } catch { inputRef.current?.focus(); }
+              }}
+            >
+              Paste
+            </button>
+            <button type="button" className="wx-cs-mob wx-cs-close" aria-label="Close search" onClick={() => setOpen(false)}>✕</button>
           </div>
 
           {/* Empty state — only if trending failed/returned nothing */}
@@ -1175,6 +1213,20 @@ function CoinSearch({
                   </span>
                 </div>
               )}
+              {recentQ.length > 0 && (
+                <div className="wx-cs-rq">
+                  <div className="wx-cs-rq-head"><span>RECENT SEARCHES</span></div>
+                  {recentQ.map((q) => (
+                    <div key={q} className="wx-cs-rq-row">
+                      <button type="button" className="wx-cs-rq-main" onClick={() => { setQuery(q); setActiveIdx(-1); }}>
+                        <span className="wx-cs-rq-ico">↺</span>
+                        <span className="wx-cs-rq-txt">{q}</span>
+                      </button>
+                      <button type="button" className="wx-cs-rq-x" aria-label="Remove" onClick={() => dropRecentQ(q)}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {recent.length > 0 && (
                 <>
                   <div
@@ -1189,7 +1241,7 @@ function CoinSearch({
                       letterSpacing: ".14em",
                     }}
                   >
-                    <span>RECENT</span>
+                    <span>RECENTLY VIEWED</span>
                     <button
                       type="button"
                       onClick={clearRecent}

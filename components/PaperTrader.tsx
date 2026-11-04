@@ -1172,6 +1172,29 @@ async function toDataUri(url: string | undefined): Promise<string | undefined> {
 }
 
 // Card dimensions — single source of truth
+
+interface ShareTheme { name: string; bg: string; accent: string; glow: string }
+const SHARE_THEMES: ShareTheme[] = [
+  { name: "Ghost", bg: "radial-gradient(circle at 80% 20%, #1f3d2e 0%, #0b1410 45%, #060606 100%)", accent: "#00c47a", glow: "#00c47a" },
+  { name: "Inferno", bg: "radial-gradient(circle at 85% 15%, #7a2a0a 0%, #2a0f06 50%, #070505 100%)", accent: "#ff7a2f", glow: "#e8490f" },
+  { name: "Void", bg: "radial-gradient(circle at 20% 10%, #3a1c6e 0%, #150b2e 50%, #06050b 100%)", accent: "#b48cff", glow: "#8a5cff" },
+  { name: "Gold", bg: "radial-gradient(circle at 80% 20%, #6b5314 0%, #241b07 50%, #070604 100%)", accent: "#ffcc3d", glow: "#ffb800" },
+  { name: "Ice", bg: "radial-gradient(circle at 15% 15%, #0f4a63 0%, #08202b 50%, #05080a 100%)", accent: "#5ad7ff", glow: "#2fb8ff" },
+  { name: "Blood", bg: "radial-gradient(circle at 80% 15%, #6e0f17 0%, #26070a 50%, #070404 100%)", accent: "#ff4d5a", glow: "#ff2f3f" },
+];
+function autoThemeIdx(pnl: number, entry: number, exit: number | undefined): number {
+  if (pnl < 0) return 5;
+  const x = exit && entry ? exit / entry : 1 + pnl / 100;
+  if (x >= 10) return 3;
+  if (x >= 5) return 2;
+  if (x >= 3) return 1;
+  if (x >= 2) return 4;
+  return 0;
+}
+function ghostSvg(color: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" style="position:absolute;right:-18px;bottom:-26px;width:230px;height:276px;opacity:0.10;z-index:1"><path d="M50 4C26 4 10 22 10 46v62l13-10 13 10 14-10 14 10 13-10 13 10V46C90 22 74 4 50 4z" fill="${color}"/><circle cx="36" cy="46" r="8" fill="#000"/><circle cx="64" cy="46" r="8" fill="#000"/></svg>`;
+}
+
 const CARD_W = 480;
 const CARD_H = 270;
 
@@ -1193,6 +1216,7 @@ async function captureShareCard(opts: {
   solPnl: number;
   letter: string;
   avatarBg: string;
+  theme: ShareTheme;
 }): Promise<HTMLCanvasElement | null> {
   const {
     tokenUri,
@@ -1206,6 +1230,7 @@ async function captureShareCard(opts: {
     solPnl,
     letter,
     avatarBg,
+    theme,
   } = opts;
 
   const html2canvas = (await import("html2canvas")).default;
@@ -1229,27 +1254,16 @@ async function captureShareCard(opts: {
       width:${CARD_W}px;
       height:${CARD_H}px;
       background:#080808;
-      border:1px solid ${isWin ? "#00c47a33" : "#ff444433"};
+      border:1px solid ${theme.accent}44;
       border-radius:12px;
       position:relative;
       overflow:hidden;
       font-family:'IBM Plex Mono',monospace;
       box-sizing:border-box;
     ">
-      ${
-        bgUri
-          ? `<img src="${bgUri}" style="
-              position:absolute;inset:0;width:100%;height:100%;
-              object-fit:cover;object-position:center;display:block;z-index:0;
-            " />`
-          : ""
-      }
-
-      <!-- dark overlay -->
-      <div style="
-        position:absolute;inset:0;z-index:1;
-        background:linear-gradient(135deg,rgba(6,6,6,0.85) 0%,rgba(6,6,6,0.60) 50%,rgba(6,6,6,0.35) 100%);
-      "></div>
+      <div style="position:absolute;inset:0;z-index:0;background:${theme.bg};"></div>
+      ${ghostSvg(theme.glow)}
+      <div style="position:absolute;left:0;right:0;top:0;height:3px;z-index:2;background:linear-gradient(90deg,${theme.accent},transparent);"></div>
 
       <!-- content layer -->
       <div style="
@@ -1401,6 +1415,11 @@ function ShareModal({
 }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [themeIdx, setThemeIdx] = useState(() => {
+    const pn = data.status === "sold" ? (data.exitPnlPct ?? data.currentPnlPct) : data.currentPnlPct;
+    return autoThemeIdx(pn, data.entryMcap, data.status === "sold" ? data.exitMcap : data.currentMcap);
+  });
+  const theme = SHARE_THEMES[themeIdx];
 
   // Proxied URLs — used only for the visible preview (fast, no data-URI round-trip)
   const [displayTokenImg, setDisplayTokenImg] = useState<string | undefined>(
@@ -1470,6 +1489,7 @@ function ShareModal({
       solPnl,
       letter,
       avatarBg,
+      theme,
     });
 
   const handleDownload = async () => {
@@ -1552,7 +1572,7 @@ function ShareModal({
             width: CARD_W,
             height: CARD_H,
             background: "#080808",
-            border: `1px solid ${isWin ? "#00c47a33" : "#ff444433"}`,
+            border: `1px solid ${theme.accent}44`,
             borderRadius: 12,
             position: "relative",
             overflow: "hidden",
@@ -1561,35 +1581,9 @@ function ShareModal({
             boxSizing: "border-box",
           }}
         >
-          {/* Background image — proxied src for display */}
-          <img
-            src={displayBgImg}
-            alt=""
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              objectPosition: "center",
-              display: "block",
-              zIndex: 0,
-            }}
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
-            }}
-          />
-
-          {/* Dark overlay */}
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(135deg, rgba(6,6,6,0.85) 0%, rgba(6,6,6,0.60) 50%, rgba(6,6,6,0.35) 100%)",
-              zIndex: 1,
-            }}
-          />
+          <div style={{ position: "absolute", inset: 0, zIndex: 0, background: theme.bg }} />
+          <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: ghostSvg(theme.glow) }} />
+          <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: 3, zIndex: 2, background: `linear-gradient(90deg, ${theme.accent}, transparent)` }} />
 
           {/* Content */}
           <div
@@ -1785,6 +1779,23 @@ function ShareModal({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* ── THEME PICKER ── */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+          {SHARE_THEMES.map((t, i) => (
+            <button
+              key={t.name}
+              type="button"
+              onClick={() => setThemeIdx(i)}
+              aria-label={t.name}
+              style={{
+                width: 26, height: 26, borderRadius: "50%", cursor: "pointer",
+                background: t.bg, border: `2px solid ${i === themeIdx ? t.accent : "#ffffff22"}`,
+                boxShadow: i === themeIdx ? `0 0 8px ${t.accent}88` : "none",
+              }}
+            />
+          ))}
         </div>
 
         {/* ── ACTION BUTTONS ── */}

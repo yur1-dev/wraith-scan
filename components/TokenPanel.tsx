@@ -7,7 +7,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bookmark, Check, Copy, ExternalLink, Globe, Link2, Send } from "lucide-react";
+import { ArrowLeft, Bookmark, Check, Copy, ExternalLink, Globe, Link2, Send } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { MemeTrend } from "@/app/app/page";
 import TokenChart from "@/components/TokenChart";
 import { snapCache } from "@/lib/prefetchChart";
@@ -77,6 +78,8 @@ function XGlyph({ size = 14 }: { size?: number }) {
 type SnapState = "loading" | "ready" | "missing" | "error";
 
 export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend | null }) {
+  const router = useRouter();
+  const goBack = () => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/app"); };
   const mint = selectedMeme?.contractAddress ?? "";
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [birth, setBirth] = useState<{ mint: string; createdAt: number } | null>(null);
@@ -610,6 +613,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
       {aboutSlot && aboutSlot !== "none" && createPortal(aboutBlock, aboutSlot)}
       {/* ── header ── */}
       <header className="wx-token-head">
+        <button type="button" className="wx-back-btn" aria-label="Back" onClick={goBack}><ArrowLeft size={18} /></button>
         <div className="wx-token-id">
           <TokenIcon contractAddress={mint} imageUrl={snap?.imageUrl ?? selectedMeme.tokenImageUrl ?? undefined} symbol={symbol} size={48} />
           <div style={{ minWidth: 0 }}>

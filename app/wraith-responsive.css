@@ -78,13 +78,33 @@ pre, code { overflow-wrap: anywhere; }
 @media (max-width: 767px) { .wx-market-layout { margin: 0; } }
 
 /* ── Search dropdown becomes a full-width sheet on phones ───────────── */
+.wx-cs-mob { display: none; }
+.wx-cs-rq-head { padding: 9px 14px 5px; color: var(--accent-text); font-size: 8px; letter-spacing: .14em; font-family: var(--font-mono), monospace; }
+.wx-cs-rq-row { display: flex; align-items: center; }
+.wx-cs-rq-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: transparent; border: 0; color: var(--text); text-align: left; cursor: pointer; }
+.wx-cs-rq-ico { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border); display: grid; place-items: center; color: var(--text-muted); flex: 0 0 auto; }
+.wx-cs-rq-txt { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wx-cs-rq-x { background: transparent; border: 0; color: var(--text-dim); padding: 10px 14px; cursor: pointer; }
 @media (max-width: 767px) {
+  /* phones: no search bar in the header; the bottom search button opens a full-screen search */
+  .wx-cs-trigger { display: none !important; }
   .wx-cs-kbd { display: none !important; }
   .wx-cs-drop {
-    position: fixed !important; left: 8px !important; right: 8px !important; top: 58px !important;
-    width: auto !important; max-width: none !important; max-height: calc(100dvh - 160px) !important;
-    overflow-y: auto !important; z-index: 120 !important;
+    position: fixed !important; inset: 0 !important; left: 0 !important; right: 0 !important; top: 0 !important; bottom: 0 !important;
+    width: auto !important; max-width: none !important; max-height: none !important; height: 100dvh !important;
+    border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: var(--bg, #0c0c0d) !important;
+    display: flex !important; flex-direction: column; overflow-y: auto !important; z-index: 100000 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+  .wx-cs-tabs { padding-top: max(12px, env(safe-area-inset-top, 0px)) !important; }
+  .wx-cs-inputrow {
+    order: 99; position: sticky; bottom: 0; margin: auto 12px 12px !important; margin-top: auto !important;
+    border: 1px solid var(--border-strong, var(--border)) !important; border-radius: 999px; background: var(--surface-2) !important; padding: 8px 10px 8px 16px !important;
+  }
+  .wx-cs-inputrow input { font-size: 16px !important; }
+  .wx-cs-mob { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border: 0; cursor: pointer; }
+  .wx-cs-paste { height: 34px; padding: 0 14px; border-radius: 999px; background: var(--surface); color: var(--text); font-weight: 700; font-size: 13px; border: 1px solid var(--border); }
+  .wx-cs-close { width: 36px; height: 36px; border-radius: 50%; background: transparent; color: var(--text); border: 1px solid var(--border); font-size: 15px; }
 }
 
 /* ── Phones & small ─────────────────────────────────────────────────── */

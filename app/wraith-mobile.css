@@ -374,3 +374,14 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   .wx-change span { margin-bottom: 0; font-size: 9px; }
   .wx-change b { font-size: 12px; white-space: nowrap; }
 }
+
+/* Token page: back button (phones only) */
+.wx-back-btn { display: none; }
+@media (max-width: 767px) {
+  .wx-token-head { flex-wrap: wrap; }
+  .wx-back-btn {
+    display: inline-grid; place-items: center; flex: 0 0 auto; width: 34px; height: 34px; padding: 0;
+    border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--text); cursor: pointer;
+  }
+  .wx-token-head .wx-token-id { flex: 1 1 0; min-width: 0; }
+}

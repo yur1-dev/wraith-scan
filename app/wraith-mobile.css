@@ -932,3 +932,29 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 
 /* stat strip labels stay on one line */
 .profile-stat-card > span, .profile-stat-card > small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* wallet intel card (Analysis tab) */
+.dt-wi { border: 1px solid var(--line, rgba(255,255,255,.08)); background: var(--surface, #0e0f12); border-radius: 12px; padding: 12px 12px 10px; margin: 12px 0; }
+.dt-wi-h { font-size: 10px; letter-spacing: .12em; font-weight: 700; color: var(--mute, #8a8f98); margin-bottom: 8px; }
+.dt-wi-list { display: flex; flex-direction: column; gap: 6px; }
+.dt-wi-row { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.45; color: var(--text, #e8e9ec); }
+.dt-wi-row i { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; background: #7b808a; }
+.dt-wi-row.good i { background: #37d58a; }
+.dt-wi-row.warn i { background: #ffba55; }
+.dt-wi-row.bad i { background: #e5594a; }
+.dt-wi-sub { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.06); }
+.dt-wi-sub > small { display: block; font-size: 10px; color: var(--mute, #8a8f98); margin-bottom: 6px; }
+.dt-wi-sub a { color: inherit; text-decoration: underline; text-decoration-color: rgba(255,255,255,.25); }
+.dt-wi-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dt-wi-chip { display: inline-flex; gap: 6px; align-items: baseline; padding: 4px 8px; border-radius: 8px; font-size: 11px; border: 1px solid rgba(255,255,255,.08); color: inherit; text-decoration: none; min-height: 0; }
+.dt-wi-chip b { font-weight: 600; }
+.dt-wi-chip span { color: #8a8f98; font-size: 10px; }
+.dt-wi-chip.graduated { border-color: rgba(55,213,138,.35); }
+.dt-wi-chip.graduated span { color: #37d58a; }
+.dt-wi-chip.dead { border-color: rgba(229,89,74,.3); }
+.dt-wi-chip.dead span { color: #e5594a; }
+.dt-wi-fam { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; padding: 3px 0; }
+.dt-wi-fam span { color: #8a8f98; }
+.dt-wi-fam em { font-style: normal; }
+.dt-wi-fam em.up { color: #37d58a; }
+.dt-wi-fam em.dn { color: #e5594a; }

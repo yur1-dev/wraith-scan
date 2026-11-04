@@ -31,7 +31,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 // ── 1. dev history (pump.fun) ───────────────────────────────────────────────────────────────────────────────
 const PUMP_BASES = (process.env.PUMP_API_BASES || "https://frontend-api-v3.pump.fun,https://frontend-api.pump.fun").split(",").map((s) => s.trim()).filter(Boolean);
 
-async function pumpJson(path: string): Promise<unknown> {
+export async function pumpJson(path: string): Promise<unknown> {
   for (const base of PUMP_BASES) {
     try {
       const res = await fetch(`${base}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(3500), cache: "no-store" });

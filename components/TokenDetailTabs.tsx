@@ -57,6 +57,14 @@ const qty = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `
 const short = (w: string) => (w.length > 11 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w);
 const ago = (ms: number) => { const m = Math.max(1, Math.round((Date.now() - ms) / 60000)); return m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
 
+interface WalletIntelData {
+  dev: null | { creator: string; created: number; graduated: number; dead: number; recent7d: number; coins: { mint: string; symbol: string; status: "graduated" | "dead" | "live"; mcap: number; ageH: number }[]; bought: boolean };
+  buyers: number; proven: number; dumpers: number;
+  familiar: { wallet: string; n: number; wins: number; dumps: number }[];
+  links: { address: string; symbol: string; outcome: "win" | "dump" | "flat"; shared: number; peak: number }[];
+  signals: { tone: "good" | "warn" | "bad" | "info"; text: string }[];
+}
+
 function safeExternalUrl(value: string): string | null {
   try {
     const url = new URL(value);
@@ -105,6 +113,8 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
   const [holdersState, setHoldersState] = useState<"loading" | "ready" | "error">("loading");
   const [networkHolders, setNetworkHolders] = useState<number | null>(null);
   const [traders, setTraders] = useState<Trader[]>([]);
+  const [wi, setWi] = useState<WalletIntelData | null>(null);
+  const [wiState, setWiState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const seen = useRef(new Set<string>());
   const [wmap, setWmap] = useState<Record<string, WUser>>({});
   const asked = useRef(new Set<string>());
@@ -146,6 +156,20 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
     window.addEventListener("wraith:trade-recorded", run);
     return () => { alive = false; window.clearInterval(t); window.removeEventListener("wraith:trade-recorded", run); };
   }, [mint]);
+
+  // Wallet intel: deployer history + familiar wallets. Loaded only when the Analysis tab is open.
+  useEffect(() => { setWi(null); setWiState("idle"); }, [mint]);
+  useEffect(() => {
+    if (tab !== "Analysis" || !mint || wi || wiState === "loading") return;
+    let alive = true;
+    setWiState("loading");
+    fetch(`/api/wallet-intel?mint=${encodeURIComponent(mint)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: WalletIntelData | null) => { if (!alive) return; if (d && Array.isArray(d.signals)) { setWi(d); setWiState("ready"); } else setWiState("error"); })
+      .catch(() => { if (alive) setWiState("error"); });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, mint]);
 
   // Which of these wallets are Wraith users? Those get their profile shown instead of a bare address.
   const walletKey = useMemo(() => [...new Set([...trades.map((t) => t.wallet ?? ""), ...holders.map((h) => h.wallet)].filter(Boolean))].sort().join(","), [trades, holders]);
@@ -303,6 +327,40 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
               )}
               {intelSummary && <div className="dt-quote">{intelSummary}</div>}
               </>)}
+              {mint && (wiState === "loading" || wi) && (
+                <div className="dt-wi">
+                  <div className="dt-wi-h">WALLET INTEL</div>
+                  {!wi ? <p className="dt-note" style={{ margin: 0 }}>Reading the deployer and early buyers…</p> : (<>
+                    <div className="dt-wi-list">
+                      {wi.signals.map((g, i) => (<div key={i} className={`dt-wi-row ${g.tone}`}><i />{g.text}</div>))}
+                    </div>
+                    {wi.dev && wi.dev.coins.length > 0 && (
+                      <div className="dt-wi-sub">
+                        <small>Deployer <a href={`https://solscan.io/account/${wi.dev.creator}`} target="_blank" rel="noopener noreferrer">{short(wi.dev.creator)}</a> · earlier launches</small>
+                        <div className="dt-wi-chips">
+                          {wi.dev.coins.map((c) => (
+                            <Link key={c.mint} href={`/app/token/${c.mint}`} className={`dt-wi-chip ${c.status}`}>
+                              <b>{c.symbol}</b><span>{c.status === "graduated" ? "graduated" : c.status === "dead" ? "faded" : usd(c.mcap)}</span>
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {wi.familiar.length > 0 && (
+                      <div className="dt-wi-sub">
+                        <small>Familiar early buyers</small>
+                        {wi.familiar.map((f) => (
+                          <div key={f.wallet} className="dt-wi-fam">
+                            <a href={`https://solscan.io/account/${f.wallet}`} target="_blank" rel="noopener noreferrer">{short(f.wallet)}</a>
+                            <span>{f.n} calls · <em className="up">{f.wins} won</em> · <em className="dn">{f.dumps} dumped</em></span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="dt-note" style={{ margin: "8px 0 0" }}>Based on {wi.buyers} early buyer wallets and Wraith's own call history. These are observations, not accusations.</p>
+                  </>)}
+                </div>
+              )}
               {verifiedLinks.length > 0 && (
                 <div className="dt-links">
                   {verifiedLinks.map((link, index) => (

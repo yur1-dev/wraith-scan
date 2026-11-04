@@ -622,7 +622,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
               {snap?.onCurve && <span className="wx-badge accent">Bonding curve</span>}
               {snap?.graduated && <span className="wx-badge">Graduated</span>}
               {snap?.dexId && !snap.onCurve && <span className="wx-badge muted">{snap.dexId}</span>}
-              {snap?.stale && <span className="wx-badge muted">delayed</span>}
+              {snap?.stale && <span className="wx-badge muted wx-stale">delayed</span>}
             </div>
             <div className="wx-token-sub">
               {name && <span>{name}</span>}

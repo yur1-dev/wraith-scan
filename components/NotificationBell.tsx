@@ -64,6 +64,7 @@ export default function NotificationBell() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
+  const [badImgs, setBadImgs] = useState<Record<string, boolean>>({});
   const [items, setItems] = useState<Notif[]>([]);
   const [seen, setSeen] = useState(0);
   const prefsRef = useRef<Prefs>(DEFAULT_PREFS); // everything is on; no filters
@@ -238,9 +239,9 @@ export default function NotificationBell() {
               ) : items.map((n) => (
                 <button key={n.id} type="button" className={`wx-notif-row${n.ts > seen - 1 && n.ts > (read<number>(SEEN, 0) - 1) ? "" : ""}`} onClick={() => go(n)}>
                   <span className={`wx-notif-ico ${n.kind}`}>
-                    {n.img ? (
+                    {n.img && !badImgs[n.img] ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={n.img} alt="" />
+                      <img src={n.img} alt="" onError={() => setBadImgs((m) => ({ ...m, [n.img as string]: true }))} />
                     ) : (
                       <Bell size={15} />
                     )}

@@ -160,7 +160,8 @@ export async function GET(request: NextRequest) {
   if (hit && Date.now() - hit.ts < 10 * 60_000 && !inflight.has(mint)) {
     const bg = build(mint).then((d) => { if (d) cache.set(mint, { data: d, ts: Date.now() }); return d; }).catch(() => null).finally(() => inflight.delete(mint));
     inflight.set(mint, bg);
-    return NextResponse.json({ ...hit.data, stale: true });
+    // background refresh is already running: only call it "stale" when it is genuinely old (a 3s-old snapshot is not delayed)
+    return NextResponse.json(Date.now() - hit.ts > 45_000 ? { ...hit.data, stale: true } : hit.data);
   }
 
   let job = inflight.get(mint);

@@ -378,13 +378,25 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 /* Token page: back button (phones only) */
 .wx-back-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; margin-right: 6px; }
 .wx-back-btn:hover { background: rgba(255,255,255,.05); }
+/* desktop: name on the left, actions, then the back button at the far end */
+@media (min-width: 768px) {
+  .wx-token-head .wx-token-id { order: 1; flex: 1 1 auto; min-width: 0; }
+  .wx-token-head .wx-token-actions { order: 2; }
+  .wx-token-head .wx-back-btn { order: 3; margin: 0 0 0 6px; }
+}
 @media (max-width: 767px) {
   .wx-token-head { flex-wrap: wrap; }
   .wx-back-btn {
     display: inline-grid; place-items: center; flex: 0 0 auto; width: 34px; height: 34px; padding: 0;
     border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--text); cursor: pointer;
   }
-  .wx-token-head .wx-token-id { flex: 1 1 0; min-width: 0; }
+  .wx-token-head .wx-token-id { flex: 1 1 0; min-width: 0; order: 1; }
+  /* back button sits on the right of the name row instead of owning its own row */
+  .wx-token-head .wx-back-btn { order: 2; margin: 0 0 0 8px; align-self: flex-start; }
+  .wx-token-head .wx-token-actions { order: 3; }
+  /* the live "delayed" flag toggles on every poll; it must never change the header height (it made the chart jump) */
+  .wx-token-name { flex-wrap: nowrap !important; overflow: hidden; }
+  .wx-token-name .wx-stale { display: none; }
 }
 
 /* safety net: a spam token must never widen the page */

@@ -14,6 +14,8 @@ import { FileText, Lock, Settings } from "lucide-react";
 import { MemeTrend } from "@/app/app/page";
 import { useWraithTier } from "@/hooks/useWraithTier";
 import { getMcap } from "@/lib/getTokenPrice";
+import { chainOf } from "@/lib/chains";
+import { drawShareCard, SHARE_RANKS, autoRankIdx, randomVariant, SHARE_VARIANTS, SHARE_W, SHARE_H, loadShareImage, recordShareClip, renderSharePng, type ShareParams } from "@/lib/shareCard";
 import StyledSelect from "@/components/StyledSelect";
 import {
   decryptHotWalletKey as decryptKeypair,
@@ -93,6 +95,8 @@ interface ShareCardData {
   exitTxSig?: string;
   status: "watching" | "sold";
   ts: number;
+  /** chain key (solana, base, bsc...). Drives the currency label on the card. */
+  chain?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1173,701 +1177,212 @@ async function toDataUri(url: string | undefined): Promise<string | undefined> {
 
 // Card dimensions — single source of truth
 
-interface ShareTheme { name: string; bg: string; accent: string; glow: string }
-const SHARE_THEMES: ShareTheme[] = [
-  { name: "Ghost", bg: "radial-gradient(circle at 80% 20%, #1f3d2e 0%, #0b1410 45%, #060606 100%)", accent: "#00c47a", glow: "#00c47a" },
-  { name: "Inferno", bg: "radial-gradient(circle at 85% 15%, #7a2a0a 0%, #2a0f06 50%, #070505 100%)", accent: "#ff7a2f", glow: "#e8490f" },
-  { name: "Void", bg: "radial-gradient(circle at 20% 10%, #3a1c6e 0%, #150b2e 50%, #06050b 100%)", accent: "#b48cff", glow: "#8a5cff" },
-  { name: "Gold", bg: "radial-gradient(circle at 80% 20%, #6b5314 0%, #241b07 50%, #070604 100%)", accent: "#ffcc3d", glow: "#ffb800" },
-  { name: "Ice", bg: "radial-gradient(circle at 15% 15%, #0f4a63 0%, #08202b 50%, #05080a 100%)", accent: "#5ad7ff", glow: "#2fb8ff" },
-  { name: "Blood", bg: "radial-gradient(circle at 80% 15%, #6e0f17 0%, #26070a 50%, #070404 100%)", accent: "#ff4d5a", glow: "#ff2f3f" },
-];
-function autoThemeIdx(pnl: number, entry: number, exit: number | undefined): number {
-  if (pnl < 0) return 5;
-  const x = exit && entry ? exit / entry : 1 + pnl / 100;
-  if (x >= 10) return 3;
-  if (x >= 5) return 2;
-  if (x >= 3) return 1;
-  if (x >= 2) return 4;
-  return 0;
-}
-function ghostSvg(color: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" style="position:absolute;right:-18px;bottom:-26px;width:230px;height:276px;opacity:0.10;z-index:1"><path d="M50 4C26 4 10 22 10 46v62l13-10 13 10 14-10 14 10 13-10 13 10V46C90 22 74 4 50 4z" fill="${color}"/><circle cx="36" cy="46" r="8" fill="#000"/><circle cx="64" cy="46" r="8" fill="#000"/></svg>`;
-}
-
 const CARD_W = 480;
 const CARD_H = 270;
 
-/**
- * Build the share card as a hidden, off-screen DOM element,
- * capture it with html2canvas, then remove it.
- * This guarantees pixel-perfect output regardless of browser zoom,
- * devicePixelRatio, modal transforms, or scroll position.
- */
-async function captureShareCard(opts: {
-  tokenUri: string | undefined;
-  bgUri: string | undefined;
-  data: ShareCardData;
-  pnl: number;
-  exitMcap: number | undefined;
-  isWin: boolean;
-  pnlColor: string;
-  exitReasonColor: string;
-  solPnl: number;
-  letter: string;
-  avatarBg: string;
-  theme: ShareTheme;
-}): Promise<HTMLCanvasElement | null> {
-  const {
-    tokenUri,
-    bgUri,
-    data,
-    pnl,
-    exitMcap,
-    isWin,
-    pnlColor,
-    exitReasonColor,
-    solPnl,
-    letter,
-    avatarBg,
-    theme,
-  } = opts;
-
-  const html2canvas = (await import("html2canvas")).default;
-
-  // Create a container positioned far off-screen so it's never visible
-  const container = document.createElement("div");
-  container.style.cssText = `
-    position: fixed;
-    left: -9999px;
-    top: -9999px;
-    width: ${CARD_W}px;
-    height: ${CARD_H}px;
-    overflow: hidden;
-    z-index: -1;
-  `;
-
-  // Build the card HTML using only inline styles (no CSS classes needed)
-  // All images use data-URIs so html2canvas has zero CORS issues
-  container.innerHTML = `
-    <div style="
-      width:${CARD_W}px;
-      height:${CARD_H}px;
-      background:#080808;
-      border:1px solid ${theme.accent}44;
-      border-radius:12px;
-      position:relative;
-      overflow:hidden;
-      font-family:'IBM Plex Mono',monospace;
-      box-sizing:border-box;
-    ">
-      <div style="position:absolute;inset:0;z-index:0;background:${theme.bg};"></div>
-      ${ghostSvg(theme.glow)}
-      <div style="position:absolute;left:0;right:0;top:0;height:3px;z-index:2;background:linear-gradient(90deg,${theme.accent},transparent);"></div>
-
-      <!-- content layer -->
-      <div style="
-        position:absolute;inset:0;z-index:3;
-        padding:18px 20px 16px;
-        box-sizing:border-box;
-        display:flex;flex-direction:column;justify-content:space-between;
-      ">
-
-        <!-- TOP: avatar + symbol -->
-      <div style="display:flex;align-items:center;gap:10px;">
-          ${
-            tokenUri
-              ? `<div style="
-                  width:34px;height:34px;border-radius:50%;overflow:hidden;
-                  border:2px solid ${pnlColor}55;flex-shrink:0;
-                "><img src="${tokenUri}" style="
-                  width:100%;height:100%;object-fit:cover;display:block;
-                " /></div>`
-              : `<div style="
-                  width:34px;height:34px;border-radius:50%;
-                  background:${avatarBg}22;border:2px solid ${avatarBg}55;
-                  display:flex;align-items:center;justify-content:center;
-                  color:${avatarBg};font-size:14px;font-weight:900;flex-shrink:0;
-                ">${letter}</div>`
-          }
-          <div>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span style="color:#fff;font-size:15px;font-weight:900;letter-spacing:0.02em;">
-                ${data.symbol}
-              </span>
-              ${
-                data.status === "watching"
-                  ? `<span style="
-                      font-size:7px;padding:2px 6px;border-radius:2px;
-                      color:#00c47a;border:1px solid #00c47a55;
-                      font-weight:700;letter-spacing:0.1em;background:#00c47a11;
-                    ">LIVE</span>`
-                  : ""
-              }
-              ${
-                data.exitReason
-                  ? `<span style="
-                      font-size:7px;padding:2px 6px;border-radius:2px;
-                      color:${exitReasonColor};border:1px solid ${exitReasonColor}55;
-                      font-weight:700;background:${exitReasonColor}11;
-                    ">${data.exitReason}</span>`
-                  : ""
-              }
-            </div>
-            <div style="color:#ffffff55;font-size:8px;margin-top:2px;">
-              ${data.amountSol} SOL · ${fmtAgo(data.ts)}
-            </div>
-          </div>
-        </div>
-
-        <!-- MIDDLE: big PnL -->
-        <div>
-        <div style="
-            font-size:46px;font-weight:900;color:${pnlColor};
-            line-height:1;letter-spacing:-0.03em;
-          ">${fmtPnl(pnl)}</div>
-          <div style="font-size:12px;color:${pnlColor}aa;margin-top:5px;font-weight:600;">
-            ${isWin ? "+" : ""}${solPnl.toFixed(3)} SOL
-          </div>
-        </div>
-
-        <!-- BOTTOM: stats + branding -->
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;">
-          <div style="display:flex;flex-direction:column;gap:5px;">
-            ${[
-              {
-                label: "ENTRY",
-                value: fmtMcap(data.entryMcap),
-                highlight: false,
-              },
-              {
-                label: data.status === "sold" ? "EXIT" : "CURRENT",
-                value: fmtMcap(exitMcap ?? 0),
-                highlight: true,
-              },
-              {
-                label: "MULTI",
-                value:
-                  exitMcap && data.entryMcap
-                    ? `${(exitMcap / data.entryMcap).toFixed(2)}×`
-                    : "—",
-                highlight: false,
-              },
-              {
-                label: "SL / TP",
-                value: `${data.slPct}% / ${data.tpX}×`,
-                highlight: false,
-              },
-            ]
-              .map(
-                (row) => `
-              <div style="display:flex;gap:10px;align-items:center;">
-                <span style="color:#ffffff44;font-size:8px;min-width:52px;">${row.label}</span>
-                <span style="color:${row.highlight ? pnlColor : "#ffffffcc"};font-size:10px;font-weight:700;">
-                  ${row.value}
-                </span>
-              </div>`,
-              )
-              .join("")}
-          </div>
-
-     <!-- branding -->
-          <div style="text-align:right;">
-            <div style="color:#e8490f;font-size:13px;font-weight:800;letter-spacing:0.22em;">
-              WRAITH
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(container);
-
-  let canvas: HTMLCanvasElement | null = null;
-  try {
-    canvas = await html2canvas(container.firstElementChild as HTMLElement, {
-      backgroundColor: "#080808",
-      scale: 2, // 2× for crisp retina quality
-      useCORS: false, // data URIs — no CORS needed
-      allowTaint: false,
-      logging: false,
-      imageTimeout: 0,
-      width: CARD_W,
-      height: CARD_H,
-    });
-    if (canvas) canvas = roundCanvasCorners(canvas, 12);
-  } catch (err) {
-    console.error("captureShareCard failed", err);
-  }
-
-  document.body.removeChild(container);
-  return canvas;
-}
-
-function ShareModal({
-  data,
-  onClose,
-}: {
-  data: ShareCardData;
-  onClose: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [themeIdx, setThemeIdx] = useState(() => {
-    const pn = data.status === "sold" ? (data.exitPnlPct ?? data.currentPnlPct) : data.currentPnlPct;
-    return autoThemeIdx(pn, data.entryMcap, data.status === "sold" ? data.exitMcap : data.currentMcap);
-  });
-  const theme = SHARE_THEMES[themeIdx];
-
-  // Proxied URLs — used only for the visible preview (fast, no data-URI round-trip)
-  const [displayTokenImg, setDisplayTokenImg] = useState<string | undefined>(
-    proxyImg(data.imageUrl),
-  );
-  const [displayBgImg] = useState(() =>
-    pickBg(data.currentPnlPct >= 0 || (data.exitPnlPct ?? 0) >= 0),
-  );
-
-  // Data-URI versions — loaded once, used for off-screen capture
-  const [captureTokenUri, setCaptureTokenUri] = useState<string | undefined>();
-  const [captureBgUri, setCaptureBgUri] = useState<string | undefined>();
-  const [assetsReady, setAssetsReady] = useState(false);
-
-  const pnl =
-    data.status === "sold"
-      ? (data.exitPnlPct ?? data.currentPnlPct)
-      : data.currentPnlPct;
+/** Share modal: live animated preview, 4 ranks x 60 layout variants, PNG / copy / video clip, optional own background. */
+function ShareModal({ data, onClose }: { data: ShareCardData; onClose: () => void }) {
+  const pnl = data.status === "sold" ? (data.exitPnlPct ?? data.currentPnlPct) : data.currentPnlPct;
   const exitMcap = data.status === "sold" ? data.exitMcap : data.currentMcap;
-  const isWin = pnl >= 0;
-  const pnlColor = isWin ? "#00c47a" : "#ff4444";
   const solPnl = data.amountSol * (pnl / 100);
+  const chainInfo = chainOf(data.chain ?? "solana");
+  const unit = chainInfo?.native ?? "SOL";
+  const chainName = chainInfo?.name ?? "Solana";
 
-  const exitReasonColor =
-    data.exitReason === "TP"
-      ? "#00c47a"
-      : data.exitReason === "SL"
-        ? "#ff4444"
-        : data.exitReason === "TRAIL"
-          ? "#ffaa00"
-          : "#777";
-
-  const letter = (data.symbol || "?").charAt(0).toUpperCase();
-  const palette = [C.orange, C.purple, C.blue, C.green, C.yellow];
-  const avatarBg = palette[letter.charCodeAt(0) % palette.length];
-
-  // Pre-load data-URIs in background so capture is instant when user clicks
+  const [rankIdx, setRankIdx] = useState(() => autoRankIdx(pnl, data.entryMcap, exitMcap));
+  const [variant, setVariant] = useState(() => randomVariant());
+  const [usdRate, setUsdRate] = useState<number | undefined>(undefined);
   useEffect(() => {
-    let cancelled = false;
-    async function preload() {
-      const [tokenUri, bgUri] = await Promise.all([
-        toDataUri(proxyImg(data.imageUrl)),
-        toDataUri(displayBgImg),
-      ]);
-      if (!cancelled) {
-        setCaptureTokenUri(tokenUri);
-        setCaptureBgUri(bgUri);
-        setAssetsReady(true);
-      }
-    }
-    preload();
-    return () => {
-      cancelled = true;
-    };
-  }, [data.imageUrl, displayBgImg]);
+    let alive = true;
+    fetch("/api/native-prices").then((r) => r.json()).then((j) => {
+      const v = j?.prices?.[unit as "SOL" | "ETH" | "BNB"];
+      if (alive && typeof v === "number" && v > 0) setUsdRate(v);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [unit]);
+  const rank = SHARE_RANKS[rankIdx];
+  const [tokenImg, setTokenImg] = useState<HTMLImageElement | null>(null);
+  const [rankImgs, setRankImgs] = useState<Record<string, HTMLImageElement | null>>({});
+  const [bg, setBg] = useState<{ kind: "image" | "video"; el: HTMLImageElement | HTMLVideoElement; w: number; h: number } | null>(null);
+  const [busy, setBusy] = useState("");
+  const [copied, setCopied] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const paramsRef = useRef<ShareParams | null>(null);
+  const t0Ref = useRef(0);
 
-  const getCanvas = () =>
-    captureShareCard({
-      tokenUri: captureTokenUri,
-      bgUri: captureBgUri,
-      data,
-      pnl,
-      exitMcap,
-      isWin,
-      pnlColor,
-      exitReasonColor,
-      solPnl,
-      letter,
-      avatarBg,
-      theme,
-    });
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const uri = await toDataUri(proxyImg(data.imageUrl));
+      const im = await loadShareImage(uri);
+      if (alive) setTokenImg(im);
+    })();
+    return () => { alive = false; };
+  }, [data.imageUrl]);
+
+  useEffect(() => {
+    let alive = true;
+    if (rankImgs[rank.img] !== undefined) return;
+    loadShareImage(rank.img).then((im) => { if (alive) setRankImgs((m) => ({ ...m, [rank.img]: im })); });
+    return () => { alive = false; };
+  }, [rank.img, rankImgs]);
+
+  const params: ShareParams = {
+    symbol: data.symbol,
+    amountSol: data.amountSol,
+    unit,
+    chainName,
+    usdRate,
+    entryMcap: data.entryMcap,
+    exitMcap,
+    pnl,
+    solPnl,
+    mult: exitMcap && data.entryMcap ? exitMcap / data.entryMcap : null,
+    ago: fmtAgo(data.ts),
+    tag: data.exitReason,
+    rank,
+    variant,
+    tokenImg,
+    rankImg: rankImgs[rank.img] ?? null,
+    bg: bg ? { src: bg.el, w: bg.w, h: bg.h, isVideo: bg.kind === "video" } : null,
+  };
+  paramsRef.current = params;
+
+  // replay the intro whenever the look changes
+  useEffect(() => { t0Ref.current = performance.now(); }, [variant, rankIdx, bg]);
+
+  // live animated preview
+  useEffect(() => {
+    let raf = 0;
+    t0Ref.current = performance.now();
+    const tick = () => {
+      const c = canvasRef.current;
+      const p = paramsRef.current;
+      if (c && p) {
+        const ctx = c.getContext("2d");
+        if (ctx) drawShareCard(ctx, ((performance.now() - t0Ref.current) / 1000) % 16, p);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const pickBgFile = (file: File | undefined) => {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    if (file.type.startsWith("video/")) {
+      const v = document.createElement("video");
+      v.src = url; v.muted = true; v.loop = true; v.playsInline = true;
+      v.onloadeddata = () => { void v.play().catch(() => undefined); setBg({ kind: "video", el: v, w: v.videoWidth, h: v.videoHeight }); };
+    } else if (file.type.startsWith("image/")) {
+      const im = new Image();
+      im.onload = () => setBg({ kind: "image", el: im, w: im.naturalWidth, h: im.naturalHeight });
+      im.src = url;
+    }
+  };
+
+  const fileName = (ext: string) => `wraith-${data.symbol}-${pnl >= 0 ? "win" : "loss"}.${ext}`;
+  const saveBlob = (blob: Blob, name: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
 
   const handleDownload = async () => {
-    setBusy(true);
+    setBusy("png");
+    try { const b = await renderSharePng(params); if (b) saveBlob(b, fileName("png")); } catch (e) { console.error("share png failed", e); }
+    setBusy("");
+  };
+  const handleCopy = async () => {
+    setBusy("copy");
     try {
-      const canvas = await getCanvas();
-      if (!canvas) return;
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `wraith-${data.symbol}-${pnl >= 0 ? "win" : "loss"}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }, "image/png");
-    } catch (e) {
-      console.error("Share card export failed", e);
-    }
-    setBusy(false);
+      const b = await renderSharePng(params);
+      if (b) { await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    } catch { /* clipboard may be blocked */ }
+    setBusy("");
+  };
+  const handleClip = async () => {
+    setBusy("clip");
+    try {
+      const res = await recordShareClip(params);
+      if (!res) { alert("This browser can't record video clips."); setBusy(""); return; }
+      const name = fileName(res.ext);
+      const file = new File([res.blob], name, { type: res.blob.type });
+      const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+      if (nav.canShare?.({ files: [file] })) {
+        try { await nav.share({ files: [file], title: `${data.symbol} on Wraith` }); setBusy(""); return; } catch { /* cancelled: fall back to download */ }
+      }
+      saveBlob(res.blob, name);
+    } catch (e) { console.error("share clip failed", e); }
+    setBusy("");
   };
 
-  const handleCopy = async () => {
-    setBusy(true);
-    try {
-      const canvas = await getCanvas();
-      if (!canvas) return;
-      canvas.toBlob(async (blob) => {
-        if (!blob) return;
-        try {
-          await navigator.clipboard.write([
-            new ClipboardItem({ "image/png": blob }),
-          ]);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        } catch {}
-      }, "image/png");
-    } catch {}
-    setBusy(false);
-  };
+  const btn = (accent?: string): React.CSSProperties => ({
+    background: accent ? "#1a0e08" : "#111",
+    border: `1px solid ${accent ? accent + "66" : C.border}`,
+    color: accent ?? C.muted,
+    fontSize: 10,
+    fontWeight: 700,
+    padding: "8px 14px",
+    borderRadius: 4,
+    cursor: busy ? "not-allowed" : "pointer",
+    letterSpacing: "0.1em",
+    opacity: busy ? 0.6 : 1,
+    ...MONO,
+  });
 
   return (
     <div
       onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.88)",
-        zIndex: 1000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backdropFilter: "blur(4px)",
-        animation: "shareOverlayIn 0.18s ease-out",
-      }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)", padding: 12, overflowY: "auto" }}
     >
-      <style>{`
-        @keyframes shareOverlayIn {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-        @keyframes shareCardIn {
-          from { opacity: 0; transform: translateY(-40px) scale(0.96); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-      `}</style>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 10,
-          animation: "shareCardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
-        }}
-      >
-        {/* ── PREVIEW CARD (display only — NOT captured) ── */}
-        <div
-          style={{
-            width: CARD_W,
-            height: CARD_H,
-            background: "#080808",
-            border: `1px solid ${theme.accent}44`,
-            borderRadius: 12,
-            position: "relative",
-            overflow: "hidden",
-            boxShadow: "0 12px 32px #00000066",
-            fontFamily: "'IBM Plex Mono', monospace",
-            boxSizing: "border-box",
-          }}
-        >
-          <div style={{ position: "absolute", inset: 0, zIndex: 0, background: theme.bg }} />
-          <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: ghostSvg(theme.glow) }} />
-          <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: 3, zIndex: 2, background: `linear-gradient(90deg, ${theme.accent}, transparent)` }} />
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%", maxWidth: 640 }}>
+        <canvas
+          ref={canvasRef}
+          width={SHARE_W}
+          height={SHARE_H}
+          style={{ width: "100%", maxWidth: 640, aspectRatio: "16 / 9", borderRadius: 14, boxShadow: `0 16px 48px #000a, 0 0 40px ${rank.glow}` }}
+        />
 
-          {/* Content */}
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              zIndex: 3,
-              padding: "18px 20px 16px",
-              boxSizing: "border-box",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-            }}
-          >
-            {/* TOP: avatar + symbol */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {displayTokenImg ? (
-                <img
-                  src={displayTokenImg}
-                  alt={data.symbol}
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: "50%",
-                    objectFit: "cover",
-                    border: `2px solid ${pnlColor}55`,
-                    flexShrink: 0,
-                  }}
-                  onError={() => setDisplayTokenImg(undefined)}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: "50%",
-                    background: `${avatarBg}22`,
-                    border: `2px solid ${avatarBg}55`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: avatarBg,
-                    fontSize: 14,
-                    fontWeight: 900,
-                    flexShrink: 0,
-                  }}
-                >
-                  {letter}
-                </div>
-              )}
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span
-                    style={{
-                      color: "#fff",
-                      fontSize: 15,
-                      fontWeight: 900,
-                      letterSpacing: "0.02em",
-                    }}
-                  >
-                    {data.symbol}
-                  </span>
-                  {data.status === "watching" && (
-                    <span
-                      style={{
-                        fontSize: 7,
-                        padding: "2px 6px",
-                        borderRadius: 2,
-                        color: "#00c47a",
-                        border: "1px solid #00c47a55",
-                        fontWeight: 700,
-                        letterSpacing: "0.1em",
-                        background: "#00c47a11",
-                      }}
-                    >
-                      LIVE
-                    </span>
-                  )}
-                  {data.exitReason && (
-                    <span
-                      style={{
-                        fontSize: 7,
-                        padding: "2px 6px",
-                        borderRadius: 2,
-                        color: exitReasonColor,
-                        border: `1px solid ${exitReasonColor}55`,
-                        fontWeight: 700,
-                        background: `${exitReasonColor}11`,
-                      }}
-                    >
-                      {data.exitReason}
-                    </span>
-                  )}
-                </div>
-                <div style={{ color: "#ffffff55", fontSize: 8, marginTop: 2 }}>
-                  {data.amountSol} SOL · {fmtAgo(data.ts)}
-                </div>
-              </div>
-            </div>
-
-            {/* MIDDLE: big PnL */}
-            <div>
-              <div
-                style={{
-                  fontSize: 46,
-                  fontWeight: 900,
-                  color: pnlColor,
-                  lineHeight: 1,
-                  letterSpacing: "-0.03em",
-                }}
-              >
-                {fmtPnl(pnl)}
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: `${pnlColor}aa`,
-                  marginTop: 5,
-                  fontWeight: 600,
-                }}
-              >
-                {isWin ? "+" : ""}
-                {solPnl.toFixed(3)} SOL
-              </div>
-            </div>
-
-            {/* BOTTOM: stats + branding */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-end",
-              }}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {[
-                  { label: "ENTRY", value: fmtMcap(data.entryMcap) },
-                  {
-                    label: data.status === "sold" ? "EXIT" : "CURRENT",
-                    value: fmtMcap(exitMcap ?? 0),
-                    highlight: true,
-                  },
-                  {
-                    label: "MULTI",
-                    value:
-                      exitMcap && data.entryMcap
-                        ? `${(exitMcap / data.entryMcap).toFixed(2)}×`
-                        : "—",
-                  },
-                  {
-                    label: "SL / TP",
-                    value: `${data.slPct}% / ${data.tpX}×`,
-                  },
-                ].map((row) => (
-                  <div
-                    key={row.label}
-                    style={{ display: "flex", gap: 10, alignItems: "center" }}
-                  >
-                    <span
-                      style={{
-                        color: "#ffffff44",
-                        fontSize: 8,
-                        minWidth: 52,
-                      }}
-                    >
-                      {row.label}
-                    </span>
-                    <span
-                      style={{
-                        color: row.highlight ? pnlColor : "#ffffffcc",
-                        fontSize: 10,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {row.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Branding */}
-              <div style={{ textAlign: "right" as const }}>
-                <div
-                  style={{
-                    color: "#e8490f",
-                    fontSize: 13,
-                    fontWeight: 800,
-                    letterSpacing: "0.22em",
-                  }}
-                >
-                  WRAITH
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── THEME PICKER ── */}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-          {SHARE_THEMES.map((t, i) => (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
+          {SHARE_RANKS.map((r, i) => (
             <button
-              key={t.name}
+              key={r.name}
               type="button"
-              onClick={() => setThemeIdx(i)}
-              aria-label={t.name}
+              onClick={() => setRankIdx(i)}
+              aria-label={r.name}
+              title={r.name}
               style={{
-                width: 26, height: 26, borderRadius: "50%", cursor: "pointer",
-                background: t.bg, border: `2px solid ${i === themeIdx ? t.accent : "#ffffff22"}`,
-                boxShadow: i === themeIdx ? `0 0 8px ${t.accent}88` : "none",
+                width: 28, height: 28, borderRadius: "50%", cursor: "pointer",
+                background: `radial-gradient(circle at 35% 30%, ${r.accent}, #0b0b0c 85%)`,
+                border: `2px solid ${i === rankIdx ? r.accent : "#ffffff22"}`,
+                boxShadow: i === rankIdx ? `0 0 10px ${r.accent}88` : "none",
               }}
             />
           ))}
-        </div>
-
-        {/* ── ACTION BUTTONS ── */}
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            onClick={handleDownload}
-            disabled={busy || !assetsReady}
-            style={{
-              background: busy ? "#0d0d0d" : C.orange,
-              border: "none",
-              color: "#fff",
-              fontSize: 9,
-              fontWeight: 700,
-              padding: "7px 14px",
-              borderRadius: 4,
-              cursor: busy || !assetsReady ? "not-allowed" : "pointer",
-              letterSpacing: "0.1em",
-              opacity: !assetsReady ? 0.5 : 1,
-              ...MONO,
-            }}
-          >
-            {busy ? "RENDERING…" : !assetsReady ? "LOADING…" : "↓ DOWNLOAD PNG"}
-          </button>
-          <button
-            onClick={handleCopy}
-            disabled={busy || !assetsReady}
-            style={{
-              background: copied ? "#001a0a" : "#111",
-              border: `1px solid ${copied ? C.green + "55" : C.border}`,
-              color: copied ? C.green : C.muted,
-              fontSize: 9,
-              fontWeight: 700,
-              padding: "7px 14px",
-              borderRadius: 4,
-              cursor: busy || !assetsReady ? "not-allowed" : "pointer",
-              letterSpacing: "0.1em",
-              opacity: !assetsReady ? 0.5 : 1,
-              ...MONO,
-            }}
-          >
-            {copied ? "✓ COPIED" : "⧉ COPY IMG"}
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              background: "transparent",
-              border: `1px solid ${C.border}`,
-              color: C.dim,
-              fontSize: 9,
-              padding: "7px 10px",
-              borderRadius: 4,
-              cursor: "pointer",
-              ...MONO,
-            }}
-          >
-            ✕
+          <button type="button" onClick={() => setVariant((v) => (v + 1 + Math.floor(Math.random() * (SHARE_VARIANTS - 1))) % SHARE_VARIANTS)} style={btn(rank.accent)}>
+            🎲 SHUFFLE
           </button>
         </div>
 
-        {!assetsReady && (
-          <div style={{ color: C.muted, fontSize: 8, ...MONO }}>
-            loading assets…
-          </div>
-        )}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+          <button onClick={handleClip} disabled={!!busy} style={btn(rank.accent)}>{busy === "clip" ? "RECORDING 5s…" : "▶ SHARE CLIP"}</button>
+          <button onClick={handleDownload} disabled={!!busy} style={btn()}>{busy === "png" ? "RENDERING…" : "↓ PNG"}</button>
+          <button onClick={handleCopy} disabled={!!busy} style={btn()}>{copied ? "✓ COPIED" : "⧉ COPY IMG"}</button>
+          <label style={{ ...btn(), cursor: "pointer" }}>
+            {bg ? "✓ BG SET" : "＋ YOUR BG"}
+            <input type="file" accept="image/*,video/*" style={{ display: "none" }} onChange={(e) => { pickBgFile(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
+          {bg && <button onClick={() => setBg(null)} style={btn()} aria-label="Remove background">✕</button>}
+          <button onClick={onClose} style={{ ...btn(), background: "transparent" }}>CLOSE</button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HOT WALLET SETUP
-// ─────────────────────────────────────────────────────────────────────────────
 function HotWalletSetup({
   onUnlocked,
 }: {

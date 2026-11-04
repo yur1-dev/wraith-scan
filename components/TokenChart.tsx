@@ -156,6 +156,7 @@ export default function TokenChart({
   const [spotTick, setSpotTick] = useState(0);
   const [spotHover, setSpotHover] = useState(false);
   const spotPinRef = useRef(false);
+  const spotCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showTrades, setShowTrades] = useState(true);
   const [dots, setDots] = useState<{ key: string; x: number; y: number; side: "buy" | "sell"; n: number; avatar: string; name: string; userId: string }[]>([]);
   const [wTraders, setWTraders] = useState<{ userId: string; displayName: string; avatar: string; lastSide: "buy" | "sell"; lastAt: number; count: number }[]>([]);
@@ -577,7 +578,12 @@ export default function TokenChart({
     // pin it to the price Wraith actually flagged it at (same level as the yellow Spotted line), not to a candle's high
     const spotValue = spottedMcap && spottedMcap > 0 ? (effectiveMetric === "mcap" ? spottedMcap : supplyKey ? spottedMcap / supplyKey : 0) : 0;
     const y = main.priceToCoordinate(spotValue > 0 ? spotValue : c.h * mult);
-    setSpotPos(x == null || y == null ? null : { x, y });
+    setSpotPos((prev) => {
+      if (x == null || y == null) return null;
+      // ignore sub-pixel drift so the marker holds still under the cursor while live ticks arrive
+      if (prev && Math.abs(prev.x - x) < 2 && Math.abs(prev.y - y) < 2) return prev;
+      return { x, y };
+    });
   }, [spottedAt, spottedMcap, supplyKey, candles, tfSec, mult, spotTick, style, effectiveMetric]);
 
   // ── Wraith traders: who on the platform bought / sold this token ──
@@ -1024,14 +1030,21 @@ export default function TokenChart({
 
         {spotPos && status === "ready" && (
           <div
-            onMouseEnter={(e) => { if (!spotPinRef.current) { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); } }}
+            onMouseEnter={(e) => {
+              if (spotCloseRef.current) { clearTimeout(spotCloseRef.current); spotCloseRef.current = null; }
+              if (!spotPinRef.current) { setSpotRect(e.currentTarget.getBoundingClientRect()); setSpotHover(true); }
+            }}
             onClick={(e) => {
               e.stopPropagation();
               const r = e.currentTarget.getBoundingClientRect();
               if (spotPinRef.current) { spotPinRef.current = false; setSpotHover(false); }
               else { spotPinRef.current = true; setSpotRect(r); setSpotHover(true); }
             }}
-            onMouseLeave={() => { if (!spotPinRef.current) setSpotHover(false); }}
+            onMouseLeave={() => {
+              if (spotPinRef.current) return;
+              if (spotCloseRef.current) clearTimeout(spotCloseRef.current);
+              spotCloseRef.current = setTimeout(() => setSpotHover(false), 350); // grace period: the chart may nudge the marker
+            }}
             style={{ position: "absolute", left: spotPos.x, top: Math.max(4, spotPos.y - 34), transform: "translateX(-50%)", pointerEvents: "auto", cursor: "pointer", padding: "6px 8px", touchAction: "manipulation", display: "flex", flexDirection: "column", alignItems: "center", zIndex: 5 }}
           >
             {spotHover && spotCard && spotRect && typeof document !== "undefined" && createPortal(

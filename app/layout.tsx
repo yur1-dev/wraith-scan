@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import PullToRefresh from "@/components/PullToRefresh";
 import localFont from "next/font/local";
 import "./globals.css";
 import "./wraith-ui.css";
@@ -63,6 +64,7 @@ export default function RootLayout({
         <BootSplash />
         <FcmLink />
         <SwRegister />
+        <PullToRefresh />
         <WalletProvider>
           <WraithTierProvider>{children}</WraithTierProvider>
         </WalletProvider>

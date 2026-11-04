@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
 
     const [profiles, positions, viewerHearts, viewerReposts, commentCounts] = await Promise.all([
       db.collection("profiles")
-        .find({ userId: { $in: userIds } }, { projection: { _id: 0, userId: 1, username: 1, displayName: 1, avatarDataUrl: 1, avatarUrl: 1 } })
+        .find({ userId: { $in: userIds } }, { projection: { _id: 0, userId: 1, username: 1, displayName: 1, avatarDataUrl: 1, avatarUrl: 1, xHandle: 1 } })
         .toArray(),
       mint
         ? db.collection("positions")
@@ -104,6 +104,7 @@ export async function GET(request: NextRequest) {
         userId: d.userId,
         displayName: profile?.displayName ?? "Wraith trader",
         username: profile?.username ?? null,
+        xHandle: (profile?.xHandle as string | undefined) || null,
         avatarDataUrl: profile?.avatarDataUrl || profile?.avatarUrl || "",
         text: d.text,
         createdAt: d.createdAt,

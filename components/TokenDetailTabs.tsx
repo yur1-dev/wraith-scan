@@ -1,5 +1,6 @@
 "use client";
 
+import { safetyBand } from "@/lib/scoreBand";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { visibleInterval } from "@/lib/visibleInterval";
 import Link from "next/link";
@@ -311,14 +312,14 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
                 <div className="dt-safety">
                   <Ring value={safetyScore} />
                   <div>
-                    <div className="dt-h">{safetyScore >= 70 ? <ShieldCheck size={15} color="#37d58a" /> : <ShieldAlert size={15} color={safetyScore >= 40 ? "#ffba55" : "#e5594a"} />} SAFETY SCORE</div>
-                    <div className="mute" style={{ fontSize: 10, marginTop: 4, maxWidth: 360, lineHeight: 1.5 }}>Automated checks on mint authority, liquidity and holder spread. A high score lowers risk, it never removes it.</div>
+                    <div className="dt-h">{safetyScore >= 70 ? <ShieldCheck size={15} color="#37d58a" /> : <ShieldAlert size={15} color={safetyScore >= 40 ? "#ffba55" : "#e5594a"} />} SAFETY SCORE <span style={{ marginLeft: 6, color: safetyBand(safetyScore).color }}>{safetyBand(safetyScore).label}</span></div>
+                    <div className="mute" style={{ fontSize: 10, marginTop: 4, maxWidth: 360, lineHeight: 1.5 }}>{safetyBand(safetyScore).hint}. Checks mint authority, liquidity and holder spread. A high score lowers risk, it never removes it.</div>
                   </div>
                 </div>
               )}
               {safetyBreakdown && safetyBreakdown.length > 0 && (
                 <div className="dt-checks">
-                  {safetyBreakdown.map((b) => (
+                  {[...safetyBreakdown].sort((a, b) => Number(a.pass) - Number(b.pass)).map((b) => (
                     <div key={b.label} className={b.pass ? "ok" : "bad"}>
                       <span>{b.pass ? "✓" : "✕"}</span>
                       <div><b>{b.label}</b><small>{b.detail}</small></div>

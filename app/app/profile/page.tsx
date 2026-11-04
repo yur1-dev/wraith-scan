@@ -7,6 +7,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { usePrivy } from "@privy-io/react-auth";
+import XLinkBridge, { type XLinkApi } from "@/components/XLinkBridge";
+import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
 import {
   LAMPORTS_PER_SOL,
   Keypair,
@@ -38,6 +40,7 @@ import StyledSelect from "@/components/StyledSelect";
 import UsernameSetupModal from "@/components/UsernameSetupModal";
 import FollowListModal from "@/components/FollowListModal";
 import { decryptHotWalletKey } from "@/lib/hotWalletCrypto";
+import { readLast, writeLast } from "@/lib/lastGood";
 import { useCashSources } from "@/lib/useCashSources";
 import {
   DisplayCurrency,
@@ -248,21 +251,33 @@ export default function ProfilePage() {
   const coverImgRef = useRef<HTMLImageElement | null>(null);
   const [coverCrop, setCoverCrop] = useState<{ zoom: number; x: number; y: number } | null>(null);
 
+  // last known balance and SOL price, shown instantly (and offline) while fresh values load
+  useEffect(() => {
+    const w = readLast<number>("wallet_sol");
+    const p = readLast<number>("sol_usd");
+    if (w !== null) setWalletBalance((cur) => cur ?? w);
+    if (p !== null) setSolUsd((cur) => cur ?? p);
+  }, []);
+
   const refreshWalletBalance = useCallback(async () => {
     const balanceAddress = embeddedSolanaAddress
       ? new PublicKey(embeddedSolanaAddress)
       : publicKey;
     if (!balanceAddress) {
-      setWalletBalance(null);
-      return;
+      return; // wallet not ready yet: keep the last known balance instead of flashing empty
     }
     setWalletLoading(true);
     try {
       const lamports = await connection.getBalance(balanceAddress, "confirmed");
       setWalletBalance(lamports / LAMPORTS_PER_SOL);
+      writeLast("wallet_sol", lamports / LAMPORTS_PER_SOL);
     } catch (cause) {
       console.error("[profile wallet balance]", cause);
-      setError("Could not load the connected wallet balance. Try refreshing.");
+      // offline or RPC hiccup: keep showing the last balance; only complain when there is nothing to show
+      setWalletBalance((cur) => {
+        if (cur === null) setError("Could not load the connected wallet balance. Try refreshing.");
+        return cur;
+      });
     } finally {
       setWalletLoading(false);
     }
@@ -475,9 +490,18 @@ export default function ProfilePage() {
     } else if (result === "not-configured") {
       setError("X account linking is not configured on this server.");
     } else {
-      setError("X account linking failed. Please try again.");
+      const why = url.searchParams.get("why") ?? "";
+      const reason =
+        why === "denied" ? "You cancelled the X authorization."
+        : why === "cookie" || why === "state" ? "The link session expired or came back on a different address. Start the link again from this same site."
+        : why === "account-402" || why === "token-402" || why === "account-403" ? "X refused the request. The X developer app has no API credits or access. Add credits in the X Developer Console, then try again."
+        : why === "token-400" || why === "token-401" ? "X rejected the app keys or the callback URL. Check the Client ID/Secret and that the callback URL matches exactly."
+        : why === "account-429" ? "X rate limit reached. Try again in a few minutes."
+        : "";
+      setError(`X account linking failed${why ? ` (${why})` : ""}. ${reason || "Please try again."}`);
     }
     url.searchParams.delete("x");
+    url.searchParams.delete("why");
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
@@ -497,6 +521,7 @@ export default function ProfilePage() {
           payload?.[SOL_MINT]?.usdPrice ?? payload?.[SOL_MINT]?.price;
         if (active && typeof price === "number" && Number.isFinite(price)) {
           setSolUsd(price);
+          writeLast("sol_usd", price);
         }
       } catch (cause) {
         console.error("[profile SOL price]", cause);
@@ -777,11 +802,78 @@ export default function ProfilePage() {
     }
   };
 
+  // ── X account, linked through Privy ─────────────────────────────────────────────────────────────────────────────
+  // Privy's own X app does the sign-in, so Wraith needs no X developer credits. The server reads the handle from Privy
+  // (never from this request) and saves it on the profile.
+  const xSyncing = useRef(false);
+  const xAutoTried = useRef("");
+  const syncXFromPrivy = useCallback(async () => {
+    if (xSyncing.current) return;
+    xSyncing.current = true;
+    setXBusy(true);
+    try {
+      const response = await fetch("/api/user/x-account/privy", { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error ?? "Could not save the linked X account.");
+      setProfile((current) => ({ ...current, xHandle: payload.username }));
+      setDraft((current) => ({ ...current, xHandle: payload.username }));
+      setNotice(`X account @${payload.username} linked.`);
+    } catch (cause) {
+      console.error("[profile X sync]", cause);
+      setError(cause instanceof Error ? cause.message : "Could not save the linked X account.");
+    } finally {
+      xSyncing.current = false;
+      setXBusy(false);
+    }
+  }, []);
+
+  // Privy's link/unlink hooks live in <XLinkBridge> (rendered below only when Privy is configured).
+  const xLinkApi = useRef<XLinkApi | null>(null);
+  const onXLinkError = useCallback((reason: string) => {
+    setXBusy(false);
+    if (reason === "exited_link_flow" || reason === "oauth_user_denied") return; // closed or cancelled on X: nothing to report
+    setError(
+      reason === "linked_to_another_user"
+        ? "That X account is already linked to another WRAITH login."
+        : `Could not link X (${reason}). Please try again.`,
+    );
+  }, []);
+
+  const startXLink = () => {
+    setError("");
+    const api = xLinkApi.current;
+    if (!api) {
+      setError("X account linking is temporarily unavailable.");
+      return;
+    }
+    setNotice("");
+    setXBusy(true);
+    api.link(); // sends you to X to approve, then back here
+    window.setTimeout(() => setXBusy(false), 15_000); // never leave the button stuck if the redirect did not start
+  };
+
+  // A linked X account that is not saved on the profile yet (for example the page reloaded right after the X redirect).
+  // Tried once per handle per page load so a failure can never loop.
+  const privyXName = privyUser?.twitter?.username ?? "";
+  useEffect(() => {
+    if (!profileReady || xBusy || !privyXName) return;
+    if (profile.xHandle.toLowerCase() === privyXName.toLowerCase()) return;
+    if (xAutoTried.current === privyXName) return;
+    xAutoTried.current = privyXName;
+    void syncXFromPrivy();
+  }, [profileReady, xBusy, privyXName, profile.xHandle, syncXFromPrivy]);
+
   const unlinkXAccount = async () => {
     setXBusy(true);
     setError("");
     setNotice("");
     try {
+      // Unlink on Privy first, otherwise it would simply re-link itself the next time this page opens.
+      const subject = privyUser?.twitter?.subject;
+      if (subject) {
+        if (!xLinkApi.current) throw new Error("X account linking is temporarily unavailable.");
+        await xLinkApi.current.unlink(subject);
+      }
       const response = await fetch("/api/user/x-account", {
         method: "DELETE",
       });
@@ -1134,6 +1226,7 @@ export default function ProfilePage() {
     <main className="wraith-dashboard profile-page">
       <Header />
       {viewerSrc && <PhotoViewer src={viewerSrc} onClose={() => setViewerSrc(null)} />}
+      {PRIVY_WALLETS_ENABLED && <XLinkBridge apiRef={xLinkApi} onLinked={() => void syncXFromPrivy()} onError={onXLinkError} />}
       <div className="profile-shell">
         <section className="profile-hero" id="profile-overview">
           {/* Cover banner */}
@@ -1628,9 +1721,7 @@ export default function ProfilePage() {
                   className="profile-social-link"
                   type="button"
                   disabled={!xLinkAvailable || xBusy}
-                  onClick={() => {
-                    window.location.assign("/api/user/x-account/connect");
-                  }}
+                  onClick={startXLink}
                 >
                   {xBusy ? "Connecting…" : "Connect X account"}{" "}
                   <ArrowUpRight size={14} />
@@ -2049,7 +2140,7 @@ export default function ProfilePage() {
                       className="profile-x-connect-btn"
                       type="button"
                       disabled={!xLinkAvailable || xBusy}
-                      onClick={() => window.location.assign("/api/user/x-account/connect")}
+                      onClick={startXLink}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.632L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
                       Link X account
@@ -2058,7 +2149,7 @@ export default function ProfilePage() {
                 </div>
                 {!xLinkAvailable && !profile.xHandle && (
                   <small className="profile-modal-field-hint">
-                    Add X_OAUTH_CLIENT_ID and register this app callback in the X Developer Portal. Set X_OAUTH_CALLBACK_URL to that same callback URL to enable linking.
+                    X account linking is temporarily unavailable.
                   </small>
                 )}
               </div>

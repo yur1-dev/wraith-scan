@@ -14,13 +14,28 @@ import { SOLANA_MINT_RE } from "@/lib/market";
 import { chainOf, EVM_ADDR_RE } from "@/lib/chains";
 import FollowingSidebar from "@/components/FollowingSidebar";
 import { TokenIcon } from "@/components/TokenIcon";
+import SheetBoundary from "@/components/SheetBoundary";
 
 const Header = dynamic(() => import("@/components/Header"), { ssr: false });
 const TokenPanel = dynamic(() => import("@/components/TokenPanel"), { ssr: false });
 const TokenMarketList = dynamic(() => import("@/components/TokenMarketList"), { ssr: false });
 const EvmTokenView = dynamic(() => import("@/components/EvmTokenView"), { ssr: false });
 const SignalsSidebar = dynamic(() => import("@/components/SignalsSidebar"), { ssr: false });
-const TokenTradeDock = dynamic(() => import("@/components/TokenTradeDock"), { ssr: false });
+// The trade panel is a big chunk (wallet, swap and bridge code). It used to load only when Buy/Sell was tapped and showed NOTHING
+// while it loaded (or if the download failed), which looked like an empty sheet. It is now fetched as soon as the page opens
+// and shows a skeleton while it finishes.
+const loadTradeDock = () => import("@/components/TokenTradeDock");
+const TokenTradeDock = dynamic(loadTradeDock, {
+  ssr: false,
+  loading: () => (
+    <div style={{ padding: 16, display: "grid", gap: 12 }} aria-busy="true" aria-label="Loading trade panel">
+      <div className="wx-skel" style={{ height: 44, borderRadius: 10 }} />
+      <div className="wx-skel" style={{ height: 38, borderRadius: 10 }} />
+      <div className="wx-skel" style={{ height: 54, borderRadius: 10 }} />
+      <div className="wx-skel" style={{ height: 48, borderRadius: 10 }} />
+    </div>
+  ),
+});
 
 type SideTab = "tokens" | "signals" | "saved" | "following";
 type MobileTab = "chart" | "trade" | "market";
@@ -44,6 +59,8 @@ export default function TokenPage() {
   const [sideTab, setSideTab] = useState<SideTab>("tokens");
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [sheet, setSheet] = useState<null | "buy" | "sell">(null);
+  // warm the trade panel chunk so the sheet opens instantly
+  useEffect(() => { const t = window.setTimeout(() => { void loadTradeDock().catch(() => undefined); }, 400); return () => window.clearTimeout(t); }, []);
   const [favorites, setFavorites] = useState<MemeTrend[]>([]);
   const isEvm = EVM_ADDR_RE.test(address);
   const validMint = SOLANA_MINT_RE.test(address) || isEvm;
@@ -214,7 +231,9 @@ export default function TokenPage() {
                 <div className="wx-sheet" role="dialog" aria-label={sheet === "buy" ? "Buy" : "Sell"} onClick={(e) => e.stopPropagation()}>
                   <div className="wx-sheet-grab" aria-hidden="true" />
                   <button type="button" className="wx-sheet-x" onClick={() => setSheet(null)} aria-label="Close">×</button>
-                  <TokenTradeDock meme={meme} initialMode={sheet} />
+                  <SheetBoundary label={sheet === "buy" ? "Buy" : "Sell"}>
+                    <TokenTradeDock meme={meme} initialMode={sheet} />
+                  </SheetBoundary>
                 </div>
               </div>
             )}

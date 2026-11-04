@@ -343,16 +343,29 @@ html { scroll-behavior: smooth; }
 @media (max-width: 760px) { .ws-sec[id] { scroll-margin-top: 90px; } }
 
 /* Download app sheet */
-.dl-overlay{position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.66);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px}
-.dl-sheet{position:relative;width:100%;max-width:440px;max-height:calc(100dvh - 32px);overflow:auto;background:#121214;border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:24px 20px 20px;color:#f3f3f5;text-align:left;font-family:inherit;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-.dl-sheet h3{margin:0 0 4px;font-size:20px}
-.dl-sub{margin:0 0 16px;font-size:13px;opacity:.65}
-.dl-x{position:absolute;top:10px;right:12px;width:34px;height:34px;border:0;border-radius:10px;background:rgba(255,255,255,.06);color:inherit;font-size:22px;line-height:1;cursor:pointer}
-.dl-card{border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:14px;margin-top:10px;background:rgba(255,255,255,.03)}
-.dl-card h4{margin:0 0 10px;font-size:14px;letter-spacing:.04em}
-.dl-card ol{margin:12px 0 0;padding-left:20px;list-style:decimal;font-size:13px;line-height:1.65;opacity:.85;text-align:left}
-.dl-card li{list-style:decimal;margin:0 0 2px}
-.dl-card h4{text-align:left}
-.dl-soon{display:block}
-.dl-btn{display:flex;align-items:center;justify-content:center;height:44px;border-radius:12px;background:#ff7b3d;color:#fff;font-weight:700;text-decoration:none}
-.dl-soon{display:inline-block;margin-top:10px;font-size:12px;opacity:.55}
+.dl-overlay{position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px}
+.dl-sheet{position:relative;width:100%;max-width:460px;max-height:calc(100dvh - 32px);overflow:auto;background:radial-gradient(120% 80% at 50% -10%,rgba(255,123,61,.16),transparent 60%),#111113;border:1px solid rgba(255,255,255,.1);border-radius:24px;padding:22px 18px 18px;color:#f3f3f5;text-align:left;font-family:inherit;box-shadow:0 40px 100px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06)}
+.dl-top{display:flex;align-items:center;gap:14px;padding-right:34px;margin-bottom:16px}
+.dl-app{flex:none;width:56px;height:56px;border-radius:16px;box-shadow:0 6px 20px rgba(255,123,61,.28),0 0 0 1px rgba(255,255,255,.08)}
+.dl-sheet h3{margin:0 0 3px;font-size:19px;line-height:1.2;letter-spacing:-.01em}
+.dl-sub{margin:0;font-size:12.5px;line-height:1.4;opacity:.62}
+.dl-x{position:absolute;top:12px;right:12px;width:32px;height:32px;border:0;border-radius:50%;background:rgba(255,255,255,.07);color:inherit;font-size:20px;line-height:1;cursor:pointer}
+.dl-x:hover{background:rgba(255,255,255,.14)}
+.dl-card{border:1px solid rgba(255,255,255,.09);border-radius:18px;padding:14px;margin-top:10px;background:rgba(255,255,255,.035)}
+.dl-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.dl-chip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;font-size:11.5px;font-weight:700;letter-spacing:.03em}
+.dl-chip.android{background:rgba(61,220,132,.14);color:#4ade90}
+.dl-chip.ios{background:rgba(255,255,255,.1);color:#e9e9ee}
+.dl-note{font-size:11.5px;opacity:.5}
+.dl-btn{display:flex;align-items:center;justify-content:center;gap:8px;height:48px;border-radius:14px;background:linear-gradient(180deg,#ff8d52,#ff6f2e);color:#fff;font-weight:800;font-size:15px;text-decoration:none;box-shadow:0 8px 24px rgba(255,123,61,.32),inset 0 1px 0 rgba(255,255,255,.25);transition:transform .15s,box-shadow .15s}
+.dl-btn:hover{transform:translateY(-1px);box-shadow:0 12px 30px rgba(255,123,61,.42),inset 0 1px 0 rgba(255,255,255,.25)}
+.dl-steps{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:9px;font-size:13px;line-height:1.4}
+.dl-steps li{list-style:none;display:flex;align-items:center;gap:10px;margin:0;opacity:.88}
+.dl-steps i{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:rgba(255,123,61,.16);color:#ff9a5c;font-style:normal;font-size:11.5px;font-weight:800}
+.dl-steps u{display:inline-flex;vertical-align:-3px;margin-left:2px;text-decoration:none;opacity:.8}
+.dl-store{margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.07)}
+.dl-badge{display:flex;align-items:center;gap:11px;height:50px;padding:0 14px;border-radius:13px;background:#000;border:1px solid rgba(255,255,255,.16);color:#fff;opacity:.72;cursor:default}
+.dl-badge>span{display:flex;flex-direction:column;line-height:1.1;flex:1}
+.dl-badge small{font-size:10px;opacity:.75}
+.dl-badge b{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.dl-badge em{font-style:normal;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.12)}

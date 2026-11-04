@@ -6,6 +6,7 @@
 // cached endpoint, so it is quick and cheap. The old AI/celeb scan is still
 // available behind "Deep scan".
 
+import { riskLevel, signalBand } from "@/lib/scoreBand";
 import { swrRead, swrWrite } from "@/lib/swrCache";
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Flame, LayoutGrid, List, Lock, Radar, RefreshCw, Sparkles, Zap } from "lucide-react";
@@ -98,8 +99,9 @@ function ScoreRing({ score, tier, locked }: { score: number; tier: "HOT" | "WATC
   }
   const r = 15;
   const c = 2 * Math.PI * r;
+  const band = signalBand(score);
   return (
-    <div className={`sg-ring ${tier === "HOT" ? "hot" : "watch"}`} title={`Signal score ${score}/100`}>
+    <div className={`sg-ring ${tier === "HOT" ? "hot" : "watch"}`} style={{ color: band.color }} title={`${band.label} · ${score}/100. ${band.hint}`}>
       <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
         <circle cx="19" cy="19" r={r} fill="none" stroke="currentColor" strokeOpacity="0.16" strokeWidth="3" />
         <circle cx="19" cy="19" r={r} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(score / 100) * c} ${c}`} transform="rotate(-90 19 19)" />
@@ -119,7 +121,10 @@ function CardBase({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; sho
           <strong>{t.symbol}</strong>
           <span><ChainLogo chain={t.chain ?? "solana"} size={13} /> {t.name && t.name !== t.symbol ? t.name : t.dex ?? chainName(t.chain)}</span>
         </div>
-        <ScoreRing score={s.score} tier={s.tier} locked={!showScore} />
+        <div className="sg-ring-wrap">
+          <ScoreRing score={s.score} tier={s.tier} locked={!showScore} />
+          {showScore && <small style={{ color: signalBand(s.score).color }}>{signalBand(s.score).label}</small>}
+        </div>
       </div>
       <div className="sg-metrics">
         <div><small>MCap</small><b>{fmtUsd(t.mcap)}</b></div>
@@ -129,6 +134,7 @@ function CardBase({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; sho
         <div><small>Age</small><b>{t.createdAt ? fmtAge(t.createdAt) : "—"}</b></div>
       </div>
       <div className="sg-tags">
+        <span className="sg-tag sg-risklevel" title={riskLevel(s.risks.length).hint} style={{ color: riskLevel(s.risks.length).color, borderColor: riskLevel(s.risks.length).color }}>● {riskLevel(s.risks.length).label}</span>
         {s.tags.map((x) => <span key={x} className="sg-tag">{x}</span>)}
         {s.risks.map((x) => <span key={x} className="sg-tag risk">{x}</span>)}
       </div>
@@ -147,7 +153,7 @@ function ListRowBase({ s, onOpen, showScore }: { s: Signal; onOpen: () => void; 
           <small><ChainLogo chain={t.chain ?? "solana"} size={12} /> {s.tags[0] ?? (t.name && t.name !== t.symbol ? t.name : chainName(t.chain))}</small>
         </span>
       </span>
-      {showScore ? <b className={s.tier === "HOT" ? "sg-score hot" : "sg-score"}>{s.score}</b> : <b className="sg-score" title={LOCK_TIP} style={{ opacity: .6 }}><Lock size={13} /></b>}
+      {showScore ? <b className="sg-score" style={{ color: signalBand(s.score).color }} title={`${signalBand(s.score).label} · ${s.score}/100`}>{s.score}</b> : <b className="sg-score" title={LOCK_TIP} style={{ opacity: .6 }}><Lock size={13} /></b>}
       <span>{fmtUsd(t.mcap)}</span>
       <span style={{ color: changeColor(t.change.h1) }}>{fmtPct(t.change.h1)}</span>
       <span className="c-vol">{fmtUsd(t.volume.h1)}</span>
@@ -167,7 +173,7 @@ function RailRowBase({ s, onOpen }: { s: Signal; onOpen: () => void }) {
         <small><ChainLogo chain={t.chain ?? "solana"} size={12} /> {s.tags[0] ?? "Momentum"} · {fmtUsd(t.mcap)}</small>
       </span>
       <span className="end">
-        <b className={s.tier === "HOT" ? "hot" : "watch"}>{s.score}</b>
+        <b style={{ color: signalBand(s.score).color }} title={`${signalBand(s.score).label} · ${s.score}/100`}>{s.score}</b>
         <small style={{ color: changeColor(t.change.h1) }}>{fmtPct(t.change.h1)}</small>
       </span>
     </button>

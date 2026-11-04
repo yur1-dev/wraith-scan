@@ -3845,6 +3845,8 @@ export default function Header({ onSelectMeme }: HeaderProps) {
               )}
             </div>
 
+            {/* Paper trading is a tier perk: users without it only saw a dead, greyed-out "LIVE" row, so it is hidden for them */}
+            {canUsePaper && (
             <button
               onClick={() => {
                 const key = "wraith_paper_mode_v1";
@@ -3912,6 +3914,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                 </svg>
               )}
             </button>
+            )}
             <AppLockMenuItem />
             <button
               onClick={() => {

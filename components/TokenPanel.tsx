@@ -5,6 +5,7 @@
 // Rebuilt around two server endpoints (/api/token-price, /api/token-chart) so
 // every number on screen comes from one consistent snapshot.
 
+import { safetyBand } from "@/lib/scoreBand";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { visibleInterval } from "@/lib/visibleInterval";
 import { createPortal } from "react-dom";
@@ -605,10 +606,10 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
         <section className="wx-safety">
           <div className="wx-safety-head">
             <strong>Risk checks</strong>
-            {typeof analysis.safetyScore === "number" && <span>{analysis.safetyScore}/100</span>}
+            {typeof analysis.safetyScore === "number" && <span style={{ color: safetyBand(analysis.safetyScore).color }}>{safetyBand(analysis.safetyScore).label} · {analysis.safetyScore}/100</span>}
           </div>
           <div className="wx-safety-grid">
-            {analysis.safetyBreakdown.map((c) => (
+            {[...analysis.safetyBreakdown].sort((a, b) => Number(a.pass) - Number(b.pass)).map((c) => (
               <div key={c.label} className={c.pass ? "ok" : "bad"} title={c.detail}>
                 <b>{c.pass ? "✓" : "✕"}</b> {c.label}
               </div>

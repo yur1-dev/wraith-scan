@@ -128,6 +128,8 @@ export default function TokenChart({
 }) {
   const onCurveRef = useRef(Boolean(onCurve));
   onCurveRef.current = Boolean(onCurve);
+  const livePriceRef = useRef<number | null>(null);
+  livePriceRef.current = livePrice && livePrice > 0 ? livePrice : null;
   const [tf, setTf] = useState<TfKey>("15m");
   const [metric, setMetric] = useState<Metric>("mcap");
   const [style, setStyle] = useState<Style>("candles");
@@ -648,6 +650,27 @@ export default function TokenChart({
       return;
     }
 
+    // The 10s history poll can lag the live price (different providers, cached bars). Re-applying the newest live tick to the
+    // running candle on every poll keeps ONE source of truth: before this the poll reset the last bar to its stale close, the
+    // next live tick pulled it back, and the candle jumped up and down forever.
+    {
+      const lp = livePriceRef.current;
+      const rows = candlesRef.current;
+      const tail = rows[rows.length - 1];
+      if (lp && tail && lp < tail.c * 20 && lp > tail.c / 20) {
+        const stepMs = tfSec * 1000;
+        const bucket = Math.floor(Date.now() / stepMs) * stepMs;
+        if (tail.t < bucket) {
+          rows.push({ t: bucket, o: tail.c, h: Math.max(tail.c, lp), l: Math.min(tail.c, lp), c: lp, v: 0 });
+        } else {
+          tail.c = lp;
+          tail.h = Math.max(tail.h, lp);
+          tail.l = Math.min(tail.l, lp);
+        }
+      }
+    }
+    const candlesView = candlesRef.current;
+
     const mkMain = (c: ChartCandle) =>
       style === "candles"
         ? { time: chartTime(c.t), open: c.o * mult, high: c.h * mult, low: c.l * mult, close: c.c * mult }
@@ -658,13 +681,13 @@ export default function TokenChart({
     // No full redraw, no flicker, and the viewport and any measure box stay put.
     const key = `${mint}|${chain ?? ""}|${tf}|${style}|${mult}`;
     const prev = pushedRef.current;
-    if (prev && prev.key === key && prev.first === candles[0].t && candles.length >= prev.len && candles.length - prev.len <= 4) {
+    if (prev && prev.key === key && prev.first === candlesView[0].t && candlesView.length >= prev.len && candlesView.length - prev.len <= 4) {
       try {
-        for (let i = Math.max(0, prev.len - 2); i < candles.length; i++) {
-          (main as ISeriesApi<"Candlestick">).update(mkMain(candles[i]) as never);
-          vol.update(mkVol(candles[i]));
+        for (let i = Math.max(0, prev.len - 2); i < candlesView.length; i++) {
+          (main as ISeriesApi<"Candlestick">).update(mkMain(candlesView[i]) as never);
+          vol.update(mkVol(candlesView[i]));
         }
-        pushedRef.current = { key, first: candles[0].t, len: candles.length };
+        pushedRef.current = { key, first: candlesView[0].t, len: candlesView.length };
         return;
       } catch {
         // chart already holds a newer live bar than this poll (or similar): fall through to a full redraw
@@ -674,7 +697,7 @@ export default function TokenChart({
     const seen = new Set<number>();
     const mainData: unknown[] = [];
     const volData: { time: UTCTimestamp; value: number; color: string }[] = [];
-    for (const c of candles) {
+    for (const c of candlesView) {
       const time = chartTime(c.t);
       if (seen.has(time)) continue;
       seen.add(time);
@@ -683,7 +706,7 @@ export default function TokenChart({
     }
     (main as ISeriesApi<"Candlestick">).setData(mainData as never);
     vol.setData(volData);
-    pushedRef.current = { key, first: candles[0].t, len: candles.length };
+    pushedRef.current = { key, first: candlesView[0].t, len: candlesView.length };
 
     if (needFitRef.current) {
       needFitRef.current = false;
@@ -695,7 +718,7 @@ export default function TokenChart({
       // a previous token (or a drag on the price axis) can leave auto-scale off: turn it back on so every token is framed properly
       try { main.priceScale().applyOptions({ autoScale: true }); } catch { /* series gone */ }
     }
-  }, [candles, style, mult, mint, chain, tf]);
+  }, [candles, style, mult, mint, chain, tf, tfSec]);
 
   // ── merge live price into the running candle ──────────────────────────
   useEffect(() => {

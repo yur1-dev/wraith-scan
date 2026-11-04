@@ -1,5 +1,6 @@
 "use client";
 
+import XBadge from "@/components/XBadge";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Heart, MessageCircle, Repeat2 } from "lucide-react";
@@ -11,6 +12,7 @@ interface CalloutItem {
   userId: string;
   displayName: string;
   username: string | null;
+  xHandle?: string | null;
   avatarDataUrl: string;
   text: string;
   createdAt: number;
@@ -85,6 +87,7 @@ export default function ProfileCallouts({ userId }: { userId: string }) {
               <div className="fp-body">
                 <div className="fp-head">
                   <Link href={`/app/u/${encodeURIComponent(c.username ?? c.userId)}`} className="fp-name">{c.displayName}</Link>
+                  <XBadge handle={c.xHandle} />
                   <span className="fp-age">{timeAgo(c.createdAt)}</span>
                   {isFresh(c.createdAt) && <i className="fp-live" aria-label="New" />}
                 </div>

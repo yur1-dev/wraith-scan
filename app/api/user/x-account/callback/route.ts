@@ -21,9 +21,10 @@ type XUserResponse = {
   };
 };
 
-function profileRedirect(request: NextRequest, result: string) {
+function profileRedirect(request: NextRequest, result: string, why?: string) {
   const url = new URL("/app/profile", request.nextUrl.origin);
   url.searchParams.set("x", result);
+  if (why) url.searchParams.set("why", why);
   url.hash = "profile-social";
   return NextResponse.redirect(url);
 }
@@ -62,7 +63,8 @@ export async function GET(request: NextRequest) {
       createHash("sha256").update(expectedState).digest(),
     )
   ) {
-    return clearOAuthCookies(profileRedirect(request, "failed"));
+    // "state" cookie missing usually means the redirect came back on a different host than the one that started the link
+    return clearOAuthCookies(profileRedirect(request, "failed", search.has("error") ? "denied" : !expectedState || !verifier ? "cookie" : "state"));
   }
 
   try {
@@ -89,8 +91,8 @@ export async function GET(request: NextRequest) {
       cache: "no-store",
     });
     if (!tokenResponse.ok) {
-      console.error("[X OAuth token]", tokenResponse.status);
-      return clearOAuthCookies(profileRedirect(request, "failed"));
+      console.error("[X OAuth token]", tokenResponse.status, (await tokenResponse.text().catch(() => "")).slice(0, 300));
+      return clearOAuthCookies(profileRedirect(request, "failed", `token-${tokenResponse.status}`));
     }
     const tokenPayload = (await tokenResponse.json()) as XTokenResponse;
     if (!tokenPayload.access_token) {
@@ -105,8 +107,8 @@ export async function GET(request: NextRequest) {
       },
     );
     if (!accountResponse.ok) {
-      console.error("[X OAuth account lookup]", accountResponse.status);
-      return clearOAuthCookies(profileRedirect(request, "failed"));
+      console.error("[X OAuth account lookup]", accountResponse.status, (await accountResponse.text().catch(() => "")).slice(0, 300));
+      return clearOAuthCookies(profileRedirect(request, "failed", `account-${accountResponse.status}`));
     }
     const accountPayload = (await accountResponse.json()) as XUserResponse;
     const xUser = accountPayload.data;

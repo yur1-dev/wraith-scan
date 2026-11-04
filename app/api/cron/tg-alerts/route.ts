@@ -1,5 +1,5 @@
 // GET /api/cron/tg-alerts  (every minute)
-// Server-side alerts so Telegram works while you're away from the PC:
+// Server-side alerts so Telegram and phone notifications work while you're away from the PC:
 //   1. new HOT/WATCH signals  2. win milestones (2x, 3x, 5x, 10x…) on every tracked call.
 // Auth: Vercel cron sends "Authorization: Bearer $CRON_SECRET"; external cron can use ?key=$CRON_SECRET.
 // Free option if your host only runs daily crons: ping this URL every minute from cron-job.org.
@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
   if (!process.env.TELEGRAM_BOT_TOKEN) {
     // No Telegram bot configured: phone push notifications still run.
     const push = await runPushAlerts().catch((e) => { console.error("[push alerts]", e); return null; });
+    if (push) console.log("[push]", JSON.stringify(push));
     return NextResponse.json({ ok: true, telegram: false, push });
   }
 
@@ -69,32 +70,45 @@ export async function GET(req: NextRequest) {
   } catch { /* feed down: still do wins */ }
   await refreshCalls(true).catch(() => undefined);
 
-  const calls = db.collection<SignalCall>("signal_calls");
+  // Phone push starts here, right after the calls are refreshed and in parallel with the Telegram sends below, so a slow or
+  // failing Telegram step can never keep an alert from reaching a phone.
+  const pushRun = runPushAlerts().catch((e) => { console.error("[push alerts]", e); return null; });
+
   const out = { entries: 0, wins: 0, sent: 0 };
+  let tgError: unknown = null;
+  try {
+    const calls = db.collection<SignalCall>("signal_calls");
 
-  // 1) fresh calls (spotted in the last 20 min)
-  const fresh = await calls.find({ spottedAt: { $gt: Date.now() - 20 * 60_000 }, shadow: { $ne: true }, engine: 2 }).toArray();
-  const feed = new Map(signals.map((s) => [s.token.address, s]));
-  for (const c of fresh) {
-    const sig = feed.get(c.address);
-    if (!first && !sig) continue; // feed missed it this run: don't burn the claim, retry next run
-    if (!(await claim(`entry:${c.address}`))) continue;
-    if (first || !sig) continue;
-    const r = await broadcast("signal", signalMessage(sig), { chain: c.chain ?? "solana", score: sig.score, markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "signal", sym: sig.token.symbol, now: sig.token.mcap, score: sig.score, tier: sig.tier, chain: c.chain ?? "solana", img: sig.token.imageUrl }) });
-    out.entries++; out.sent += r.sent;
+    // 1) fresh calls (spotted in the last 20 min)
+    const fresh = await calls.find({ spottedAt: { $gt: Date.now() - 20 * 60_000 }, shadow: { $ne: true }, engine: 2 }).toArray();
+    const feed = new Map(signals.map((s) => [s.token.address, s]));
+    for (const c of fresh) {
+      const sig = feed.get(c.address);
+      if (!first && !sig) continue; // feed missed it this run: don't burn the claim, retry next run
+      if (!(await claim(`entry:${c.address}`))) continue;
+      if (first || !sig) continue;
+      const r = await broadcast("signal", signalMessage(sig), { chain: c.chain ?? "solana", score: sig.score, markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "signal", sym: sig.token.symbol, now: sig.token.mcap, score: sig.score, tier: sig.tier, chain: c.chain ?? "solana", img: sig.token.imageUrl }) });
+      out.entries++; out.sent += r.sent;
+    }
+
+    // 2) win milestones across the last 7 days
+    const tracked = await calls.find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
+    for (const c of tracked) {
+      const m = milestoneFor(c.lastMcap / c.spottedMcap);
+      if (!m) continue;
+      if (!(await claim(`win:${c.address}:${m}`))) continue;
+      if (first) continue;
+      const r = await broadcast("win", winMessage(c, m), { chain: c.chain ?? "solana", markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "win", sym: c.symbol, x: c.lastMcap / c.spottedMcap, called: c.spottedMcap, now: c.lastMcap, peak: c.peakMcap, chain: c.chain ?? "solana" }) });
+      out.wins++; out.sent += r.sent;
+      await pushBroadcast({ title: `🏆 ${m}x $${c.symbol}`, body: `${(c.lastMcap / c.spottedMcap).toFixed(2)}x from the call`, url: `/app/token/${c.address}`, tag: `w:${c.address}:${m}` }, "signal").catch(() => 0);
+    }
+  } catch (e) {
+    tgError = e;
+    console.error("[tg alerts]", e);
   }
 
-  // 2) win milestones across the last 7 days
-  const tracked = await calls.find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
-  for (const c of tracked) {
-    const m = milestoneFor(c.lastMcap / c.spottedMcap);
-    if (!m) continue;
-    if (!(await claim(`win:${c.address}:${m}`))) continue;
-    if (first) continue;
-    const r = await broadcast("win", winMessage(c, m), { chain: c.chain ?? "solana", markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "win", sym: c.symbol, x: c.lastMcap / c.spottedMcap, called: c.spottedMcap, now: c.lastMcap, peak: c.peakMcap, chain: c.chain ?? "solana" }) });
-    out.wins++; out.sent += r.sent;
-    await pushBroadcast({ title: `🏆 ${m}x $${c.symbol}`, body: `${(c.lastMcap / c.spottedMcap).toFixed(2)}x from the call`, url: `/app/token/${c.address}`, tag: `w:${c.address}:${m}` }, "signal").catch(() => 0);
-  }
-  const push = await runPushAlerts().catch((e) => { console.error("[push alerts]", e); return null; });
+  const push = await pushRun;
+  if (push) console.log("[push]", JSON.stringify(push));
+  if (tgError) return NextResponse.json({ ok: false, error: "telegram step failed", first, ...out, push }, { status: 500 });
   return NextResponse.json({ ok: true, first, ...out, push });
 }

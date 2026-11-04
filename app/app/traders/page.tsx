@@ -9,6 +9,7 @@ import TraderFollowButton from "@/components/TraderFollowButton";
 import PhotoViewer from "@/components/PhotoViewer";
 import Radar from "@/components/Radar";
 import { useCash } from "@/lib/cash";
+import { readLast, writeLast } from "@/lib/lastGood";
 import { fmtHold, fmtMult, type TraderStatsResult } from "@/lib/traderStats";
 
 type Trader = {
@@ -54,6 +55,7 @@ export default function TradersPage() {
   const [traders, setTraders] = useState<Trader[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [stale, setStale] = useState(false);
   const [sort, setSort] = useState<"pnl" | "active" | "open">("pnl");
   const [period, setPeriod] = useState<Period>("d7");
   const [viewer, setViewer] = useState<string | null>(null);
@@ -72,26 +74,41 @@ export default function TradersPage() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/traders")
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Could not load traders.");
-        }
-        if (active) setTraders(payload.traders ?? []);
-      })
-      .catch((cause: unknown) => {
-        if (active) {
-          setError(
-            cause instanceof Error ? cause.message : "Could not load traders.",
-          );
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    // show the last saved ranking instantly (and when offline), then refresh in the background
+    const saved = readLast<Trader[]>("traders");
+    if (saved?.length) { setTraders(saved); setLoading(false); }
+    const load = () =>
+      fetch("/api/traders")
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error ?? "Could not load traders.");
+          if (!active) return;
+          const list: Trader[] = payload.traders ?? [];
+          setTraders(list);
+          setError("");
+          setStale(false);
+          writeLast("traders", list);
+        })
+        .catch((cause: unknown) => {
+          if (!active) return;
+          // keep whatever is already on screen; only show an error when there is nothing to show
+          setStale(true);
+          setTraders((cur) => {
+            if (!cur.length) setError(cause instanceof Error && cause.message !== "Failed to fetch" ? cause.message : "No connection. Pull down to retry.");
+            return cur;
+          });
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    void load();
+    const onBack = () => void load();
+    window.addEventListener("online", onBack);
+    window.addEventListener("wraith:refresh", onBack);
     return () => {
       active = false;
+      window.removeEventListener("online", onBack);
+      window.removeEventListener("wraith:refresh", onBack);
     };
   }, []);
 
@@ -119,7 +136,8 @@ export default function TradersPage() {
           </div>
         </section>
         {viewer && <PhotoViewer src={viewer} onClose={() => setViewer(null)} />}
-        {error && <div className="profile-message is-error">{error}</div>}
+        {stale && traders.length > 0 && <div className="profile-message" style={{ fontSize: 12 }}>Offline: showing the last saved ranking.</div>}
+        {error && !traders.length && <div className="profile-message is-error">{error}</div>}
         {loading ? (
           <div className="traders-grid">
             {Array.from({ length: 6 }).map((_, index) => (

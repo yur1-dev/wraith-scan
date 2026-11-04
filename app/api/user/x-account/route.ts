@@ -1,7 +1,7 @@
 import { getPrivySession } from "@/lib/privyAuth";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongoClient";
-import { getXOAuthConfig } from "@/lib/xOAuth";
+import { getPrivyClient } from "@/lib/privyServer";
 
 export async function GET() {
   const session = await getPrivySession();
@@ -15,7 +15,7 @@ export async function GET() {
       { projection: { _id: 0, username: 1, profileImageUrl: 1, verifiedAt: 1 } },
     );
     return NextResponse.json({
-      available: !!getXOAuthConfig(),
+      available: !!getPrivyClient(), // linking runs through Privy now
       linked: !!link,
       account: link
         ? {

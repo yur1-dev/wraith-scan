@@ -1,5 +1,6 @@
 "use client";
 
+import XBadge from "@/components/XBadge";
 import { CALLOUT_POSTED_EVENT, useLiveRefresh } from "@/lib/useLiveRefresh";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,6 +20,7 @@ interface Callout {
   userId: string;
   displayName: string;
   username: string | null;
+  xHandle?: string | null;
   avatarDataUrl: string;
   text: string;
   createdAt: number;
@@ -312,6 +314,7 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
                 <Link href={`/app/u/${encodeURIComponent(c.username ?? c.userId)}`} className="callout-name">
                   {c.displayName}
                 </Link>
+                <XBadge handle={c.xHandle} />
                 {c.username && <span className="callout-handle">@{c.username}</span>}
               </div>
               <span className="callout-age">{timeAgo(c.createdAt)} ago</span>

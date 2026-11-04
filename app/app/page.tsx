@@ -12,6 +12,7 @@ const TokenBoard = dynamic(() => import("@/components/TokenBoard"), { ssr: false
 const MemeScanner = dynamic(() => import("@/components/MemeScanner"), { ssr: false });
 const WinsBoard = dynamic(() => import("@/components/WinsBoard"), { ssr: false });
 const SignalScanner = dynamic(() => import("@/components/SignalScanner"), { ssr: false });
+const HotCalloutsFeed = dynamic(() => import("@/components/HotCalloutsFeed"), { ssr: false });
 const MarketCallsRail = dynamic(() => import("@/components/MarketCallsRail"), { ssr: false });
 
 // Shared across the app (scanner, wins, favorites, token navigation).
@@ -34,11 +35,12 @@ export interface MemeTrend {
   aiContext?: string;
 }
 
-type View = "market" | "scanner" | "wins";
+type View = "market" | "scanner" | "wins" | "callouts";
 const VIEWS: { key: View; label: string; hint: string }[] = [
   { key: "market", label: "Market", hint: "Live Solana tokens" },
   { key: "scanner", label: "Scanner", hint: "Live momentum signals" },
   { key: "wins", label: "Wins", hint: "How our calls performed" },
+  { key: "callouts", label: "Callouts", hint: "What traders are calling right now" },
 ];
 
 export default function Home() {
@@ -50,6 +52,7 @@ export default function Home() {
     try {
       const v = localStorage.getItem("wraith_home_view");
       if (v === "market" || v === "scanner" || v === "wins") setView(v);
+      else if (v === "callouts" && window.matchMedia("(min-width: 768px)").matches) setView(v);
     } catch {
       /* storage unavailable */
     }
@@ -93,7 +96,7 @@ export default function Home() {
       <nav className="wx-subnav" aria-label="Discover sections">
         <div className="wx-subnav-inner">
           {VIEWS.map((v) => (
-            <button key={v.key} type="button" className={view === v.key ? "on" : ""} aria-current={view === v.key ? "page" : undefined} onClick={() => changeView(v.key)}>
+            <button key={v.key} type="button" data-view={v.key} className={view === v.key ? "on" : ""} aria-current={view === v.key ? "page" : undefined} onClick={() => changeView(v.key)}>
               {v.label}
             </button>
           ))}
@@ -125,6 +128,7 @@ export default function Home() {
             <WinsBoard onSelectMeme={handleSelectMeme} />
           </div>
         )}
+        {view === "callouts" && <HotCalloutsFeed onSelectMeme={handleSelectMeme} />}
       </main>
       <StatusBar />
     </div>

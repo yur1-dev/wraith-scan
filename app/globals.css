@@ -1938,6 +1938,11 @@ hr {
 .profile-field textarea {
   padding: 11px 12px;
   resize: vertical;
+  /* grows with the text up to a limit, then scrolls inside the box */
+  field-sizing: content;
+  min-height: 84px;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .profile-send-form input:focus,

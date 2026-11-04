@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import Header from "@/components/Header";
+import PhotoViewer from "@/components/PhotoViewer";
 import FollowingIntelSidebar from "@/components/FollowingIntelSidebar";
 import ProfileCallouts from "@/components/ProfileCallouts";
 import { useWraithSession } from "@/components/SessionProvider";
@@ -230,6 +231,7 @@ export default function ProfilePage() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [transferBusy, setTransferBusy] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const [viewerSrc, setViewerSrc] = useState<string | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const coverImgRef = useRef<HTMLImageElement | null>(null);
   const [coverCrop, setCoverCrop] = useState<{ zoom: number; x: number; y: number } | null>(null);
@@ -1119,11 +1121,13 @@ export default function ProfilePage() {
   return (
     <main className="wraith-dashboard profile-page">
       <Header />
+      {viewerSrc && <PhotoViewer src={viewerSrc} onClose={() => setViewerSrc(null)} />}
       <div className="profile-shell">
         <section className="profile-hero" id="profile-overview">
           {/* Cover banner */}
           <div
-            className="profile-cover"
+            className="profile-cover wx-tappable"
+            onClick={() => { if (profileReady) setViewerSrc(profile.coverDataUrl || defaultCover(userId || displayName)); }}
             style={
               {
                 backgroundImage: profileReady ? `url("${profile.coverDataUrl || defaultCover(userId || displayName)}")` : "none",
@@ -1137,8 +1141,12 @@ export default function ProfilePage() {
           {/* Identity row — avatar overlaps cover */}
           <div className="profile-identity">
             <div
-              className="profile-avatar-button"
-              style={{ cursor: "default" }}
+              className="profile-avatar-button wx-tappable"
+              role="button"
+              tabIndex={0}
+              aria-label="View profile photo"
+              onClick={() => { if (profileReady) setViewerSrc(avatar || defaultAvatar(userId || displayName)); }}
+              onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && profileReady) setViewerSrc(avatar || defaultAvatar(userId || displayName)); }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {profileReady ? <img src={avatar || defaultAvatar(userId || displayName)} alt="" className="profile-avatar" /> : <span className="profile-avatar-fallback" style={{ background: "#141414" }} />}
@@ -1606,7 +1614,7 @@ export default function ProfilePage() {
         </section>
 
         {userId && (
-          <section className="profile-panel" style={{ padding: 0, overflow: "hidden" }}>
+          <section className="profile-panel profile-flat" style={{ padding: 0, overflow: "hidden" }}>
             <div className="profile-panel-heading" style={{ padding: "14px 20px 0" }}>
               <div>
                 <span className="profile-eyebrow">ACTIVITY</span>

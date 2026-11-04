@@ -79,7 +79,13 @@ type SnapState = "loading" | "ready" | "missing" | "error";
 
 export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend | null }) {
   const router = useRouter();
-  const goBack = () => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/app"); };
+  const goBack = () => {
+    if (typeof window === "undefined") return;
+    // history.back() does nothing when this page was the first one opened (Telegram link, new tab, app launch): fall back to the app home
+    const before = window.location.href;
+    if (window.history.length > 1) router.back();
+    window.setTimeout(() => { if (window.location.href === before) router.push("/app"); }, 400);
+  };
   const mint = selectedMeme?.contractAddress ?? "";
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [birth, setBirth] = useState<{ mint: string; createdAt: number } | null>(null);

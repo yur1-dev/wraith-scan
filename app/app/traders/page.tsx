@@ -2,10 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Users } from "lucide-react";
 import Header from "@/components/Header";
 import TraderFollowButton from "@/components/TraderFollowButton";
+import PhotoViewer from "@/components/PhotoViewer";
 
 type Trader = {
   userId: string;
@@ -30,6 +31,16 @@ export default function TradersPage() {
   const [traders, setTraders] = useState<Trader[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [sort, setSort] = useState<"pnl" | "active" | "open">("pnl");
+  const [viewer, setViewer] = useState<string | null>(null);
+  const sorted = useMemo(() => {
+    const list = [...traders];
+    if (sort === "active") list.sort((a, b) => b.closedTradeCount + b.openPositionCount - (a.closedTradeCount + a.openPositionCount));
+    else if (sort === "open") list.sort((a, b) => b.openPositionCount - a.openPositionCount || b.profitSol - a.profitSol);
+    else list.sort((a, b) => b.profitSol - a.profitSol);
+    return list;
+  }, [traders, sort]);
+  const maxAbs = useMemo(() => Math.max(0.001, ...traders.map((t) => Math.abs(t.profitSol))), [traders]);
 
   useEffect(() => {
     let active = true;
@@ -64,7 +75,13 @@ export default function TradersPage() {
           <span className="profile-eyebrow">WRAITH COMMUNITY</span>
           <h1>Traders</h1>
           <p>See open positions and recent closes from traders who opted in.</p>
+          <div className="trader-tabs" role="tablist">
+            {([["pnl", "Top P&L"], ["active", "Most active"], ["open", "Open now"]] as const).map(([key, label]) => (
+              <button key={key} type="button" role="tab" aria-selected={sort === key} className={sort === key ? "on" : ""} onClick={() => setSort(key)}>{label}</button>
+            ))}
+          </div>
         </section>
+        {viewer && <PhotoViewer src={viewer} onClose={() => setViewer(null)} />}
         {error && <div className="profile-message is-error">{error}</div>}
         {loading ? (
           <div className="traders-grid">
@@ -74,9 +91,9 @@ export default function TradersPage() {
           </div>
         ) : traders.length ? (
           <div className="traders-grid">
-            {traders.map((trader, index) => (
+            {sorted.map((trader, index) => (
               <article
-                className="trader-card"
+                className={`trader-card${index < 3 && sort === "pnl" ? ` podium-${index + 1}` : ""}`}
                 key={trader.userId}
               >
                 <div className="trader-card-top">
@@ -85,12 +102,13 @@ export default function TradersPage() {
                   </span>
                   {trader.avatarDataUrl ? (
                     <Image
-                      className="trader-avatar"
+                      className="trader-avatar wx-tappable"
                       src={trader.avatarDataUrl}
                       alt=""
                       width={48}
                       height={48}
                       unoptimized
+                      onClick={() => setViewer(trader.avatarDataUrl)}
                     />
                   ) : (
                     <span className="trader-avatar trader-avatar-fallback">
@@ -119,6 +137,9 @@ export default function TradersPage() {
                     <span>CLOSED</span>
                     <strong>{trader.closedTradeCount}</strong>
                   </div>
+                </div>
+                <div className="trader-pnl-bar" aria-hidden="true">
+                  <i className={trader.profitSol >= 0 ? "is-positive" : "is-negative"} style={{ width: `${Math.max(4, Math.round((Math.abs(trader.profitSol) / maxAbs) * 100))}%` }} />
                 </div>
                 {trader.openPositions.length > 0 ? (
                   <div className="trader-card-open">

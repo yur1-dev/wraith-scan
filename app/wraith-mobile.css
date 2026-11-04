@@ -378,11 +378,11 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 /* Token page: back button (phones only) */
 .wx-back-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; margin-right: 6px; }
 .wx-back-btn:hover { background: rgba(255,255,255,.05); }
-/* desktop: name on the left, actions, then the back button at the far end */
+/* desktop: no back button (it is a phone control); name on the left, actions on the right */
 @media (min-width: 768px) {
   .wx-token-head .wx-token-id { order: 1; flex: 1 1 auto; min-width: 0; }
   .wx-token-head .wx-token-actions { order: 2; }
-  .wx-token-head .wx-back-btn { order: 3; margin: 0 0 0 6px; }
+  .wx-token-head .wx-back-btn { display: none !important; }
 }
 @media (max-width: 767px) {
   .wx-token-head { flex-wrap: wrap; }
@@ -417,4 +417,93 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   .wx-token-actions { width: 100%; justify-content: space-between !important; gap: 0 !important; padding: 4px 2px 0; }
   .wx-token-actions .wx-icon-btn, .wraith-dashboard .wx-token-actions .wx-icon-btn { width: 40px !important; height: 34px !important; border: 0 !important; background: transparent !important; color: var(--text-muted); }
   .wx-token-actions .wx-icon-btn.active { color: var(--accent-text, #ff9a63); }
+}
+
+/* ── Round 5: header back button inline, compact icon row, blurred floating nav ───────────────── */
+@media (max-width: 767px) {
+  .wraith-dashboard .wx-token-head { position: relative; padding: 10px 14px 0; }
+  .wraith-dashboard .wx-token-head .wx-back-btn {
+    position: absolute; top: 14px; right: 14px; margin: 0; z-index: 2;
+    width: 36px; height: 36px; border-radius: 12px; background: rgba(255,255,255,.04);
+  }
+  .wraith-dashboard .wx-token-head .wx-token-id { padding-right: 50px; }
+  .wx-token-actions { width: auto !important; justify-content: flex-start !important; gap: 6px !important; margin-top: 8px !important; padding: 0 !important; }
+  .wx-token-actions .wx-icon-btn, .wraith-dashboard .wx-token-actions .wx-icon-btn {
+    width: 36px !important; height: 32px !important; border-radius: 10px !important;
+    border: 1px solid var(--border) !important; background: rgba(255,255,255,.03) !important;
+  }
+  .wx-pricebar { gap: 6px !important; }
+
+  /* nav: content scrolls under a soft blur + fade instead of being cut off by a hard edge */
+  .wx-tabbar::before {
+    content: ""; position: fixed; left: 0; right: 0; bottom: 0; z-index: -1; pointer-events: none;
+    height: calc(104px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, rgba(9,9,10,.94) 0%, rgba(9,9,10,.62) 48%, rgba(9,9,10,0) 100%);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    -webkit-mask-image: linear-gradient(to top, #000 52%, transparent 100%); mask-image: linear-gradient(to top, #000 52%, transparent 100%);
+  }
+  .wx-tabbar-pill, .wx-tabbar-search {
+    background: rgba(28, 28, 32, 0.6) !important;
+    -webkit-backdrop-filter: blur(26px) saturate(1.6) !important; backdrop-filter: blur(26px) saturate(1.6) !important;
+    border: 1px solid rgba(255,255,255,.1) !important;
+  }
+}
+
+/* ── photo viewer ─────────────────────────────────────────────────── */
+.wx-photo-viewer {
+  position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center;
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  touch-action: pinch-zoom; animation: wx-photo-in .18s ease-out;
+}
+.wx-photo-img {
+  max-width: min(94vw, 900px); max-height: 86vh; object-fit: contain; border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6); transition: transform .12s ease-out; user-select: none; -webkit-user-drag: none;
+}
+.wx-photo-close {
+  position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px; width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14); cursor: pointer;
+}
+@keyframes wx-photo-in { from { opacity: 0; } to { opacity: 1; } }
+.wx-tappable { cursor: zoom-in; -webkit-tap-highlight-color: transparent; }
+
+/* ── traders: sort tabs, podium, P&L bar ───────────────────────────── */
+.trader-tabs { display: flex; gap: 6px; margin-top: 12px; overflow-x: auto; scrollbar-width: none; }
+.trader-tabs::-webkit-scrollbar { display: none; }
+.trader-tabs button {
+  flex: 0 0 auto; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
+  color: var(--text-muted); font-size: 12.5px; font-weight: 700; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.trader-tabs button.on { color: #fff; background: rgba(var(--accent-rgb), .18); border-color: rgba(var(--accent-rgb), .45); }
+.trader-pnl-bar { height: 4px; border-radius: 4px; background: rgba(255,255,255,.06); overflow: hidden; }
+.trader-pnl-bar i { display: block; height: 100%; border-radius: 4px; }
+.trader-pnl-bar i.is-positive { background: var(--profit, #35d07f); }
+.trader-pnl-bar i.is-negative { background: var(--loss, #ff5b5b); }
+.trader-card.podium-1 { border-color: rgba(255, 201, 74, .45); background: linear-gradient(180deg, rgba(255,201,74,.07), var(--surface) 55%); }
+.trader-card.podium-2 { border-color: rgba(200, 208, 220, .35); background: linear-gradient(180deg, rgba(200,208,220,.05), var(--surface) 55%); }
+.trader-card.podium-3 { border-color: rgba(205, 127, 50, .4); background: linear-gradient(180deg, rgba(205,127,50,.06), var(--surface) 55%); }
+.trader-card.podium-1 .trader-rank { color: #ffc94a; }
+.trader-card.podium-2 .trader-rank { color: #c8d0dc; }
+.trader-card.podium-3 .trader-rank { color: #cd7f32; }
+@media (max-width: 767px) {
+  .trader-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .trader-pnl-bar { grid-column: 1 / -1; }
+}
+
+/* ── phone: flat, Fomo-style feed sections (no boxed cards inside boxed cards) ───────────────── */
+@media (max-width: 767px) {
+  .wraith-dashboard .profile-panel.profile-flat,
+  .wraith-dashboard .profile-body-aside {
+    background: transparent !important; border: 0 !important; box-shadow: none !important; border-radius: 0 !important;
+    border-top: 1px solid var(--border) !important; margin-top: 4px; padding: 12px 0 0 !important;
+  }
+  .profile-flat .profile-panel-heading { padding: 0 2px 2px !important; }
+  .profile-flat .profile-panel-heading h2, .profile-body-aside .fi-title { font-size: 18px; font-weight: 800; letter-spacing: -.01em; }
+  .profile-body-aside .fi-sidebar { background: transparent !important; border: 0 !important; box-shadow: none !important; }
+  .profile-body-aside .fi-header { padding: 4px 2px 10px; border-bottom: 0; }
+  .profile-body-aside .fi-card { padding: 14px 2px; gap: 9px; border-top: 1px solid var(--border); background: transparent; }
+  .profile-body-aside .fi-avatar { width: 36px; height: 36px; flex-basis: 36px; }
+  .profile-body-aside .fi-name { font-size: 14px; }
+  .profile-body-aside .fi-text { font-size: 14px; line-height: 1.45; }
+  .profile-body-aside .fi-token { background: rgba(255,255,255,.04); }
+  .profile-flat > div:not(.profile-panel-heading) > * { border-left: 0; border-right: 0; }
 }

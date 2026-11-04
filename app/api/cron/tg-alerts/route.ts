@@ -9,7 +9,7 @@ import { refreshCalls, type SignalCall } from "@/lib/signalCalls";
 import type { Signal } from "@/app/api/signals/route";
 import { broadcast, claim, milestoneFor, signalMessage, winMessage } from "@/lib/telegramBot";
 import { tokenKeyboard } from "@/lib/telegramUi";
-import { runPushAlerts } from "@/lib/push";
+import { runPushAlerts, pushBroadcast } from "@/lib/push";
 
 export const maxDuration = 60;
 
@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
     if (first) continue;
     const r = await broadcast("win", winMessage(c, m), { chain: c.chain ?? "solana", markup: tokenKeyboard(c.address, c.chain ?? "solana") });
     out.wins++; out.sent += r.sent;
+    await pushBroadcast({ title: `🏆 ${m}x $${c.symbol}`, body: `${(c.lastMcap / c.spottedMcap).toFixed(2)}x from the call`, url: `/app/token/${c.address}`, tag: `w:${c.address}:${m}` }, "signal").catch(() => 0);
   }
   const push = await runPushAlerts().catch((e) => { console.error("[push alerts]", e); return null; });
   return NextResponse.json({ ok: true, first, ...out, push });

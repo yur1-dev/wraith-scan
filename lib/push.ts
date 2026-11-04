@@ -78,6 +78,23 @@ export async function sendTest(userId: string): Promise<number> {
   return n;
 }
 
+/** Push one message to every subscriber who has that category on (one channel per user). Used for win milestones. */
+export async function pushBroadcast(msg: Msg, pref: keyof PushPrefs = "signal"): Promise<number> {
+  if (!pushAnyConfigured()) return 0;
+  const db = await getDb();
+  const col = db.collection<PushSub>(COLLECTION);
+  const all = await col.find({}).limit(3000).toArray();
+  const fcmUsers = new Set(all.filter((s) => s.fcm).map((s) => s.userId));
+  const subs = all.filter((s) => (s.fcm || !fcmUsers.has(s.userId)) && s.prefs?.[pref] !== false);
+  const dead: string[] = [];
+  let sent = 0;
+  for (const sub of subs) {
+    if (await deliver(sub, msg)) sent++; else dead.push(sub._id);
+  }
+  if (dead.length) await col.deleteMany({ _id: { $in: dead } });
+  return sent;
+}
+
 async function jupPrices(mints: string[]): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (let i = 0; i < mints.length; i += 50) {

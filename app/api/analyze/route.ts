@@ -1,6 +1,7 @@
 import { aiText, aiAvailable, aiCanSearch } from "@/lib/ai";
 import { NextResponse } from "next/server";
 import { getAppSession } from "@/lib/session";
+import { getDb } from "@/lib/mongoClient";
 import { analyzeLimiter, checkLimit } from "@/lib/ratelimit";
 
 
@@ -199,6 +200,62 @@ function buildPrediction(
   };
 }
 
+
+// ── Analysis thread ─────────────────────────────────────────────────────
+// The first read of a token is kept forever. Later reads only get appended
+// when something material changed, so what a user already read never shifts.
+type ThreadEntry = {
+  ts: number;
+  mcap: number;
+  safetyScore: number;
+  prediction: string;
+  predictionReason: string;
+  safetyBreakdown: { label: string; pass: boolean; detail: string }[];
+};
+type ThreadDoc = {
+  mint: string;
+  checkedAt: number;
+  entries: ThreadEntry[];
+  links: { url: string; platform: string; title: string }[];
+  aiAnalysis?: string;
+};
+const THREAD_FRESH_MS = 20 * 60_000;
+const THREAD_MAX = 20;
+
+async function threadCol() {
+  try {
+    const db = await getDb();
+    return db.collection<ThreadDoc>("token_analysis");
+  } catch {
+    return null;
+  }
+}
+
+function threadPayload(doc: ThreadDoc) {
+  const last = doc.entries[doc.entries.length - 1];
+  return {
+    safetyScore: last.safetyScore,
+    safetyBreakdown: last.safetyBreakdown,
+    prediction: last.prediction,
+    predictionReason: last.predictionReason,
+    links: doc.links,
+    aiAnalysis: doc.aiAnalysis ?? "",
+    thread: doc.entries,
+  };
+}
+
+function isMaterial(prev: ThreadEntry, next: ThreadEntry): boolean {
+  if (prev.prediction !== next.prediction) return true;
+  if (Math.abs(prev.safetyScore - next.safetyScore) >= 10) return true;
+  if (prev.mcap > 0 && next.mcap > 0) {
+    const r = next.mcap / prev.mcap;
+    if (r >= 1.6 || r <= 0.6) return true;
+  }
+  const a = prev.safetyBreakdown.map((b) => `${b.label}:${b.pass}`).sort().join("|");
+  const b = next.safetyBreakdown.map((x) => `${x.label}:${x.pass}`).sort().join("|");
+  return a !== b;
+}
+
 export async function GET(req: Request) {
   const session = await getAppSession();
   if (!session?.user?.id) {
@@ -256,6 +313,20 @@ export async function GET(req: Request) {
       { status: 400 },
     );
   }
+  // Serve the stored thread while it is fresh: no recompute, nothing shifts.
+  const col = rawContract ? await threadCol() : null;
+  let stored: ThreadDoc | null = null;
+  if (col) {
+    try {
+      stored = await col.findOne({ mint: rawContract }, { projection: { _id: 0 } });
+    } catch {
+      stored = null;
+    }
+    if (stored && stored.entries?.length && Date.now() - stored.checkedAt < THREAD_FRESH_MS) {
+      return NextResponse.json(threadPayload(stored));
+    }
+  }
+
   if (rawCeleb && !CELEB_RE.test(rawCeleb)) {
     return NextResponse.json(
       { error: "Invalid celebMention" },
@@ -475,6 +546,33 @@ ${safeContext ? `\nAdditional context: ${safeContext}` : ""}`;
       `${priceChange1h > 200 ? `⚠ Already up ${priceChange1h.toFixed(0)}% in 1h — may be late. ` : ""}` +
       `Safety score ${safetyScore}/100 — ${safetyScore >= 70 ? "passes basic checks" : safetyScore >= 40 ? "use caution" : "high risk, do not buy"}.\n\n` +
       `Verdict: ${predictionReason}`;
+  }
+
+  if (col && rawContract) {
+    try {
+      const entry: ThreadEntry = {
+        ts: Date.now(),
+        mcap: Math.round(mcap),
+        safetyScore,
+        prediction,
+        predictionReason,
+        safetyBreakdown,
+      };
+      let doc: ThreadDoc;
+      if (!stored || !stored.entries?.length) {
+        doc = { mint: rawContract, checkedAt: entry.ts, entries: [entry], links: evidenceLinks, aiAnalysis };
+      } else {
+        const prev = stored.entries[stored.entries.length - 1];
+        const entries = isMaterial(prev, entry) ? [...stored.entries, entry] : stored.entries;
+        // keep the first read, trim the middle if the thread gets long
+        const trimmed = entries.length > THREAD_MAX ? [entries[0], ...entries.slice(entries.length - (THREAD_MAX - 1))] : entries;
+        doc = { ...stored, checkedAt: entry.ts, entries: trimmed };
+      }
+      await col.updateOne({ mint: rawContract }, { $set: doc }, { upsert: true });
+      return NextResponse.json(threadPayload(doc));
+    } catch {
+      /* fall through to the plain response */
+    }
   }
 
   return NextResponse.json({

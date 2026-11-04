@@ -30,8 +30,8 @@ import {
 } from "lucide-react";
 import Header from "@/components/Header";
 import PhotoViewer from "@/components/PhotoViewer";
-import FollowingIntelSidebar from "@/components/FollowingIntelSidebar";
-import ProfileCallouts from "@/components/ProfileCallouts";
+import ProfileFeed from "@/components/ProfileFeed";
+import TraderStats from "@/components/TraderStats";
 import { useWraithSession } from "@/components/SessionProvider";
 import StyledSelect from "@/components/StyledSelect";
 import UsernameSetupModal from "@/components/UsernameSetupModal";
@@ -140,6 +140,17 @@ function formatDate(timestamp: number) {
     hour: "numeric",
     minute: "2-digit",
   }).format(timestamp);
+}
+
+function MoneyText({ text }: { text: string }) {
+  const m = /^(.*?)([.,]\d{1,2})$/.exec(text);
+  if (!m) return <>{text}</>;
+  return (
+    <>
+      {m[1]}
+      <span className="dim">{m[2]}</span>
+    </>
+  );
 }
 
 export default function ProfilePage() {
@@ -1247,10 +1258,11 @@ export default function ProfilePage() {
         <div className="profile-body-layout">
           <div className="profile-body-main">
 
+        <div className="profile-summary-card">
         <section className="profile-portfolio-overview">
           <div className="profile-portfolio-copy">
             <div className="profile-portfolio-head">
-              <span className="profile-eyebrow">PORTFOLIO VALUE</span>
+              <span className="profile-eyebrow">Portfolio value</span>
               <span
                 className="profile-portfolio-info"
                 title={[
@@ -1261,18 +1273,25 @@ export default function ProfilePage() {
               >
                 <Info size={11} />
               </span>
+              <div className="profile-periods" role="tablist" aria-label="Period">
+                {(["24h", "7d", "30d", "all"] as const).map((period) => (
+                  <button key={period} type="button" role="tab" aria-selected={timeframe === period} className={timeframe === period ? "on" : ""} onClick={() => setTimeframe(period)}>
+                    {period === "all" ? "All" : period}
+                  </button>
+                ))}
+              </div>
             </div>
             <strong className="profile-portfolio-value">
-              {portfolioValue === null
+              <MoneyText text={portfolioValue === null
                 ? fxRate === null && !fxLoading
                   ? "Rate unavailable"
                   : walletLoading || solUsd === null || fxLoading
                     ? "Loading…"
                     : "Connect wallet"
-                : formatCurrency(portfolioValue, profile.displayCurrency)}
+                : formatCurrency(portfolioValue, profile.displayCurrency)} />
             </strong>
             <div className="profile-portfolio-period">
-              <span>7d P&amp;L</span>
+              <span>{timeframe === "all" ? "All-time" : timeframe} P&amp;L</span>
               <strong className={(realizedValue ?? realizedPnl) >= 0 ? "is-positive" : "is-negative"}>
                 {realizedValue === null
                   ? "—"
@@ -1280,7 +1299,7 @@ export default function ProfilePage() {
               </strong>
             </div>
           </div>
-          <div className={`profile-portfolio-chart${completedTrades.length ? "" : " is-empty"}`}>
+          <div className={`profile-portfolio-chart${completedTrades.length ? "" : " is-empty"} tone-${!pnlChart.line ? "flat" : realizedPnl >= 0 ? "up" : "down"}`}>
             <div className="profile-chart-label">
               <span>REALIZED P&L CURVE</span>
               <span>{completedTrades.length} closes</span>
@@ -1293,11 +1312,12 @@ export default function ProfilePage() {
             >
               <defs>
                 <linearGradient id="profile-orange-fill" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#f26a35" stopOpacity="0.28" />
-                  <stop offset="100%" stopColor="#f26a35" stopOpacity="0" />
+                  <stop offset="0%" stopColor="currentColor" stopOpacity="0.3" />
+                  <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
                 </linearGradient>
               </defs>
               <line x1="8" x2="592" y1="154" y2="154" className="profile-chart-baseline" />
+              {!pnlChart.line && <line x1="0" x2="600" y1="80" y2="80" className="profile-chart-flat" />}
               {pnlChart.area && (
                 <polygon points={pnlChart.area} fill="url(#profile-orange-fill)" />
               )}
@@ -1305,7 +1325,7 @@ export default function ProfilePage() {
                 <polyline
                   points={pnlChart.line}
                   fill="none"
-                  stroke="#f26a35"
+                  stroke="currentColor"
                   strokeWidth="2.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -1313,6 +1333,7 @@ export default function ProfilePage() {
                 />
               )}
             </svg>
+            <i className="profile-chart-dot" />
           </div>
         </section>
 
@@ -1360,6 +1381,16 @@ export default function ProfilePage() {
             </small>
           </article>}
         </section>
+        </div>
+
+        <TraderStats
+          trades={trades}
+          money={(sol, signed) => {
+            if (solUsd === null || fxRate === null) return "-";
+            const v = sol * solUsd * fxRate;
+            return `${signed && v > 0 ? "+" : ""}${formatCurrency(v, profile.displayCurrency)}`;
+          }}
+        />
 
         <section className={`profile-main-grid${filteredTrades.length ? "" : " is-social-only"}`}>
           {filteredTrades.length > 0 && <article
@@ -1613,18 +1644,6 @@ export default function ProfilePage() {
           </aside>
         </section>
 
-        {userId && (
-          <section className="profile-panel profile-flat" style={{ padding: 0, overflow: "hidden" }}>
-            <div className="profile-panel-heading" style={{ padding: "14px 20px 0" }}>
-              <div>
-                <span className="profile-eyebrow">ACTIVITY</span>
-                <h2>My Callouts</h2>
-              </div>
-            </div>
-            <ProfileCallouts userId={userId} />
-          </section>
-        )}
-
         <section
           className="profile-panel profile-transfer-panel"
           aria-hidden="true"
@@ -1822,8 +1841,8 @@ export default function ProfilePage() {
         </section>
 
           </div>{/* /profile-body-main */}
-          <aside className="profile-body-aside">
-            <FollowingIntelSidebar />
+          <aside className="profile-body-aside profile-feed-aside">
+            <ProfileFeed userId={userId} />
           </aside>
         </div>{/* /profile-body-layout */}
 

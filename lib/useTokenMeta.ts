@@ -33,6 +33,19 @@ export function useTokenMeta(mints: string[]): Record<string, TokenMeta> {
         }
       })
       .catch(() => undefined)
+      .then(async () => {
+        // anything the batch lookup could not name (fresh pump tokens, thin pairs) gets a direct per-token lookup,
+        // so feeds show a symbol and logo instead of a raw contract address
+        const missing = need.filter((m) => !cache.has(m)).slice(0, 6);
+        await Promise.all(missing.map((m) =>
+          fetch(`/api/token-price?mint=${encodeURIComponent(m)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d: { symbol?: string; name?: string; imageUrl?: string; marketCap?: number } | null) => {
+              if (d?.symbol) cache.set(m, { symbol: d.symbol, name: d.name ?? d.symbol, imageUrl: d.imageUrl, mcap: Number(d.marketCap) || 0 });
+            })
+            .catch(() => undefined),
+        ));
+      })
       .finally(() => {
         need.forEach((m) => pending.delete(m));
         if (alive) bump((n) => n + 1);

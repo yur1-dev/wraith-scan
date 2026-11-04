@@ -3591,7 +3591,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
             <div className="wraith-profile-menu-group">
               <ProfileMenuItem
                 icon={UserRound}
-                label="Your profile"
+                label="Profile"
                 href="/app/profile"
                 onClick={() => setUserMenuOpen(false)}
               />

@@ -73,5 +73,12 @@ export function useCash() {
     perSol,
     toSol: (cash: number) => (perSol && perSol > 0 ? cash / perSol : null),
     fmt: (cash: number) => formatCash(cash, currency),
+    /** SOL amount shown as cash in the user's currency, optionally with a +/- sign. */
+    money: (sol: number, signed = false) => {
+      if (!perSol || perSol <= 0) return "-";
+      const cash = sol * perSol;
+      const sign = cash < 0 ? "-" : signed && cash > 0 ? "+" : "";
+      return `${sign}${formatCash(Math.abs(cash), currency)}`;
+    },
   };
 }

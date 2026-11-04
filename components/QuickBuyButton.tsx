@@ -17,13 +17,12 @@ import { useToast } from "@/components/Toast";
 import { C } from "@/lib/theme";
 import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
 
-const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
 
 // Map SwapError codes -> toast copy. INSUFFICIENT_SOL matches Telemetry's
 // exact wording from your screenshot.
 const ERROR_COPY: Record<SwapError["code"], string> = {
   NO_WALLET: "Embedded wallet is not ready yet",
-  INSUFFICIENT_SOL: "Not enough SOL — lower size or priority fee",
+  INSUFFICIENT_SOL: "Not enough balance — lower the quick buy size",
   NO_ROUTE: "No swap route found for this token",
   NO_TOKENS: "No tokens to sell from this wallet",
   QUOTE_FAILED: "Couldn't get a quote — try again",
@@ -94,6 +93,7 @@ function UnconfiguredQuickBuyButton({
           mint: contractAddress,
           symbol,
           amountSol,
+          amountLabel: quick.label,
         });
         push(
           result.message,
@@ -182,7 +182,7 @@ function EmbeddedWalletQuickBuyButton({
   }, []);
 
   const dim = size === "compact" ? 26 : 38;
-  const fontSize = size === "compact" ? 10 : 12;
+  const fontSize = size === "compact" ? 11 : 13; // icon size = fontSize + 3
 
   const handleBuy = useCallback(
     async (e: React.MouseEvent) => {
@@ -197,6 +197,7 @@ function EmbeddedWalletQuickBuyButton({
             mint: contractAddress,
             symbol,
             amountSol,
+            amountLabel: quick.label,
           });
           if (result.ok) {
             setStatus("success");
@@ -296,22 +297,25 @@ function EmbeddedWalletQuickBuyButton({
         top: 0,
         display: "flex",
         alignItems: "center",
+        justifyContent: "center",
         gap: 5,
         height: dim,
-        padding: hover || isSuccess || isError ? "0 10px" : 0,
-        width: hover || isSuccess || isError ? "auto" : dim,
-        justifyContent: "center",
-        background:
-          hover || isSuccess ? `${activeColor}22` : "rgba(255,255,255,0.04)",
-        border: `1px solid ${hover || isSuccess || isError ? activeColor + "66" : "rgba(255,255,255,0.1)"}`,
-        borderRadius: 6,
-        color:
-          hover || isSuccess || isError ? activeColor : (C.green ?? "#8bc34a"),
+        width: dim,
+        padding: 0,
+        background: isError
+          ? "rgba(255,82,82,.12)"
+          : hover || isSuccess
+            ? `${activeColor}26`
+            : "rgba(57,217,138,.09)",
+        border: `1px solid ${isError ? "rgba(255,82,82,.4)" : hover || isSuccess ? activeColor + "77" : "rgba(57,217,138,.26)"}`,
+        borderRadius: size === "compact" ? 8 : 10,
+        color: isError ? "#ff5252" : isSuccess ? "#00c47a" : "#39d98a",
         cursor: isBuying ? "wait" : "pointer",
-        transition: "all 0.15s ease",
+        transition: "background .15s ease, border-color .15s ease, color .15s ease",
         flexShrink: 0,
         overflow: "hidden",
         whiteSpace: "nowrap" as const,
+        fontVariantNumeric: "tabular-nums",
       }}
     >
       {isBuying ? (
@@ -337,36 +341,6 @@ function EmbeddedWalletQuickBuyButton({
           strokeWidth={0}
           style={{ flexShrink: 0 }}
         />
-      )}
-      {(hover || isSuccess || isError) && !isBuying && (
-        <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
-          <span style={{ fontSize, fontWeight: 700, ...MONO }}>
-            {isSuccess ? "BOUGHT" : isError ? "FAILED" : quick.label}
-          </span>
-          {!isSuccess && !isError && (
-            <svg
-              width={fontSize}
-              height={fontSize}
-              viewBox="0 0 397 311"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              style={{ flexShrink: 0 }}
-            >
-              <path
-                d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z"
-                fill="currentColor"
-              />
-              <path
-                d="M64.6 3.8C67.1 1.4 70.4 0 73.9 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z"
-                fill="currentColor"
-              />
-              <path
-                d="M332.3 120.4c-2.4-2.4-5.7-3.8-9.2-3.8H5.7c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.7z"
-                fill="currentColor"
-              />
-            </svg>
-          )}
-        </span>
       )}
       <style>{`
         @keyframes wraithBuySpin { to { transform: rotate(360deg); } }

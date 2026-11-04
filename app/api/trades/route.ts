@@ -24,6 +24,7 @@ interface ValidatedTrade {
   status: "filled" | "failed" | "open";
   imageUrl?: string;
   ts: number;
+  closedAt?: number;
 }
 
 const VALID_TRADE_STATUSES = new Set(["filled", "failed", "open"]);
@@ -104,6 +105,8 @@ function validateTrade(raw: unknown): ValidatedTrade | null {
   if (t.buyTxSig !== undefined) out.buyTxSig = t.buyTxSig;
   if (t.exitTxSig !== undefined) out.exitTxSig = t.exitTxSig;
   if (t.imageUrl !== undefined) out.imageUrl = t.imageUrl;
+  // close time powers average hold time; an implausible value is ignored instead of rejecting the trade
+  if (isFiniteNumber(t.closedAt) && t.closedAt >= t.ts && t.closedAt <= Date.now() + 60_000) out.closedAt = t.closedAt;
   return out;
 }
 

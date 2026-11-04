@@ -75,6 +75,7 @@ interface TradeLog {
   status: "filled" | "failed" | "open";
   imageUrl?: string;
   ts: number;
+  closedAt?: number;
 }
 
 interface ShareCardData {
@@ -3034,6 +3035,7 @@ export default function PaperTrader({
           status: "filled",
           imageUrl: pos.imageUrl,
           ts: pos.ts,
+          closedAt: Date.now(),
         };
 
         if (mountedRef.current) setLog((prev) => [logEntry, ...prev]);

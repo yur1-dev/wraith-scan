@@ -4,6 +4,7 @@
 // How Wraith's calls performed: every token the signal feed (or the old scanner)
 // flagged, with its market cap when spotted, now, and at its peak.
 
+import { swrRead, swrWrite } from "@/lib/swrCache";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Trophy, Trash2 } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
@@ -34,7 +35,7 @@ function ago(ts: number) {
 }
 
 export default function WinsBoard({ onSelectMeme }: { onSelectMeme: (meme: MemeTrend) => void }) {
-  const [calls, setCalls] = useState<LoggedCall[]>([]);
+  const [calls, setCalls] = useState<LoggedCall[]>(() => swrRead<LoggedCall[]>("wins:calls") ?? []);
   const [filter, setFilter] = useState<Filter>("all");
   const [checking, setChecking] = useState(false);
 
@@ -53,7 +54,9 @@ export default function WinsBoard({ onSelectMeme }: { onSelectMeme: (meme: MemeT
     // 2) Anything the old scanner tracked in this browser that the server does not know about.
     const serverSet = new Set(server.map((c) => c.address));
     const local = readCalls().filter((c) => !serverSet.has(c.address));
-    setCalls([...server, ...local].sort((a, b) => b.spottedAt - a.spottedAt));
+    const merged = [...server, ...local].sort((a, b) => b.spottedAt - a.spottedAt);
+    setCalls(merged);
+    if (server.length) swrWrite("wins:calls", merged.slice(0, 120));
     const mints = local.slice(0, 30).map((c) => c.address);
     if (!mints.length) return;
     setChecking(true);

@@ -71,7 +71,11 @@ export default function TraderFollowButton({
         title={error || (following ? "Unfollow trader" : "Follow trader")}
         aria-label={following ? "Unfollow trader" : "Follow trader"}
         style={{
-          minHeight: compact ? 30 : 38,
+          minHeight: compact ? 32 : 38,
+          minWidth: compact ? 112 : 136,
+          userSelect: "none",
+          WebkitTapHighlightColor: "transparent",
+          transition: "background .18s, border-color .18s, color .18s, opacity .18s",
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
@@ -89,7 +93,7 @@ export default function TraderFollowButton({
         }}
       >
         {following ? <UserRoundCheck size={14} /> : <UserRoundPlus size={14} />}
-        {busy ? "Saving" : following ? "Following" : "Follow"}
+        {following ? "Following" : "Follow"}
       </button>
     </span>
   );

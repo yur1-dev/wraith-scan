@@ -6,6 +6,7 @@
 // cached endpoint, so it is quick and cheap. The old AI/celeb scan is still
 // available behind "Deep scan".
 
+import { swrRead, swrWrite } from "@/lib/swrCache";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Flame, LayoutGrid, List, Lock, Radar, RefreshCw, Sparkles, Zap } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
@@ -40,8 +41,9 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 
 function useSignals() {
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const warm = swrRead<Signal[]>("signals");
+  const [signals, setSignals] = useState<Signal[]>(warm ?? []);
+  const [loading, setLoading] = useState(!warm);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
@@ -51,6 +53,7 @@ function useSignals() {
       const data: { signals?: Signal[]; updatedAt?: number; error?: string } = await res.json();
       if (Array.isArray(data.signals) && data.signals.length) {
         setSignals(data.signals);
+        swrWrite("signals", data.signals);
         setUpdatedAt(data.updatedAt ?? Date.now());
         setError("");
       } else if (!res.ok) {

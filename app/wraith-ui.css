@@ -125,7 +125,7 @@
 .wx-tcard-chips { display: flex; gap: 12px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 11px; }
 .wx-tcard-chips b { font-weight: 700; }
 .wx-tcard-chips { align-items: center; }
-.wx-qb { position: relative; margin-left: auto; width: 78px; height: 26px; flex: 0 0 78px; }
+.wx-qb { position: relative; margin-left: auto; width: 26px; height: 26px; flex: 0 0 26px; }
 .wx-tcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wx-curve-mini { display: flex; align-items: center; gap: 8px; }
 .wx-curve-mini .wx-bar { flex: 1; }

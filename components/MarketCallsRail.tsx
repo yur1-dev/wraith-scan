@@ -4,6 +4,7 @@
 // Left panel on the Market view: callouts from traders you follow, plus the
 // strongest live signals underneath.
 
+import { swrRead, swrWrite } from "@/lib/swrCache";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Flame, UsersRound } from "lucide-react";
@@ -51,10 +52,11 @@ function mc(v?: number | null) {
 }
 
 export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSelectMeme: (meme: MemeTrend) => void; onOpenScanner: () => void }) {
-  const [callouts, setCallouts] = useState<Callout[]>([]);
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const warmCallouts = swrRead<Callout[]>("rail:callouts");
+  const [callouts, setCallouts] = useState<Callout[]>(warmCallouts ?? []);
+  const [state, setState] = useState<"loading" | "ready" | "error">(warmCallouts ? "ready" : "loading");
   const [signedOut, setSignedOut] = useState(false);
-  const [signals, setSignals] = useState<SigLite[]>([]);
+  const [signals, setSignals] = useState<SigLite[]>(() => swrRead<SigLite[]>("rail:signals") ?? []);
   const { canUse: can } = useWraithTier();
   const canSignals = can("live_signals_view");
   const canScore = can("ai_score");
@@ -65,7 +67,9 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
       const res = await fetch("/api/callouts?following=1&limit=10", { cache: "no-store" });
       if (!res.ok) { setState((s) => (s === "ready" ? s : "error")); return; }
       const data: { callouts?: Callout[] } = await res.json();
-      setCallouts(Array.isArray(data.callouts) ? data.callouts : []);
+      const list = Array.isArray(data.callouts) ? data.callouts : [];
+      setCallouts(list);
+      swrWrite("rail:callouts", list);
       setState("ready");
     } catch {
       setState((s) => (s === "ready" ? s : "error"));
@@ -87,7 +91,7 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
         const res = await fetch("/api/signals", { cache: "no-store" });
         if (!res.ok) return;
         const data: { signals?: SigLite[] } = await res.json();
-        if (alive && Array.isArray(data.signals)) setSignals(data.signals.slice(0, 6));
+        if (alive && Array.isArray(data.signals)) { const top = data.signals.slice(0, 6); setSignals(top); swrWrite("rail:signals", top); }
       } catch { /* optional */ }
     };
     void load();

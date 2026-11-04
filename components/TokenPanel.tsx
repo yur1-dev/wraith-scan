@@ -12,7 +12,8 @@ import { useRouter } from "next/navigation";
 import type { MemeTrend } from "@/app/app/page";
 import TokenChart from "@/components/TokenChart";
 import { snapCache } from "@/lib/prefetchChart";
-import { TokenDetailTabs, type IntelLink, type TradeRow } from "@/components/TokenDetailTabs";
+import { swrRead, swrWrite } from "@/lib/swrCache";
+import { TokenDetailTabs, type AnalysisEntry, type IntelLink, type TradeRow } from "@/components/TokenDetailTabs";
 import { TokenIcon } from "@/components/TokenIcon";
 import SpotCard from "@/components/SpotCard";
 import { readTokenFavorites, toggleTokenFavorite, TOKEN_FAVORITES_EVENT } from "@/lib/tokenFavorites";
@@ -65,6 +66,7 @@ interface Analysis {
   predictionReason?: string;
   safetyScore?: number;
   safetyBreakdown?: { label: string; pass: boolean; detail: string }[];
+  thread?: AnalysisEntry[];
 }
 
 function XGlyph({ size = 14 }: { size?: number }) {
@@ -462,7 +464,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
   const analysisKey = snap ? mint : "";
   useEffect(() => {
     if (!analysisKey) return;
-    setAnalysis(null);
+    setAnalysis(swrRead<Analysis>(`an:${mint}`, 20 * 60_000) ?? null);
     const ctrl = new AbortController();
     const params = new URLSearchParams({
       keyword: symbolForAnalysis,
@@ -474,7 +476,10 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
     fetch(`/api/analyze?${params.toString()}`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: Analysis | null) => {
-        if (d && !ctrl.signal.aborted) setAnalysis(d);
+        if (d && !ctrl.signal.aborted) {
+          setAnalysis(d);
+          swrWrite(`an:${mint}`, d);
+        }
       })
       .catch(() => undefined);
     return () => ctrl.abort();
@@ -743,7 +748,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
 
       {/* ── activity ── */}
       <div style={{ padding: "0 0 20px" }}>
-        <TokenDetailTabs trades={tradeRows} mint={mint} intelLinks={analysis?.links} intelSummary={analysis?.predictionReason} safetyScore={analysis?.safetyScore} safetyBreakdown={analysis?.safetyBreakdown} currentMcap={snap?.marketCap} />
+        <TokenDetailTabs trades={tradeRows} mint={mint} intelLinks={analysis?.links} intelSummary={analysis?.predictionReason} thread={analysis?.thread} safetyScore={analysis?.safetyScore} safetyBreakdown={analysis?.safetyBreakdown} currentMcap={snap?.marketCap} />
       </div>
     </div>
   );

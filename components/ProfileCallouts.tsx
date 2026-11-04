@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Repeat2 } from "lucide-react";
+import { Heart, MessageCircle, Repeat2 } from "lucide-react";
+import { Face, TokenCard, isFresh, mcapLabel, timeAgo } from "@/components/CalloutParts";
+import { useTokenMeta } from "@/lib/useTokenMeta";
 
 interface CalloutItem {
   id: string;
@@ -15,6 +18,7 @@ interface CalloutItem {
   hearts: number;
   reposts: number;
   comments: number;
+  mint?: string;
   imageUrl?: string | null;
   repostedFrom?: { displayName: string; username: string | null; text: string } | null;
   position: {
@@ -24,25 +28,10 @@ interface CalloutItem {
   } | null;
 }
 
-function timeAgo(ts: number) {
-  const diff = (Date.now() - ts) / 1000;
-  if (diff < 60) return `${Math.floor(diff)}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
-
-function mcapLabel(v?: number | null) {
-  if (!v || !Number.isFinite(v)) return null;
-  if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
-  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
-  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
-  return `$${v.toFixed(0)}`;
-}
-
 export default function ProfileCallouts({ userId }: { userId: string }) {
   const [callouts, setCallouts] = useState<CalloutItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const meta = useTokenMeta(callouts.map((c) => c.mint ?? ""));
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -63,7 +52,7 @@ export default function ProfileCallouts({ userId }: { userId: string }) {
 
   if (loading) {
     return (
-      <div className="profile-callouts-empty">
+      <div className="fp-empty">
         <div className="callouts-loading-dot" /><div className="callouts-loading-dot" /><div className="callouts-loading-dot" />
       </div>
     );
@@ -71,7 +60,7 @@ export default function ProfileCallouts({ userId }: { userId: string }) {
 
   if (callouts.length === 0) {
     return (
-      <div className="profile-callouts-empty">
+      <div className="fp-empty">
         <strong>No callouts yet</strong>
         <span>Open a token and share your take to see it here.</span>
       </div>
@@ -79,43 +68,47 @@ export default function ProfileCallouts({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="profile-callouts-feed">
-      {callouts.map((c) => (
-        <div key={c.id} className="profile-callout-card">
-          {c.repostedFrom && (
-            <div className="callout-repost-banner">
-              <Repeat2 size={11} />
-              <span>Reposted from {c.repostedFrom.displayName}</span>
+    <div className="fi-feed">
+      {callouts.map((c) => {
+        const m = c.mint ? meta[c.mint] : undefined;
+        const nowMcap = m?.mcap || c.mcapAtPost;
+        return (
+          <article key={c.id} className="fi-card fp-post">
+            {c.repostedFrom && (
+              <div className="fp-repost">
+                <Repeat2 size={12} />
+                <span>Reposted from {c.repostedFrom.displayName}</span>
+              </div>
+            )}
+            <div className="fp-row">
+              <Face src={c.avatarDataUrl} name={c.displayName} />
+              <div className="fp-body">
+                <div className="fp-head">
+                  <Link href={`/app/u/${encodeURIComponent(c.username ?? c.userId)}`} className="fp-name">{c.displayName}</Link>
+                  <span className="fp-age">{timeAgo(c.createdAt)}</span>
+                  {isFresh(c.createdAt) && <i className="fp-live" aria-label="New" />}
+                </div>
+                <p className="fp-text">{c.text}</p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {c.imageUrl && <img src={c.imageUrl} alt="" className="fp-img" />}
+                <TokenCard
+                  mint={c.mint}
+                  meta={m}
+                  symbol={c.position?.symbol}
+                  calledMcap={c.position?.entryMcap ?? c.mcapAtPost}
+                  pnlPct={c.position ? c.position.currentPnlPct : undefined}
+                />
+                <div className="fp-actions">
+                  <span className="fp-stat"><Heart size={15} />{c.hearts > 0 && c.hearts}</span>
+                  <span className="fp-stat"><MessageCircle size={15} />{c.comments > 0 && c.comments}</span>
+                  <span className="fp-stat"><Repeat2 size={16} />{c.reposts > 0 && c.reposts}</span>
+                  {nowMcap ? <span className="fp-mc"><b>{mcapLabel(nowMcap)}</b> MC</span> : null}
+                </div>
+              </div>
             </div>
-          )}
-          <div className="profile-callout-top">
-            <span className="profile-callout-age">{timeAgo(c.createdAt)}</span>
-            {c.mcapAtPost && <span className="callout-mcap-badge">{mcapLabel(c.mcapAtPost)} MC</span>}
-          </div>
-          <p className="callout-text">{c.text}</p>
-          {c.imageUrl && (
-            <div className="callout-img-wrap">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={c.imageUrl} alt="" className="callout-img" />
-            </div>
-          )}
-          {c.position && (
-            <div className="callout-position">
-              <span className="callout-position-label">Position</span>
-              <span className="callout-position-symbol">{c.position.symbol}</span>
-              <span className="callout-position-entry">Entry {mcapLabel(c.position.entryMcap)}</span>
-              <span className={`callout-position-pnl${c.position.currentPnlPct >= 0 ? " is-positive" : " is-negative"}`}>
-                {c.position.currentPnlPct > 0 ? "+" : ""}{c.position.currentPnlPct.toFixed(1)}%
-              </span>
-            </div>
-          )}
-          <div className="profile-callout-foot">
-            <span>❤ {c.hearts}</span>
-            {c.reposts > 0 && <span>↺ {c.reposts}</span>}
-            {c.comments > 0 && <span>💬 {c.comments}</span>}
-          </div>
-        </div>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }

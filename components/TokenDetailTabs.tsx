@@ -25,7 +25,17 @@ export interface IntelLink {
   title: string;
 }
 
+export interface AnalysisEntry {
+  ts: number;
+  mcap: number;
+  safetyScore: number;
+  prediction: string;
+  predictionReason: string;
+  safetyBreakdown: { label: string; pass: boolean; detail: string }[];
+}
+
 export interface TokenDetailTabsProps {
+  thread?: AnalysisEntry[];
   trades?: TradeRow[];
   mint?: string;
   intelLinks?: IntelLink[];
@@ -88,7 +98,7 @@ function Ring({ value, size = 76 }: { value: number; size?: number }) {
   );
 }
 
-export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSummary, safetyScore, safetyBreakdown, currentMcap }: TokenDetailTabsProps) {
+export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSummary, thread, safetyScore, safetyBreakdown, currentMcap }: TokenDetailTabsProps) {
   const [tab, setTab] = useState<Tab>("Swaps");
   const [holders, setHolders] = useState<Holder[]>([]);
   const [top10, setTop10] = useState<number | null>(null);
@@ -237,6 +247,41 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
         {tab === "Analysis" && (
           safetyScore == null && !intelSummary && verifiedLinks.length === 0 ? <Empty title="No analysis yet" sub="Safety checks and research links appear once Wraith has scanned this token." /> : (
             <div className="dt-pad">
+              {thread && thread.length > 0 ? (
+                <div className="dt-thread">
+                  {thread.map((e, i) => {
+                    const prev = i > 0 ? thread[i - 1] : null;
+                    const prevPass = new Map((prev?.safetyBreakdown ?? []).map((b) => [b.label, b.pass]));
+                    const checks = prev ? e.safetyBreakdown.filter((b) => prevPass.get(b.label) !== b.pass) : e.safetyBreakdown;
+                    const stamp = new Date(e.ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+                    return (
+                      <article key={e.ts} className={`dt-th ${i === 0 ? "first" : ""}`}>
+                        <header>
+                          <b>{i === 0 ? "Initial read" : "Update"}</b>
+                          <span>{stamp} · {ago(e.ts)} ago</span>
+                        </header>
+                        <div className="dt-th-meta">
+                          {e.mcap > 0 && <span>MC <b>{usd(e.mcap)}</b></span>}
+                          <span>Safety <b>{prev ? `${prev.safetyScore} → ${e.safetyScore}` : e.safetyScore}</b></span>
+                          <span className={`dt-th-call ${e.prediction.toLowerCase()}`}>{e.prediction}</span>
+                        </div>
+                        <p>{e.predictionReason}</p>
+                        {checks.length > 0 && (
+                          <div className="dt-checks">
+                            {checks.map((b) => (
+                              <div key={b.label} className={b.pass ? "ok" : "bad"}>
+                                <span>{b.pass ? "✓" : "✕"}</span>
+                                <div><b>{b.label}</b><small>{b.detail}</small></div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                  <p className="dt-note">The first read stays as written. New entries are added only when something material changes.</p>
+                </div>
+              ) : (<>
               {safetyScore != null && (
                 <div className="dt-safety">
                   <Ring value={safetyScore} />
@@ -257,6 +302,7 @@ export function TokenDetailTabs({ trades = [], mint, intelLinks = [], intelSumma
                 </div>
               )}
               {intelSummary && <div className="dt-quote">{intelSummary}</div>}
+              </>)}
               {verifiedLinks.length > 0 && (
                 <div className="dt-links">
                   {verifiedLinks.map((link, index) => (

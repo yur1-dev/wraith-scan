@@ -124,8 +124,11 @@ export async function quickPaperBuy(args: {
   symbol: string;
   amountSol: number;
   imageUrl?: string;
+  /** how the size should read in messages (e.g. "₱100"); defaults to the SOL amount */
+  amountLabel?: string;
 }): Promise<QuickBuyResult> {
   const { mint, symbol, amountSol, imageUrl } = args;
+  const sizeText = args.amountLabel ?? `${amountSol} SOL`;
 
   if (!mint || !symbol || !Number.isFinite(amountSol) || amountSol <= 0) {
     return { ok: false, message: "Invalid buy request" };
@@ -135,7 +138,7 @@ export async function quickPaperBuy(args: {
   if (amountSol > paperBal) {
     return {
       ok: false,
-      message: `Insufficient paper SOL — ${paperBal.toFixed(3)} left`,
+      message: "Not enough paper balance for this buy",
     };
   }
 
@@ -179,7 +182,7 @@ export async function quickPaperBuy(args: {
           }
         : p,
     );
-    message = `Added ${amountSol} SOL to ${symbol} · avg entry now ${avgEntryMcap >= 1000 ? `$${(avgEntryMcap / 1000).toFixed(1)}K` : `$${avgEntryMcap.toFixed(0)}`}`;
+    message = `Added ${sizeText} to ${symbol} · avg entry now ${avgEntryMcap >= 1000 ? `$${(avgEntryMcap / 1000).toFixed(1)}K` : `$${avgEntryMcap.toFixed(0)}`}`;
   } else {
     const trailFrac = DEFAULT_TRAIL / 100;
     const pos: PaperPosition = {
@@ -203,7 +206,7 @@ export async function quickPaperBuy(args: {
       fills: [fill],
     };
     nextPositions = [pos, ...positions];
-    message = `✓ Bought ${symbol} — ${amountSol} SOL · auto-sell armed (${DEFAULT_SL}% SL / ${DEFAULT_TP}x TP)`;
+    message = `✓ Bought ${symbol} — ${sizeText} · auto-sell armed (${DEFAULT_SL}% SL / ${DEFAULT_TP}x TP)`;
   }
 
   lsSet(PAPER_BAL_KEY, parseFloat((paperBal - amountSol).toFixed(6)));

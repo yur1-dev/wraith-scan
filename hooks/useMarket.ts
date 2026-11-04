@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MarketCategory, MarketToken } from "@/lib/market";
+import { swrPeek, swrRead, swrWrite } from "@/lib/swrCache";
 
 export interface UseMarket {
   tokens: MarketToken[];
@@ -17,13 +18,14 @@ export interface UseMarket {
 }
 
 export function useMarket(category: MarketCategory, intervalMs = 60_000): UseMarket {
-  const [tokens, setTokens] = useState<MarketToken[]>([]);
-  const [loading, setLoading] = useState(true);
+  const warm = swrPeek<MarketToken[]>(`market:${category}`);
+  const [tokens, setTokens] = useState<MarketToken[]>(warm ?? []);
+  const [loading, setLoading] = useState(!warm);
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const reqId = useRef(0);
-  const hasData = useRef(false);
+  const hasData = useRef(Boolean(warm));
 
   const load = useCallback(async () => {
     const id = ++reqId.current;
@@ -37,6 +39,7 @@ export function useMarket(category: MarketCategory, intervalMs = 60_000): UseMar
       if (id !== reqId.current) return;
       if (res.ok && Array.isArray(data.tokens)) {
         setTokens(data.tokens);
+        swrWrite(`market:${category}`, data.tokens.slice(0, 80));
         setStale(Boolean(data.stale));
         setUpdatedAt(data.updatedAt ?? Date.now());
         setError(null);
@@ -55,9 +58,11 @@ export function useMarket(category: MarketCategory, intervalMs = 60_000): UseMar
   }, [category]);
 
   useEffect(() => {
-    hasData.current = false;
-    setTokens([]);
-    setLoading(true);
+    // show the last list for this category right away (tab switch / coming back), then refresh behind it
+    const cached = swrRead<MarketToken[]>(`market:${category}`);
+    hasData.current = Boolean(cached);
+    setTokens(cached ?? []);
+    setLoading(!cached);
     setError(null);
     setStale(false);
     void load();

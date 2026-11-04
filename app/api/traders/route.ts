@@ -1,10 +1,13 @@
 import { getPrivySession } from "@/lib/privyAuth";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongoClient";
+import { computeTraderStats } from "@/lib/traderStats";
 
 type StoredTrade = {
   amountSol?: number;
   pnlPct?: number;
+  ts?: number;
+  closedAt?: number;
 };
 
 type StoredPosition = {
@@ -162,6 +165,7 @@ export async function GET(request: NextRequest) {
           closedTradeCount: closed.length,
           openPositionCount: openPositions.length,
           profitSol,
+          stats: computeTraderStats(closed),
           openPositions: openPositions.slice(0, 3).map((position) => ({
             symbol: position.symbol,
             mint: position.mint,

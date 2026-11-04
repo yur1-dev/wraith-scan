@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Bookmark, Heart, MessageCircle, Repeat2, Rss, Send } from "lucide-react";
-import { TokenIcon } from "@/components/TokenIcon";
+import { Face as PostFace, TokenCard, isFresh, mcapLabel, timeAgo as ago } from "@/components/CalloutParts";
 import { useTokenMeta, type TokenMeta } from "@/lib/useTokenMeta";
+import { swrPeek, swrWrite } from "@/lib/swrCache";
 import { CALLOUT_POSTED_EVENT, useLiveRefresh } from "@/lib/useLiveRefresh";
 import { readTokenFavorites, toggleTokenFavorite, TOKEN_FAVORITES_EVENT } from "@/lib/tokenFavorites";
 
@@ -49,14 +50,6 @@ function timeAgo(ts: number) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   return `${Math.floor(diff / 86400)}d`;
-}
-
-function mcapLabel(v?: number | null) {
-  if (!v || !Number.isFinite(v)) return null;
-  if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
-  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
-  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
-  return `$${v.toFixed(0)}`;
 }
 
 function Face({ src, name, small }: { src?: string; name: string; small?: boolean }) {
@@ -160,9 +153,10 @@ function Thread({ callout, meta, onCount }: { callout: CalloutItem; meta?: Token
   );
 }
 
-export default function FollowingIntelSidebar() {
-  const [callouts, setCallouts] = useState<CalloutItem[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function FollowingIntelSidebar({ embedded = false }: { embedded?: boolean } = {}) {
+  const warm = swrPeek<CalloutItem[]>("fi:following");
+  const [callouts, setCallouts] = useState<CalloutItem[]>(warm ?? []);
+  const [loading, setLoading] = useState(!warm);
   const [openThread, setOpenThread] = useState<string | null>(null);
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const meta = useTokenMeta(callouts.map((c) => c.mint ?? ""));
@@ -171,7 +165,7 @@ export default function FollowingIntelSidebar() {
     try {
       const r = await fetch("/api/callouts?following=1&limit=20", { cache: "no-store" });
       const d = await r.json();
-      if (r.ok) setCallouts(d.callouts ?? []);
+      if (r.ok) { setCallouts(d.callouts ?? []); swrWrite("fi:following", d.callouts ?? []); }
     } finally {
       setLoading(false);
     }
@@ -226,10 +220,15 @@ export default function FollowingIntelSidebar() {
 
   return (
     <div className="fi-sidebar">
-      <div className="fi-header">
-        <Rss size={13} color="var(--orange-hot)" />
-        <span className="fi-title">Following Intel</span>
-      </div>
+      {!embedded && (
+        <div className="fi-header">
+          <div className="fi-head-copy">
+            <span className="profile-eyebrow">SOCIAL</span>
+            <span className="fi-title">Following Intel</span>
+          </div>
+          <Rss size={14} color="var(--orange-hot)" />
+        </div>
+      )}
 
       {loading ? (
         <div className="fi-empty">
@@ -248,35 +247,26 @@ export default function FollowingIntelSidebar() {
             const m = c.mint ? meta[c.mint] : undefined;
             const isSaved = !!c.mint && saved.has(c.mint);
             return (
-              <div key={c.id} className="fi-card">
+              <article key={c.id} className="fi-card fp-post">
                 {c.repostedFrom && (
-                  <div className="fi-repost-label">
-                    <Repeat2 size={10} />
+                  <div className="fp-repost">
+                    <Repeat2 size={12} />
                     <span>Reposted from {c.repostedFrom.displayName}</span>
                   </div>
                 )}
-                <div className="fi-card-top">
-                  <Face src={c.avatarDataUrl} name={c.displayName} />
-                  <div className="fi-meta">
-                    <Link href={`/app/u/${encodeURIComponent(c.username ?? c.userId)}`} className="fi-name">{c.displayName}</Link>
-                    <span className="fi-age">{timeAgo(c.createdAt)}</span>
-                  </div>
-                  {c.mcapAtPost && <span className="fi-mcap">{mcapLabel(c.mcapAtPost)}</span>}
-                </div>
-
-                {c.mint && (
-                  <Link href={`/app/token/${c.mint}`} className="fi-token">
-                    <TokenIcon contractAddress={c.mint} imageUrl={m?.imageUrl} symbol={m?.symbol ?? "?"} size={18} />
-                    <b>{m ? `$${m.symbol}` : `${c.mint.slice(0, 4)}…${c.mint.slice(-4)}`}</b>
-                    {m && <span>{mcapLabel(m.mcap)} now</span>}
-                  </Link>
-                )}
-
-                <p className="fi-text">{c.text}</p>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {c.imageUrl && <img src={c.imageUrl} alt="" className="fi-img" />}
-
-                <div className="fi-actions">
+                <div className="fp-row">
+                  <PostFace src={c.avatarDataUrl} name={c.displayName} />
+                  <div className="fp-body">
+                    <div className="fp-head">
+                      <Link href={`/app/u/${encodeURIComponent(c.username ?? c.userId)}`} className="fp-name">{c.displayName}</Link>
+                      <span className="fp-age">{ago(c.createdAt)}</span>
+                      {isFresh(c.createdAt) && <i className="fp-live" aria-label="New" />}
+                    </div>
+                    <p className="fp-text">{c.text}</p>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    {c.imageUrl && <img src={c.imageUrl} alt="" className="fp-img" />}
+                    {c.mint && <TokenCard mint={c.mint} meta={m} calledMcap={c.mcapAtPost} />}
+                <div className="fi-actions fp-actions">
                   <button type="button" className={c.hearted ? "on heart" : ""} onClick={() => void heart(c)} aria-label="Like" aria-pressed={!!c.hearted}>
                     <Heart size={14} fill={c.hearted ? "currentColor" : "none"} /> {c.hearts > 0 && <span>{c.hearts}</span>}
                   </button>
@@ -289,12 +279,15 @@ export default function FollowingIntelSidebar() {
                   <button type="button" className={isSaved ? "on save" : ""} onClick={() => save(c)} aria-label={isSaved ? "Remove saved token" : "Save token"} title={isSaved ? "Saved. Click to remove" : "Save this token"} aria-pressed={isSaved}>
                     <Bookmark size={14} fill={isSaved ? "currentColor" : "none"} />
                   </button>
+                  {(m?.mcap || c.mcapAtPost) ? <span className="fp-mc"><b>{mcapLabel(m?.mcap || c.mcapAtPost)}</b> MC</span> : null}
                 </div>
 
                 {openThread === c.id && (
                   <Thread callout={c} meta={m} onCount={(n) => patch(c.id, (x) => ({ ...x, comments: n }))} />
                 )}
-              </div>
+                  </div>
+                </div>
+              </article>
             );
           })}
         </div>

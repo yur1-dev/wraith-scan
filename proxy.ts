@@ -17,7 +17,7 @@ const PRIVY_SESSION_COOKIE = "wraith_privy_session";
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  if (pathname.startsWith("/_next/") || pathname === "/favicon.ico" || pathname === "/manifest.webmanifest" || pathname === "/sw.js" || pathname.startsWith("/.well-known/") || pathname.startsWith("/downloads/")) {
+  if (pathname.startsWith("/_next/") || pathname === "/favicon.ico" || pathname === "/manifest.webmanifest" || pathname === "/sw.js" || pathname === "/offline.html" || pathname.startsWith("/.well-known/") || pathname.startsWith("/downloads/")) {
     return NextResponse.next();
   }
 

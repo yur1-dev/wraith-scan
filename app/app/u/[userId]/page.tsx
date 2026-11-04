@@ -9,6 +9,8 @@ import Header from "@/components/Header";
 import TraderFollowButton from "@/components/TraderFollowButton";
 import FollowListModal from "@/components/FollowListModal";
 import PnlChart from "@/components/PnlChart";
+import TraderStats from "@/components/TraderStats";
+import { useCash } from "@/lib/cash";
 import TierGlyph from "@/components/TierGlyph";
 import { GLYPH_PALETTE } from "@/lib/tierGlyph";
 import { TIERS, type TierKey } from "@/lib/tiers";
@@ -35,6 +37,7 @@ type PublicTrade = {
   pnlPct?: number;
   imageUrl?: string;
   ts?: number;
+  closedAt?: number;
 };
 
 type TraderDetails = {
@@ -80,6 +83,7 @@ export default function PublicTraderPage() {
   const [copied, setCopied] = useState(false);
   const [showFollowModal, setShowFollowModal] = useState(false);
   const [followModalTab, setFollowModalTab] = useState<"followers" | "following">("followers");
+  const { money } = useCash();
 
   useEffect(() => {
     if (!userId) return;
@@ -336,6 +340,8 @@ export default function PublicTraderPage() {
             <small>live + closed</small>
           </div>
         </div>
+
+        <TraderStats trades={data.closedTrades} money={money} title="Trader statistics" />
 
         {/* ── P&L sparkline ── */}
         <PnlChart trades={data.closedTrades} title="Realized P&L" />

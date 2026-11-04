@@ -178,7 +178,6 @@ export default function PushToggle({ prefs }: { prefs: Prefs }) {
         <>
           <span><BellRing size={15} /> Phone notifications are on</span>
           <span>
-            <button type="button" disabled={busy} onClick={() => void test()}>Send test</button>
             <button type="button" disabled={busy} onClick={() => void disable()}>Turn off</button>
           </span>
         </>

@@ -363,3 +363,14 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   .wx-board-bar { padding: 6px 10px !important; gap: 6px !important; }
   .wx-board-bar .wx-search input { height: 34px; }
 }
+
+/* Token page header on phones: keep market cap and the 5m/1h/6h/24h changes on one row, never wrapped */
+@media (max-width: 767px) {
+  .wx-pricebar { flex-wrap: nowrap !important; align-items: center; gap: 8px; padding: 8px 12px !important; }
+  .wx-pricebar > div:first-child { min-width: 0; flex: 0 1 auto; }
+  .wx-mcap { font-size: 24px !important; white-space: nowrap; margin-top: 1px; }
+  .wx-changes { flex-wrap: nowrap !important; gap: 2px; margin-left: auto; flex: 0 0 auto; }
+  .wx-change { min-width: 0 !important; padding: 2px 5px !important; border: 0 !important; background: transparent !important; }
+  .wx-change span { margin-bottom: 0; font-size: 9px; }
+  .wx-change b { font-size: 12px; white-space: nowrap; }
+}

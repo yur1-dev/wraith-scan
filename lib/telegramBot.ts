@@ -60,6 +60,19 @@ export async function broadcast(kind: "signal" | "win", text: string, opts: { ch
     if (!res.ok) res = await tg("sendMessage", { chat_id: chat, text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: opts.markup });
     if (res.ok) sent++;
   }
+
+  // Optional public group/topic feed: set TELEGRAM_GROUP_CHAT_ID (e.g. -1001234567890) and, for a forum topic,
+  // TELEGRAM_GROUP_THREAD_ID. Wins always post there; signals only if TELEGRAM_GROUP_SIGNALS=1.
+  const gid = process.env.TELEGRAM_GROUP_CHAT_ID;
+  if (gid && (kind === "win" || process.env.TELEGRAM_GROUP_SIGNALS === "1")) {
+    const thread = Number(process.env.TELEGRAM_GROUP_THREAD_ID);
+    const extra = Number.isFinite(thread) && thread > 0 ? { message_thread_id: thread } : {};
+    let res = opts.imageUrl && text.length < 1000
+      ? await tg("sendPhoto", { chat_id: gid, photo: opts.imageUrl, caption: text, parse_mode: "HTML", reply_markup: opts.markup, ...extra })
+      : { ok: false };
+    if (!res.ok) res = await tg("sendMessage", { chat_id: gid, text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: opts.markup, ...extra });
+    if (!res.ok) console.error("[telegram] group post failed", (res as { description?: string }).description);
+  }
   return { sent, skipped };
 }
 

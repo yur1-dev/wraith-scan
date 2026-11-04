@@ -2106,15 +2106,23 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
           inputRef.current?.focus();
         }, 650);
       }
-    });
+    }).catch(() => { setPin(""); setError(false); setChecking(false); });
   }, [pin, checking, unlocked, onUnlock]);
 
+  // Safety net: if a check ever hangs (suspended tab, slow crypto), never leave the keypad dead.
+  useEffect(() => {
+    if (!checking || unlocked) return;
+    const t = window.setTimeout(() => { setPin(""); setError(false); setChecking(false); }, 4000);
+    return () => window.clearTimeout(t);
+  }, [checking, unlocked]);
+
+  // Typing digits is never blocked by a running check (only a full 6-digit entry is checked).
   const press = (d: string) => {
-    if (checking || unlocked) return;
+    if (unlocked) return;
     setPin((p) => (p.length < 6 ? p + d : p));
   };
   const back = () => {
-    if (checking || unlocked) return;
+    if (unlocked) return;
     setPin((p) => p.slice(0, -1));
   };
   const tone = error ? "#ff5a5a" : unlocked ? "#55cf91" : "#ff7b3d";

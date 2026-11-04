@@ -9,10 +9,7 @@ export const WHITELISTED_WALLETS: string[] = [
 
 export const WHITELISTED_EMAILS: string[] = [
   "yuriesb01@gmail.com",
-  "villanuevajared62@gmail.com",
-  "kudu.bernas.au@phinmaed.com",
-  "liba.perez.au@phinmaed.com",
-  "crca.rayo.au@phinmaed.com",
+  "jonathan.4thwatchlogro@gmail.com",
 ];
 
 // ─── PER-WALLET TIER OVERRIDES ───────────────────────────────────────────────

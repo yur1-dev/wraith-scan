@@ -283,7 +283,7 @@ export default function Landing() {
             </div>
             <footer className="ws-foot">
               <span>Wraith © {new Date().getFullYear()} · Not financial advice. Meme tokens are high risk.</span>
-              <span><a href={PORTAL} target="_blank" rel="noreferrer">Telegram channel</a> · <a href={BOT} target="_blank" rel="noreferrer">Alerts bot</a> · <Link href="/app">App</Link></span>
+              <span><a href={PORTAL} target="_blank" rel="noreferrer">Telegram channel</a> · <a href={BOT} target="_blank" rel="noreferrer">Alerts bot</a> · <Link href="/app">App</Link> · <Link href="/privacy">Privacy Policy</Link> · <Link href="/terms">Terms</Link></span>
             </footer>
           </div>
         </section>

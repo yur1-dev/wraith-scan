@@ -907,3 +907,7 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
 .wx-tcard-meta { align-items: center; min-height: 34px; overflow: visible; }
 .wx-tcard-meta .wx-qb { align-self: center; height: 26px; width: 26px; flex: 0 0 26px; margin-left: auto; display: block; overflow: visible; }
 .wx-tcard { overflow: visible; }
+
+/* quick buy: the inner button was being stretched by a global min-height, so it overflowed the row and hit the card edge */
+.wx-qb > button { min-height: 0 !important; min-width: 0 !important; width: 26px !important; height: 26px !important; padding: 0 !important; }
+.wx-tcard-meta .wx-qb { margin-bottom: 0; }

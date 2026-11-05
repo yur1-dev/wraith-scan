@@ -81,6 +81,7 @@ let _conn: Connection | null = null;
 function connection(): Connection {
   if (!_conn) {
     const url =
+      process.env.SOLANA_RPC_URL ||
       process.env.NEXT_PUBLIC_SOLANA_RPC ||
       process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
       "https://api.mainnet-beta.solana.com";

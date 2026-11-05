@@ -50,11 +50,11 @@ config({ path: ".env.local" });
 let getDb: () => Promise<import("mongodb").Db>;
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────
-const RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC;
+const RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC;
 const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!RPC_URL) {
-  console.error("[ingest-worker] Missing NEXT_PUBLIC_SOLANA_RPC in .env.local");
+  console.error("[ingest-worker] Missing SOLANA_RPC_URL in .env.local");
   process.exit(1);
 }
 if (!MONGODB_URI) {

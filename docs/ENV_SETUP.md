@@ -10,8 +10,9 @@ Order below = what to set up first.
 ## 1. Helius (RPC + candles + swaps) — REQUIRED
 1. Go to https://dashboard.helius.dev and sign up.
 2. Dashboard → **API Keys** → copy your key (or **RPCs** → Mainnet URL).
-3. `NEXT_PUBLIC_SOLANA_RPC=https://mainnet.helius-rpc.com/?api-key=<key>`
-4. Optional devnet (test mode): `https://devnet.helius-rpc.com/?api-key=<key>` → `NEXT_PUBLIC_DEVNET_RPC_URL` and `DEVNET_RPC_URL`.
+3. `SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=<key>`. Server-only: never give a keyed URL a `NEXT_PUBLIC_` prefix, because Next.js ships those to every browser that loads the site.
+4. Optional devnet (test mode): `https://devnet.helius-rpc.com/?api-key=<key>` → `DEVNET_RPC_URL`.
+5. Optional: `SOLANA_RPC_URLS=https://a,https://b` adds extra keyed endpoints that are tried in order when the first one rate-limits.
 Wraith reads the API key from that URL for the Enhanced Transactions API (swaps, chart candles) and DAS (holder counts). No separate key needed.
 Free plan is fine for dev; upgrade when users grow.
 

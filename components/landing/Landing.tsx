@@ -153,7 +153,7 @@ export default function Landing() {
         <section id="features" className="ws-sec">
           <div className="ws-wrap">
             <Reveal><span className="ws-kicker">The product</span>
-              <h2 className="ws-h2 lp-h2">Built for the way meme tokens actually move.</h2></Reveal>
+              <h2 className="ws-h2 lp-h2">Built for the way new tokens actually move.</h2></Reveal>
             <div className="lp-rows">
               {SHOWCASE.map((f, i) => (
                 <div key={f.id} className={`lp-row${i % 2 ? " rev" : ""}`}>
@@ -266,7 +266,7 @@ export default function Landing() {
               </div>
             </div>
             <footer className="ws-foot">
-              <span>Wraith © {new Date().getFullYear()} · Not financial advice. Meme tokens are high risk.</span>
+              <span>Wraith © {new Date().getFullYear()} · Not financial advice. Tokens are high risk.</span>
               <span><a href={PORTAL} target="_blank" rel="noreferrer">Telegram channel</a> · <a href={BOT} target="_blank" rel="noreferrer">Alerts bot</a> · <Link href="/app">App</Link> · <Link href="/privacy">Privacy Policy</Link> · <Link href="/terms">Terms</Link></span>
             </footer>
           </div>

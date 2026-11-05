@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Wraith",
     short_name: "Wraith",
-    description: "Scan viral memes, find tokens, trade across chains.",
+    description: "Scan new tokens, spot the ones with real upside, trade across seven chains.",
     start_url: "/app",
     scope: "/",
     display: "standalone",

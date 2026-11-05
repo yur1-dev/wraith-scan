@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import { LegalPage, H } from "../legal-page";
 
-export const metadata: Metadata = { title: "Privacy Policy | Wraith" };
+export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
     <LegalPage title="Privacy Policy" updated="November 5, 2026">
-      <p>Wraith (wraith.farm) is a meme token scanner and trading app. This page explains what we collect and how it is used.</p>
+      <p>Wraith (wraith.farm) is a multi-chain token scanner and trading app. This page explains what we collect and how it is used.</p>
 
       <H>What we collect</H>
       <p>When you sign in with Google, email or a wallet, authentication is handled by Privy. We receive your account identifier, your email address if you used one, your display name and profile picture from your sign-in provider, and your wallet address.</p>

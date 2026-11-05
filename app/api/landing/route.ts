@@ -25,6 +25,8 @@ type Candle = { t: number; o: number; h: number; l: number; c: number; v?: numbe
 type TgBlock = { html: string; kb: unknown };
 
 const xOf = (c: SignalCall) => (c.spottedMcap > 0 ? c.peakMcap / c.spottedMcap : 0);
+/** where the call stands now vs. where Wraith flagged it: the calls that stayed up */
+const nowOf = (c: SignalCall) => (c.spottedMcap > 0 ? c.lastMcap / c.spottedMcap : 0);
 const slim = (c: SignalCall) => ({
   address: c.address,
   chain: c.chain ?? "solana",
@@ -37,6 +39,7 @@ const slim = (c: SignalCall) => ({
   peakMcap: c.peakMcap,
   lastMcap: c.lastMcap,
   x: Math.round(xOf(c) * 100) / 100,
+  nowX: Math.round(nowOf(c) * 100) / 100,
 });
 type Slim = ReturnType<typeof slim>;
 
@@ -112,10 +115,12 @@ async function sampleSignal(origin: string, calls: SignalCall[], now: number): P
 function shape(calls: SignalCall[], now: number) {
   const hit2 = calls.filter((c) => xOf(c) >= 2).length;
   const stats = { calls: calls.length, hit2, rate: calls.length ? Math.round((hit2 / calls.length) * 100) : 0 };
-  const winCalls = calls.filter((c) => xOf(c) >= 1.5).sort((a, b) => xOf(b) - xOf(a));
+  // Showcase the calls that STAYED up (still well above the call price now), not ones that spiked and dumped.
+  const held = calls.filter((c) => nowOf(c) >= 1.5).sort((a, b) => nowOf(b) - nowOf(a));
+  const winCalls = held.length >= 3 ? held : calls.filter((c) => xOf(c) >= 1.5).sort((a, b) => xOf(b) - xOf(a));
   const wins = winCalls.slice(0, 8).map(slim);
   const recent = calls.filter((c) => c.spottedAt < now - 3_600_000).sort((a, b) => b.spottedAt - a.spottedAt).slice(0, 8).map(slim);
-  const topWin = calls.filter((c) => xOf(c) >= 2).sort((a, b) => xOf(b) - xOf(a))[0];
+  const topWin = held.find((c) => nowOf(c) >= 2) ?? calls.filter((c) => xOf(c) >= 2).sort((a, b) => xOf(b) - xOf(a))[0];
   const win: TgBlock | null = topWin
     ? { html: winMessage(topWin, milestoneFor(topWin.lastMcap / topWin.spottedMcap) || 2), kb: tokenKeyboard(topWin.address, topWin.chain ?? "solana") }
     : null;

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { LegalPage, H } from "../legal-page";
 
-export const metadata: Metadata = { title: "Terms of Service | Wraith" };
+export const metadata: Metadata = { title: "Terms of Service" };
 
 export default function TermsPage() {
   return (
@@ -9,10 +9,10 @@ export default function TermsPage() {
       <p>By using Wraith (wraith.farm) you agree to these terms. If you do not agree, do not use the service.</p>
 
       <H>What Wraith is</H>
-      <p>Wraith is a tool for discovering and tracking meme tokens, with paper trading and optional live trading. It provides market data and automated checks for information only.</p>
+      <p>Wraith is a tool for discovering and tracking tokens across chains, with paper trading and optional live trading. It provides market data and automated checks for information only.</p>
 
       <H>Not financial advice</H>
-      <p>Nothing in Wraith is financial, investment or legal advice. Safety scores, analysis and signals are automated and can be wrong. Meme tokens are extremely volatile and you can lose everything you put in. You are responsible for your own decisions.</p>
+      <p>Nothing in Wraith is financial, investment or legal advice. Safety scores, analysis and signals are automated and can be wrong. Early-stage tokens are extremely volatile and you can lose everything you put in. You are responsible for your own decisions.</p>
 
       <H>Your account and wallet</H>
       <p>You are responsible for your account and for keeping your sign-in and wallet secure. You must be old enough to use crypto services where you live and follow the laws that apply to you.</p>

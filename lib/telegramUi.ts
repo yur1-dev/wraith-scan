@@ -1,7 +1,7 @@
 // Shared Telegram look & feel for the Wraith bot: one header style, chain-aware links, inline buttons.
 import { CHAINS } from "@/lib/chains";
 
-export const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://wraith-scan.vercel.app").replace(/\/$/, "");
+export const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://www.wraith.farm").replace(/\/$/, "");
 export const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME ?? "wraithscan_bot";
 const RULE = "━━━━━━━━━━━━━━━━";
 

@@ -32,14 +32,14 @@ const display = localFont({
 
 const SITE = "https://www.wraith.farm";
 const TITLE = "Wraith: trade every chain from one cash balance";
-const DESC = "Multi-chain meme-token scanner and trading platform. Live signals on Solana, Base, Ethereum, BNB Chain, Monad, Arc and Robinhood Chain, Telegram alerts, and paper trading.";
+const DESC = "Multi-chain token scanner and trading platform. Find tokens with real upside across Solana, Base, Ethereum, BNB Chain, Monad, Arc and Robinhood Chain, with safety scores, Telegram alerts and paper trading.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),
   title: { default: TITLE, template: "%s | Wraith" },
   description: DESC,
   applicationName: "Wraith",
-  keywords: ["meme coin scanner", "token scanner", "Solana meme coins", "crypto signals", "paper trading", "Telegram crypto alerts", "multi-chain trading", "Wraith"],
+  keywords: ["token scanner", "crypto token scanner", "multi-chain token scanner", "new token alerts", "crypto signals", "paper trading", "Telegram crypto alerts", "multi-chain trading", "Wraith"],
   authors: [{ name: "Wraith", url: SITE }],
   creator: "Wraith",
   publisher: "Wraith",
@@ -52,7 +52,7 @@ export const metadata: Metadata = {
     title: TITLE,
     description: DESC,
     locale: "en_US",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Wraith, the meme-token scanner" }],
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Wraith, the multi-chain token scanner" }],
   },
   twitter: { card: "summary_large_image", title: TITLE, description: DESC, images: ["/og.png"] },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 } },

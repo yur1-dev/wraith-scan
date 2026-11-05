@@ -1,5 +1,5 @@
 module.exports=[
-{type:"SIGHTING",n:1,title:"Paper trading",sub:"Practice on live meme tokens with fake money. Same charts, zero risk.",chips:["LIVE PRICES","NO RISK"]},
+{type:"SIGHTING",n:1,title:"Paper trading",sub:"Practice on live tokens with fake money. Same charts, zero risk.",chips:["LIVE PRICES","NO RISK"]},
 {type:"SIGHTING",n:2,title:"One cash balance, seven chains",sub:"Buy on Solana, Base, Ethereum, BNB Chain, Monad, Arc and Robinhood Chain with the stablecoins you already hold.",chips:["7 CHAINS","STABLECOINS"]},
 {type:"SIGHTING",n:3,title:"Signals that hunt for you",sub:"The scanner scores new tokens around the clock and pings you the moment one lights up.",chips:["SCORE","24/7"]},
 {type:"SIGHTING",n:4,title:"Telegram alerts",sub:"Link your chat, pick your chains and minimum score, sleep through the noise.",chips:["QUIET MODE","PER-CHAIN"]},

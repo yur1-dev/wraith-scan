@@ -159,7 +159,7 @@ function LoginInner() {
           <div className="wl2-chains">
             {CHAINS.map(([k, n]) => (<span key={k} title={n}><ChainLogo chain={k} size={20} /></span>))}
           </div>
-          <p className="wl-legal">Wallets are secured by Privy and locked behind your PIN. Not financial advice, meme tokens are high risk.</p>
+          <p className="wl-legal">Wallets are secured by Privy and locked behind your PIN. Not financial advice, tokens are high risk.</p>
         </div>
       </main>
     </div>

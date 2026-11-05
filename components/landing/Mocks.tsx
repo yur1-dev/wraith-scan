@@ -4,7 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import ChainLogo from "@/components/ChainLogo";
 
-export interface Call { address: string; chain: string; symbol: string; imageUrl: string | null; tier: "HOT" | "WATCH"; score: number; spottedAt: number; spottedMcap: number; peakMcap: number; lastMcap: number; x: number }
+export interface Call { address: string; chain: string; symbol: string; imageUrl: string | null; tier: "HOT" | "WATCH"; score: number; spottedAt: number; spottedMcap: number; peakMcap: number; lastMcap: number; x: number; nowX?: number }
 export interface Candle { t: number; o: number; h: number; l: number; c: number; v?: number }
 export interface TgBlock { html: string; kb?: { inline_keyboard?: { text: string }[][] } | null }
 export interface LandingData {
@@ -24,12 +24,20 @@ export const xf = (x: number) => `${x >= 10 ? x.toFixed(1) : x.toFixed(2)}x`;
 function Empty({ text }: { text: string }) { return <p className="lp-empty">{text}</p>; }
 function Skeleton({ rows = 5 }: { rows?: number }) { return <div className="lp-skel">{Array.from({ length: rows }).map((_, i) => <i key={i} />)}</div>; }
 
+/** Letter avatar is always there instantly; the token image fades in over it, and a broken image just leaves the letter. */
 export function Coin({ c }: { c: Call }) {
-  return c.imageUrl
-    // eslint-disable-next-line @next/next/no-img-element
-    ? <img className="lp-coin" src={c.imageUrl} alt="" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
-    : <span className="lp-coin ph">{c.symbol.slice(0, 1)}</span>;
+  const [ok, setOk] = useState(true);
+  return (
+    <span className="lp-coin ph">
+      {c.symbol.slice(0, 1).toUpperCase()}
+      {c.imageUrl && ok && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="lp-ci" src={c.imageUrl} alt="" loading="eager" decoding="async" referrerPolicy="no-referrer" onLoad={(e) => e.currentTarget.classList.add("in")} onError={() => setOk(false)} />
+      )}
+    </span>
+  );
 }
+const nowMult = (c: Call) => c.nowX ?? (c.spottedMcap > 0 ? c.lastMcap / c.spottedMcap : c.x);
 
 export function Ticker({ data }: { data: LandingData | null }) {
   const items = useMemo(() => {
@@ -49,8 +57,8 @@ export function Ticker({ data }: { data: LandingData | null }) {
             <ChainLogo chain={c.chain} size={14} />
             <b>${c.symbol.toUpperCase()}</b>
             <i style={{ color: TIER_COLOR[c.tier], borderColor: TIER_COLOR[c.tier] }}>{c.tier}</i>
-            <em style={{ color: c.x >= 1 ? "#22c55e" : "#ef4444" }}>{xf(c.x)}</em>
-            <small>{fmtUsd(c.spottedMcap)} → {fmtUsd(c.peakMcap)}</small>
+            <em style={{ color: nowMult(c) >= 1 ? "#22c55e" : "#ef4444" }}>{xf(nowMult(c))}</em>
+            <small>{fmtUsd(c.spottedMcap)} → {fmtUsd(c.lastMcap)}</small>
           </span>
         ))}
       </div>
@@ -74,7 +82,7 @@ export function LiveBoard({ data, loading }: { data: LandingData | null; loading
           <div key={c.address} className="lp-board-row">
             <Coin c={c} />
             <div className="nm"><b>${c.symbol.toUpperCase()}</b><span><ChainLogo chain={c.chain} size={12} /> called at {fmtUsd(c.spottedMcap)}</span></div>
-            <div className="mx"><strong>{xf(c.x)}</strong><span>peak {fmtUsd(c.peakMcap)}</span></div>
+            <div className="mx"><strong>{xf(nowMult(c))}</strong><span>now {fmtUsd(c.lastMcap)} · peak {fmtUsd(c.peakMcap)}</span></div>
           </div>
         ))}
       </div>
@@ -181,7 +189,7 @@ export function WinsReal({ data }: { data: LandingData | null }) {
         <div key={c.address} className="lp-win">
           <span className="id"><Coin c={c} /><b>${c.symbol.toUpperCase()}</b><ChainLogo chain={c.chain} size={13} /></span>
           <i style={{ color: TIER_COLOR[c.tier], borderColor: TIER_COLOR[c.tier] }}>{c.tier}</i>
-          <em>{xf(c.x)}</em>
+          <em>{xf(nowMult(c))}</em>
         </div>
       ))}
     </div>

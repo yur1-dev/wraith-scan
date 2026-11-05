@@ -6,7 +6,7 @@ export const HERO = {
   eyebrow: "Seven networks · one balance",
   title: ["See it first.", "Buy it from", "any chain."],
   accent: 2, // index of the line shown in the accent colour
-  sub: "Wraith scans new meme tokens on Solana, Base, Ethereum, BNB Chain, Monad, Arc and Robinhood Chain, scores them, and lets you buy with the stablecoins you already hold.",
+  sub: "Wraith scans new tokens on Solana, Base, Ethereum, BNB Chain, Monad, Arc and Robinhood Chain, scores their upside and safety, and lets you buy with the stablecoins you already hold.",
   note: "Sign in with Google · wallets created for you · not financial advice",
 };
 
@@ -67,5 +67,5 @@ export const FAQ = [
   ["Do you hold my funds?", "No. Wallets are embedded wallets that only you can approve from. You approve each transaction and can lock the wallet with a PIN."],
   ["What does it cost?", "A small per-trade fee that depends on your tier, from 1.5% with no OMEN down to 0% at the top tier. Network gas is separate."],
   ["Are the screens on this page real?", "Yes. The numbers, tokens and Telegram messages on this page come from the same server-side call record the app uses, refreshed every 30 seconds."],
-  ["Is this financial advice?", "No. Meme tokens are extremely volatile and most lose value. Only trade what you can afford to lose."],
+  ["Is this financial advice?", "No. Early-stage tokens are extremely volatile and most lose value. Only trade what you can afford to lose."],
 ] as const;

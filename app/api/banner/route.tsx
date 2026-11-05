@@ -3,6 +3,7 @@ import path from "path";
 import type { NextRequest } from "next/server";
 import { drawBanner, type BannerData, type BannerStat } from "@/lib/telegramBanner";
 import { SHARE_RANKS } from "@/lib/shareCard";
+import { safeFetchImage } from "@/lib/safeFetch";
 
 // Telegram banner (signals + wins), drawn on the server and returned as a PNG.
 // /api/banner?kind=win&sym=FOO&x=3.5&called=13000&now=45500&peak=45500&chain=solana&img=<token image url>
@@ -41,9 +42,15 @@ const CHAINS: Record<string, string> = { solana: "Solana", ethereum: "Ethereum",
 async function img(url: string | null, same: string | null): Promise<Image | null> {
   if (!url) return null;
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(6000), headers: same ? {} : { "user-agent": "wraith-banner" } });
-    if (!r.ok) return null;
-    return await loadImage(Buffer.from(await r.arrayBuffer()));
+    if (same) {
+      // our own static art: trusted origin, fixed paths
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!r.ok) return null;
+      return await loadImage(Buffer.from(await r.arrayBuffer()));
+    }
+    // token image comes from the query string: public hosts only, size capped, image types only
+    const got = await safeFetchImage(url, { headers: { "user-agent": "wraith-banner" } });
+    return got ? await loadImage(got.buf) : null;
   } catch { return null; }
 }
 

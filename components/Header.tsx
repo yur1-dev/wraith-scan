@@ -2183,7 +2183,7 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
           setPin("");
           setError(false);
           setChecking(false);
-          inputRef.current?.focus();
+          if (!window.matchMedia("(hover: none) and (pointer: coarse)").matches) inputRef.current?.focus();
         }, 650);
       }
     }).catch(() => { setPin(""); setError(false); setChecking(false); });
@@ -2293,7 +2293,8 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
         autoComplete="off"
         maxLength={6}
         aria-label="PIN"
-        autoFocus
+        readOnly={touch}
+        tabIndex={-1}
         style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 1, height: 1 }}
       />
 

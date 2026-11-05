@@ -1,64 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeFetchImage } from "@/lib/safeFetch";
 
 /**
  * GET /api/proxy-img?url=<encoded-url>
  *
- * Proxies an external image through the Next.js server so html2canvas
- * can capture it without hitting CORS restrictions.
- * Only allows image content-types for safety.
+ * Proxies an external image through the Next.js server so html2canvas can capture it without CORS problems.
+ * Hardened: public hosts only (no localhost / private / cloud-metadata addresses), redirects re-checked,
+ * 4 MB cap, real image types only (SVG refused).
  */
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const url = searchParams.get("url");
+  const url = new URL(req.url).searchParams.get("url");
+  if (!url || url.length > 2048) return new NextResponse("Missing url param", { status: 400 });
 
-  if (!url) {
-    return new NextResponse("Missing url param", { status: 400 });
-  }
+  const got = await safeFetchImage(url, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; WraithBot/1.0; +https://wraith.farm)", Accept: "image/*,*/*;q=0.8" },
+    timeoutMs: 5000,
+  });
+  if (!got) return new NextResponse("Unavailable", { status: 502 });
 
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(url);
-    // Basic safety — only allow http/https
-    if (!/^https?:\/\//i.test(decoded)) throw new Error("bad protocol");
-  } catch {
-    return new NextResponse("Invalid url", { status: 400 });
-  }
-
-  try {
-    const upstream = await fetch(decoded, {
-      headers: {
-        // Mimic a browser request so CDNs don't reject us
-        "User-Agent":
-          "Mozilla/5.0 (compatible; WraithBot/1.0; +https://wraith.app)",
-        Accept: "image/*,*/*;q=0.8",
-      },
-      // 5 second timeout
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!upstream.ok) {
-      return new NextResponse("Upstream error", { status: 502 });
-    }
-
-    const contentType = upstream.headers.get("content-type") ?? "image/png";
-    // Safety: only pass through actual image types
-    if (!contentType.startsWith("image/")) {
-      return new NextResponse("Not an image", { status: 415 });
-    }
-
-    const buffer = await upstream.arrayBuffer();
-
-    return new NextResponse(buffer, {
-      status: 200,
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "public, max-age=86400, immutable",
-        // Allow the browser to use this cross-origin
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
-  } catch (err) {
-    console.error("[proxy-img] fetch failed", err);
-    return new NextResponse("Fetch failed", { status: 502 });
-  }
+  return new NextResponse(new Uint8Array(got.buf), {
+    status: 200,
+    headers: {
+      "Content-Type": got.type,
+      "Cache-Control": "public, max-age=86400, immutable",
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
 }

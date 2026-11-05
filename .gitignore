@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# marketing assets (large)
+/marketing/out/
+/marketing/memes/
+/marketing/*.zip

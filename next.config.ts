@@ -1,7 +1,26 @@
 import path from "path";
 import type { NextConfig } from "next";
 
+const securityHeaders = [
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), usb=(), payment=(), interest-cohort=()" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'" },
+  { key: "X-DNS-Prefetch-Control", value: "on" },
+];
+
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
+  productionBrowserSourceMaps: false,
+  async headers() {
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // API responses are per-user or live data: never let a CDN/browser share-cache them by accident (routes can still override)
+      { source: "/api/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+    ];
+  },
   turbopack: {
     root: path.resolve(process.cwd()),
   },

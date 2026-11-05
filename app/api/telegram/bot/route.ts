@@ -267,6 +267,7 @@ async function handleCallback(cb: { id: string; data?: string; message?: { chat:
 export async function POST(req: NextRequest) {
   // Optional shared secret set via setWebhook (see /api/telegram/setup)
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") console.warn("[tg-bot] TELEGRAM_WEBHOOK_SECRET is not set: webhook accepts unauthenticated updates");
   if (secret && req.headers.get("x-telegram-bot-api-secret-token") !== secret) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }

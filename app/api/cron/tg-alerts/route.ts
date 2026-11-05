@@ -22,6 +22,7 @@ function bannerUrl(origin: string, q: Record<string, string | number | undefined
 
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") console.warn("[cron] CRON_SECRET is not set: this endpoint is publicly callable");
   if (secret) {
     const ok = req.headers.get("authorization") === `Bearer ${secret}` || req.nextUrl.searchParams.get("key") === secret;
     if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });

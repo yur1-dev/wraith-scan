@@ -30,12 +30,34 @@ const display = localFont({
   variable: "--font-display",
 });
 
+const SITE = "https://www.wraith.farm";
+const TITLE = "Wraith: trade every chain from one cash balance";
+const DESC = "Multi-chain meme-token scanner and trading platform. Live signals on Solana, Base, Ethereum, BNB Chain, Monad, Arc and Robinhood Chain, Telegram alerts, and paper trading.";
+
 export const metadata: Metadata = {
-  title: "WRAITH — Meme Token Sniper",
-  description: "Scan viral memes, find Solana tokens, buy instantly.",
+  metadataBase: new URL(SITE),
+  title: { default: TITLE, template: "%s | Wraith" },
+  description: DESC,
   applicationName: "Wraith",
+  keywords: ["meme coin scanner", "token scanner", "Solana meme coins", "crypto signals", "paper trading", "Telegram crypto alerts", "multi-chain trading", "Wraith"],
+  authors: [{ name: "Wraith", url: SITE }],
+  creator: "Wraith",
+  publisher: "Wraith",
+  category: "finance",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "Wraith",
+    url: SITE,
+    title: TITLE,
+    description: DESC,
+    locale: "en_US",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Wraith, the meme-token scanner" }],
+  },
+  twitter: { card: "summary_large_image", title: TITLE, description: DESC, images: ["/og.png"] },
+  robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 } },
   appleWebApp: { capable: true, title: "Wraith", statusBarStyle: "black-translucent" },
-  icons: { apple: "/apple-touch-icon.png" },
+  icons: { icon: [{ url: "/icon.png", type: "image/png" }], apple: "/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = {

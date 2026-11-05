@@ -3,12 +3,13 @@ import { effectiveTier } from "@/lib/effectiveTier";
 import { NextRequest, NextResponse } from "next/server";
 import { getAppSession } from "@/lib/session";
 import { getDb } from "@/lib/mongoClient";
-import { fmtUsd, footer, header, rule } from "@/lib/telegramUi";
-
-const API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+import { esc, fmtUsd, footer, header, rule } from "@/lib/telegramUi";
+import { checkLimit, lightWriteLimiter } from "@/lib/ratelimit";
 
 async function send(chatId: string, text: string) {
-  await fetch(`${API}/sendMessage`, {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
@@ -20,9 +21,19 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json();
-  const { symbol, keyword, initialMcap, currentMcap, contractAddress, seenAt } =
-    body;
+  // this sends to the caller's own linked chat only, but it is still an outbound message per request, so it gets a budget
+  const rl = await checkLimit(lightWriteLimiter, `stale:${session.user.id}`);
+  if (!rl.success) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+
+  let body: Record<string, unknown>;
+  try { body = (await req.json()) as Record<string, unknown>; } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const symbol = typeof body.symbol === "string" ? body.symbol.slice(0, 32) : "TOKEN";
+  const initialMcap = num(body.initialMcap);
+  const currentMcap = num(body.currentMcap);
+  const seenAt = num(body.seenAt);
+  const contractAddress = typeof body.contractAddress === "string" && /^[A-Za-z0-9]{32,44}$/.test(body.contractAddress) ? body.contractAddress : "";
+  if (!seenAt) return NextResponse.json({ skipped: true });
 
   // Only send stale alert if token is 20+ mins old and below 1.5x
   const ageMs = Date.now() - seenAt;
@@ -60,14 +71,19 @@ export async function POST(req: NextRequest) {
   const xStr = xNow >= 10 ? `${xNow.toFixed(1)}x` : `${xNow.toFixed(2)}x`;
   const ageMin = Math.floor(ageMs / 60_000);
 
-  const chain: string = body.chain ?? "solana";
+  const chain: string = typeof body.chain === "string" ? body.chain.slice(0, 20) : "solana";
   let msg = header("☠️", "STALE · NO PROGRESS", symbol, chain);
   msg += `\n📉 <b>Entry</b>  ${fmtUsd(initialMcap)}  →  <b>Now</b>  ${fmtUsd(currentMcap)}  (${xStr})`;
   msg += `\n⏱ <b>${ageMin}m</b> with no meaningful move`;
-  if (contractAddress) msg += `\n${rule}\n<code>${contractAddress}</code>`;
+  if (contractAddress) msg += `\n${rule}\n<code>${esc(contractAddress)}</code>`;
   msg += `\n\n${footer}`;
 
-  await send(user.telegramChatId, msg);
+  try {
+    await send(user.telegramChatId, msg);
+  } catch (err) {
+    console.error("[telegram stale]", err);
+    return NextResponse.json({ error: "Could not send" }, { status: 502 });
+  }
 
   return NextResponse.json({ ok: true });
 }

@@ -9,6 +9,7 @@ import { getAppSession } from "@/lib/session";
 import { getPrivyClient, verifyPrivyAccessToken } from "@/lib/privyServer";
 import { getDb } from "@/lib/mongoClient";
 import { CASH_TOKENS } from "@/lib/cashTokens";
+import { checkLimit, syncLimiter } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -37,6 +38,9 @@ const pad = (a: string) => "0x" + "0".repeat(24) + a.toLowerCase().slice(2);
 export async function POST(req: NextRequest) {
   const session = await getAppSession();
   if (!session?.user?.id || !ObjectId.isValid(session.user.id)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // one call scans ~270k blocks (dozens of RPC requests, up to 60 s of function time), so it must be budgeted per account
+  const rl = await checkLimit(syncLimiter, session.user.id);
+  if (!rl.success) return NextResponse.json({ error: "Sync is busy. Try again in a few minutes." }, { status: 429 });
   try {
     const db = await getDb();
     // who is this in Privy? prefer the access token the page sends, else the id stored on the user

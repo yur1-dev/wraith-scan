@@ -8,6 +8,7 @@ import { getPrivyClient } from "@/lib/privyServer";
 import { getSandboxToken } from "@/lib/devnetTokens";
 import { DEVNET_RPC } from "@/lib/devnet";
 import { arr, getJson, getSolUsd, obj, parseDexPair } from "@/lib/marketProviders";
+import { hedgedRpc } from "@/lib/rpcHedge";
 
 export const MIN_COMMENT_HOLD_USD = 3;
 
@@ -47,29 +48,13 @@ export async function getEmbeddedSolanaAddress(userId: string): Promise<string |
 }
 
 async function rpc(method: string, params: unknown[], only?: string[]): Promise<unknown> {
-  const urls = (only ?? [process.env.NEXT_PUBLIC_SOLANA_RPC_URL, "https://solana-rpc.publicnode.com", "https://solana.drpc.org"]).filter(
+  const urls = (only ?? [process.env.SOLANA_RPC_URL, process.env.NEXT_PUBLIC_SOLANA_RPC_URL, "https://solana-rpc.publicnode.com", "https://solana.drpc.org"]).filter(
     (u): u is string => typeof u === "string" && u.startsWith("http"),
   );
-  // Ask every endpoint at once and take the first good answer.
-  return Promise.any(
-    urls.map(async (url) => {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
-      try {
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-          signal: ctrl.signal,
-        });
-        const data = (await res.json()) as { result?: unknown; error?: unknown };
-        if (data.error || data.result === undefined) throw new Error("rpc error");
-        return data.result;
-      } finally {
-        clearTimeout(timer);
-      }
-    }),
-  );
+  // Hedged: the first endpoint answers alone; the next ones only start if it is slow or failing (no more asking every node at once).
+  const { data } = await hedgedRpc<{ result?: unknown }>(urls, { jsonrpc: "2.0", id: 1, method, params }, { timeoutMs: 5000, hedgeMs: 600 });
+  if (data.result === undefined) throw new Error("rpc error");
+  return data.result;
 }
 
 const qtyCache = new Map<string, { qty: number; ts: number }>();
@@ -113,6 +98,43 @@ async function getPriceUsd(mint: string): Promise<number> {
   }
   if (price > 0) priceCache.set(mint, { price, ts: Date.now() });
   return price;
+}
+
+/**
+ * Did `signature` really move `mint` in this user's OWN Wraith wallet, in the direction claimed? Read from the chain, never trusted
+ * from the browser. Sandbox (devnet) tokens are not checked: they are free test tokens.
+ */
+export async function verifySwapSignature(userId: string, mint: string, side: "buy" | "sell", signature: string): Promise<boolean> {
+  if (await getSandboxToken(mint)) return true;
+  const wallet = await getEmbeddedSolanaAddress(userId);
+  if (!wallet) return false;
+  type Bal = { owner?: string; mint?: string; uiTokenAmount?: { uiAmount?: number | null; uiAmountString?: string } };
+  type Tx = {
+    meta?: { err: unknown; preTokenBalances?: Bal[]; postTokenBalances?: Bal[] } | null;
+    transaction?: { message?: { accountKeys?: Array<{ pubkey?: string; signer?: boolean } | string> } };
+  } | null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let tx: Tx = null;
+    try {
+      tx = (await rpc("getTransaction", [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }])) as Tx;
+    } catch {
+      tx = null;
+    }
+    if (tx?.meta) {
+      if (tx.meta.err) return false; // the swap failed on chain
+      const keys = tx.transaction?.message?.accountKeys ?? [];
+      const signedByUser = keys.some((k) => typeof k === "object" && k !== null && k.pubkey === wallet && k.signer === true);
+      if (!signedByUser) return false;
+      const total = (list?: Bal[]) =>
+        (list ?? [])
+          .filter((b) => b.owner === wallet && b.mint === mint)
+          .reduce((sum, b) => sum + Number(b.uiTokenAmount?.uiAmount ?? b.uiTokenAmount?.uiAmountString ?? 0), 0);
+      const delta = total(tx.meta.postTokenBalances) - total(tx.meta.preTokenBalances);
+      return side === "buy" ? delta > 0 : delta < 0;
+    }
+    await new Promise((r) => setTimeout(r, 800)); // the node may not have the transaction yet right after it confirms
+  }
+  return false;
 }
 
 /** Has this user bought or sold the token on Wraith (or do they hold it right now)? */

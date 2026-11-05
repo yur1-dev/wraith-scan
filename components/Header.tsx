@@ -3,6 +3,7 @@
 import { QRCodeSVG } from "qrcode.react";
 import { cleanSym, cleanName } from "@/lib/cleanText";
 import { defaultAvatar } from "@/lib/defaultArt";
+import { loadHeaderProfile, readHeaderProfile, writeHeaderProfile } from "@/lib/profileCache";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
@@ -3129,18 +3130,47 @@ interface HeaderProps {
 }
 
 export default function Header({ onSelectMeme }: HeaderProps) {
-  const { data: session, logout } = useWraithSession();
+  const { data: session, status: sessionStatus, logout } = useWraithSession();
   const { tier, canUse } = useWraithTier();
   const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
+  // avatarReady = we know what the account's saved photo is (from this browser's last visit or from the server).
+  // Until then the header shows a neutral placeholder instead of flashing the default ghost.
   const [avatarReady, setAvatarReady] = useState(false);
-  useEffect(() => {
-    try { const c = localStorage.getItem("wraith_avatar_cache_v1"); if (c) setProfileAvatar(c); } catch { /* ignore */ }
-  }, []);
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(
     null,
   );
   const [displayCurrency, setDisplayCurrency] =
     useState<DisplayCurrency>("USD");
+  // Paint the remembered photo and name on the first frame, and start the profile request right now. It is authenticated by the
+  // app session cookie, so it no longer waits for the wallet SDK to initialise (that wait was the long ghost-avatar delay).
+  useEffect(() => {
+    const cached = readHeaderProfile();
+    if (cached) {
+      setProfileAvatar(cached.avatar);
+      setProfileDisplayName(cached.name);
+      setAvatarReady(true);
+    }
+    let active = true;
+    void loadHeaderProfile().then((p) => {
+      if (!active) return;
+      setAvatarReady(true);
+      if (!p) return; // signed out or offline: keep whatever we painted from the cache
+      setProfileAvatar(p.avatar);
+      setProfileDisplayName(p.name);
+      if (isDisplayCurrency(p.currency)) {
+        setDisplayCurrency(p.currency);
+        try { localStorage.setItem("wraith_display_currency_v1", p.currency); } catch { /* ignore */ }
+      }
+      writeHeaderProfile(p);
+    });
+    return () => { active = false; };
+  }, []);
+  // Signed out for real (not just "still loading"): forget the photo and name.
+  useEffect(() => {
+    if (sessionStatus !== "unauthenticated") return;
+    setProfileAvatar(null);
+    setProfileDisplayName(null);
+  }, [sessionStatus]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [termsRequired, setTermsRequired] = useState(false);
   const [termsChecked, setTermsChecked] = useState(false);
@@ -3183,35 +3213,7 @@ export default function Header({ onSelectMeme }: HeaderProps) {
     };
     window.addEventListener("wraith:currency-sync", onCurrencyUpdated);
 
-    if (!session?.user) {
-      setProfileAvatar(null);
-      setProfileDisplayName(null);
-      return () =>
-        window.removeEventListener("wraith:currency-sync", onCurrencyUpdated);
-    }
-    let active = true;
-    fetch("/api/user/profile")
-      .then(async (response) => {
-        if (!response.ok) { setAvatarReady(true); return; }
-        const payload = await response.json();
-        if (!active) return;
-        const av = payload.profile?.avatarDataUrl || payload.profile?.avatarUrl || null;
-        setProfileAvatar(av);
-        setAvatarReady(true);
-        try { if (av && av.length < 400_000) localStorage.setItem("wraith_avatar_cache_v1", av); else localStorage.removeItem("wraith_avatar_cache_v1"); } catch { /* ignore */ }
-        setProfileDisplayName(payload.profile?.displayName || null);
-        if (isDisplayCurrency(payload.profile?.displayCurrency)) {
-          setDisplayCurrency(payload.profile.displayCurrency);
-          localStorage.setItem(
-            "wraith_display_currency_v1",
-            payload.profile.displayCurrency,
-          );
-        }
-      })
-      .catch((error) => {
-        console.error("[header profile]", error);
-        setAvatarReady(true);
-      });
+    // The profile page announces saves here so the header updates without a reload (and the remembered copy stays current).
     const onProfileUpdated = (event: Event) => {
       const detail = (
         event as CustomEvent<{
@@ -3220,19 +3222,29 @@ export default function Header({ onSelectMeme }: HeaderProps) {
           displayCurrency?: DisplayCurrency;
         }>
       ).detail;
-      setProfileAvatar(detail?.avatarDataUrl || null);
-      setProfileDisplayName(detail?.displayName || null);
+      const avatar = detail?.avatarDataUrl || null;
+      const name = detail?.displayName || null;
+      setProfileAvatar(avatar);
+      setProfileDisplayName(name);
+      setAvatarReady(true);
       if (isDisplayCurrency(detail?.displayCurrency)) {
         setDisplayCurrency(detail.displayCurrency);
       }
+      const prev = readHeaderProfile();
+      writeHeaderProfile({
+        uid: prev?.uid ?? null,
+        username: prev?.username ?? null,
+        currency: isDisplayCurrency(detail?.displayCurrency) ? detail.displayCurrency : (prev?.currency ?? null),
+        avatar,
+        name,
+      });
     };
     window.addEventListener("wraith:profile-updated", onProfileUpdated);
     return () => {
-      active = false;
       window.removeEventListener("wraith:profile-updated", onProfileUpdated);
       window.removeEventListener("wraith:currency-sync", onCurrencyUpdated);
     };
-  }, [session?.user]);
+  }, []);
 
   const changeDisplayCurrency = async (value: string) => {
     if (!isDisplayCurrency(value)) return;
@@ -3547,6 +3559,12 @@ export default function Header({ onSelectMeme }: HeaderProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [userMenuOpen]);
 
+  const avatarLoading = !profileAvatar && !avatarReady;
+  const avatarSrc =
+    profileAvatar ||
+    (avatarReady ? session?.user?.image : null) ||
+    defaultAvatar(session?.user?.email ?? session?.user?.name ?? "wraith");
+
   const userMenu =
     mounted && userMenuOpen && session
       ? createPortal(
@@ -3563,14 +3581,18 @@ export default function Header({ onSelectMeme }: HeaderProps) {
             aria-label="Profile menu"
           >
             <div className="wraith-profile-menu-account">
-              <Image
-                src={profileAvatar || (avatarReady ? session.user?.image : null) || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
-                alt=""
-                width={40}
-                height={40}
-                className="wraith-profile-menu-avatar"
-                unoptimized
-              />
+              {avatarLoading ? (
+                <span className="wraith-profile-menu-avatar wraith-avatar-skel" aria-hidden="true" style={{ display: "block", width: 40, height: 40 }} />
+              ) : (
+                <Image
+                  src={avatarSrc}
+                  alt=""
+                  width={40}
+                  height={40}
+                  className="wraith-profile-menu-avatar"
+                  unoptimized
+                />
+              )}
               <div className="wraith-profile-menu-identity">
                 <strong>
                   {profileDisplayName || session.user?.name || "Your account"}
@@ -4127,15 +4149,19 @@ export default function Header({ onSelectMeme }: HeaderProps) {
                   handleProfileMouseLeave();
                 }}
               >
-                <Image
-                  src={profileAvatar || (avatarReady ? session.user?.image : null) || defaultAvatar(session.user?.email ?? session.user?.name ?? "wraith")}
-                  alt="avatar"
-                  width={32}
-                  height={32}
-                  className="wraith-header-avatar"
-                  style={{ borderRadius: "50%", display: "block" }}
-                  unoptimized
-                />
+                {avatarLoading ? (
+                  <span className="wraith-header-avatar wraith-avatar-skel" aria-hidden="true" style={{ borderRadius: "50%", display: "block", width: 32, height: 32 }} />
+                ) : (
+                  <Image
+                    src={avatarSrc}
+                    alt="avatar"
+                    width={32}
+                    height={32}
+                    className="wraith-header-avatar"
+                    style={{ borderRadius: "50%", display: "block" }}
+                    unoptimized
+                  />
+                )}
               </button>
             </div>
           )}

@@ -8,8 +8,9 @@ import { useSignTransaction, useWallets as useSolanaWallets } from "@privy-io/re
 import { Droplets, FlaskConical, LoaderCircle, Copy } from "lucide-react";
 import { useToast } from "@/components/Toast";
 import { ataOf, TOKEN_PROGRAM_ID, transferCheckedIx } from "@/lib/splLite";
+import { DEVNET_RPC_PUBLIC } from "@/lib/publicRpc";
 
-const DEVNET_RPC = process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com";
+const DEVNET_RPC = DEVNET_RPC_PUBLIC;
 
 interface TestToken { symbol: string; name: string; mint: string; priceSol: number; decimals: number; treasuryAta: string }
 interface Sandbox { tokens: TestToken[]; treasury: string; error: string | null }

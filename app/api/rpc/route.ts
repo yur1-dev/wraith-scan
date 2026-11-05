@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAppSession } from "@/lib/session";
 import { rpcLimiter } from "@/lib/ratelimit";
+import { hedgedRpc } from "@/lib/rpcHedge";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const RPC_URLS = [
@@ -47,24 +48,6 @@ const SENSITIVE_METHODS = new Set([
 ]);
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-async function tryRpc(url: string, body: unknown): Promise<Response | null> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), PER_RPC_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    return res.ok ? res : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function applyLocalRateLimit(userId: string): boolean {
   const now = Date.now();
   const recentRequests = (localRateWindows.get(userId) ?? []).filter(
@@ -132,6 +115,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // content-length can be missing (chunked uploads), so measure what was actually parsed too
+  if (JSON.stringify(body ?? null).length > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Request too large" }, { status: 413 });
+  }
+
   if (
     !body ||
     typeof body !== "object" ||
@@ -162,27 +150,13 @@ export async function POST(req: NextRequest) {
   }
 
   // ── FORWARD TO RPC ────────────────────────────────────────────────────────
-  // Race all endpoints simultaneously — the first OK response wins.
-  // This cuts worst-case latency from 3×timeout to 1×timeout.
-  type RpcResult = { data: unknown; url: string };
-  const races = RPC_URLS.map(
-    (url): Promise<RpcResult> =>
-      tryRpc(url, body).then(async (res) => {
-        if (!res) throw new Error(`${url}: non-OK`);
-        const data = await res.json();
-        return { data, url };
-      }),
-  );
-
+  // Hedged: the first endpoint (the paid key) is asked alone; the next one only starts if it is slow (700 ms) or failed. The old code
+  // raced every endpoint on every call, which charged the paid key for each request AND for the duplicates.
   try {
-    const { data } = await Promise.any(races);
+    const { data } = await hedgedRpc(RPC_URLS, body, { timeoutMs: PER_RPC_TIMEOUT_MS, hedgeMs: 700 });
     return NextResponse.json(data);
   } catch (e: unknown) {
-    const errs =
-      e instanceof AggregateError
-        ? e.errors.map((x: unknown) => (x instanceof Error ? x.message : String(x))).join("; ")
-        : String(e);
-    console.error("[RPC] All endpoints failed:", errs);
+    console.error("[RPC] All endpoints failed:", e instanceof Error ? e.message : String(e));
     return NextResponse.json({ error: "RPC unavailable" }, { status: 503 });
   }
 }

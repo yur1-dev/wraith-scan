@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongoClient";
 import { getPrivySession } from "@/lib/privyAuth";
 import { SOLANA_MINT_RE } from "@/lib/market";
-import { hasTradedToken } from "@/lib/holdingCheck";
+import { hasTradedToken, verifySwapSignature } from "@/lib/holdingCheck";
+import { activityLimiter, checkLimit } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,15 @@ export async function POST(req: NextRequest) {
   const { mint, side, signature } = body;
   if (typeof mint !== "string" || !SOLANA_MINT_RE.test(mint)) return NextResponse.json({ error: "Invalid mint." }, { status: 400 });
   if (side !== "buy" && side !== "sell") return NextResponse.json({ error: "Invalid side." }, { status: 400 });
-  if (typeof signature !== "string" || signature.length < 60 || signature.length > 100) return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
+  if (typeof signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(signature)) return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
+  const rl = await checkLimit(activityLimiter, session.user.id);
+  if (!rl.success) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   try {
+    // This record unlocks posting intel on the token, so it must be real: the transaction has to exist on chain, be signed by this
+    // user's own wallet and really move this token in the claimed direction. (Before, any 60-100 character string was accepted.)
+    if (!(await verifySwapSignature(session.user.id, mint, side, signature))) {
+      return NextResponse.json({ error: "That trade could not be verified on chain." }, { status: 422 });
+    }
     const db = await getDb();
     await db.collection("token_activity").updateOne(
       { userId: session.user.id, mint },

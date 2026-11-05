@@ -13,7 +13,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await getPrivySession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -21,27 +21,62 @@ export async function GET() {
 
   try {
     const db = await getDb();
-    const profile = await db.collection("profiles").findOne(
-      { userId: session.user.id },
-      {
-        projection: {
-          _id: 0,
-          displayName: 1,
-          bio: 1,
-          xHandle: 1,
-          avatarDataUrl: 1,
-          avatarUrl: 1,
-          coverDataUrl: 1,
-          displayCurrency: 1,
-          publicTrading: 1,
-          username: 1,
+
+    // The header only needs the photo, name, currency and username. The full profile also carries the cover image (up to
+    // 700 KB) and two extra lookups, which made the header wait on a megabyte it never shows.
+    if (request.nextUrl.searchParams.get("lite") === "1") {
+      const p = await db.collection("profiles").findOne(
+        { userId: session.user.id },
+        { projection: { _id: 0, displayName: 1, avatarDataUrl: 1, avatarUrl: 1, displayCurrency: 1, username: 1 } },
+      );
+      return NextResponse.json(
+        {
+          profile: {
+            displayName: p?.displayName ?? session.user.name ?? "",
+            avatarDataUrl: p?.avatarDataUrl ?? "",
+            avatarUrl: p?.avatarUrl ?? "",
+            displayCurrency: isDisplayCurrency(p?.displayCurrency) ? p.displayCurrency : "USD",
+            username: p?.username ?? null,
+          },
+          userId: session.user.id,
         },
-      },
-    );
-    const xLink = await db.collection("x_links").findOne(
-      { userId: session.user.id },
-      { projection: { _id: 0, username: 1 } },
-    );
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
+
+    const userObjectId = ObjectId.isValid(session.user.id)
+      ? new ObjectId(session.user.id)
+      : null;
+    // Three independent lookups: run them together instead of one after another.
+    const [profile, xLink, user] = await Promise.all([
+      db.collection("profiles").findOne(
+        { userId: session.user.id },
+        {
+          projection: {
+            _id: 0,
+            displayName: 1,
+            bio: 1,
+            xHandle: 1,
+            avatarDataUrl: 1,
+            avatarUrl: 1,
+            coverDataUrl: 1,
+            displayCurrency: 1,
+            publicTrading: 1,
+            username: 1,
+          },
+        },
+      ),
+      db.collection("x_links").findOne(
+        { userId: session.user.id },
+        { projection: { _id: 0, username: 1 } },
+      ),
+      userObjectId
+        ? db.collection("users").findOne(
+            { _id: userObjectId },
+            { projection: { _id: 0, createdAt: 1 } },
+          )
+        : Promise.resolve(null),
+    ]);
     // Keep the signed-in photo on the profile so other people's pages can show it.
     if (profile && !profile.avatarDataUrl && session.user.image) {
       await db.collection("profiles").updateOne(
@@ -49,15 +84,6 @@ export async function GET() {
         { $set: { avatarUrl: session.user.image } },
       ).catch(() => undefined);
     }
-    const userObjectId = ObjectId.isValid(session.user.id)
-      ? new ObjectId(session.user.id)
-      : null;
-    const user = userObjectId
-      ? await db.collection("users").findOne(
-          { _id: userObjectId },
-          { projection: { _id: 0, createdAt: 1 } },
-        )
-      : null;
 
     return NextResponse.json({
       profile: {

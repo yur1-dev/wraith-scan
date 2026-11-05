@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -15,6 +16,7 @@ import {
   usePrivy,
 } from "@privy-io/react-auth";
 import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
+import { clearUserCaches } from "@/lib/profileCache";
 
 export interface WraithSession {
   user: {
@@ -134,18 +136,19 @@ function PrivySessionProvider({ children }: { children: React.ReactNode }) {
     (googleAccount?.type === "google_oauth" ? googleAccount.email : null) ??
     (emailAccount?.type === "email" ? emailAccount.address : null);
 
-  const session: WraithSessionState = {
-    data:
-      authenticated && user
-        ? {
-            user: {
-              id: user.id,
-              name,
-              email,
-              image: profileImage,
-            },
-          }
+  // Keep the session object's identity stable. It used to be rebuilt on every render, so every effect that depended on
+  // `session.user` re-ran each time Privy updated anything, refetching the profile (up to ~1 MB) over and over.
+  const userId = user?.id ?? null;
+  const sessionData = useMemo<WraithSession | null>(
+    () =>
+      authenticated && userId
+        ? { user: { id: userId, name, email, image: profileImage } }
         : null,
+    [authenticated, userId, name, email, profileImage],
+  );
+
+  const session: WraithSessionState = {
+    data: sessionData,
     status: !ready
       ? "loading"
       : authenticated
@@ -161,6 +164,7 @@ function PrivySessionProvider({ children }: { children: React.ReactNode }) {
     reauthenticateGoogle: () => reauthorize({ provider: "google" }),
     syncAppSession,
     logout: async () => {
+      clearUserCaches();
       await logout();
       await fetch("/api/auth/session", { method: "DELETE" });
     },

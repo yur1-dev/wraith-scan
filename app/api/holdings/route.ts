@@ -7,6 +7,7 @@ import { getAppSession } from "@/lib/session";
 import { getPrivyClient, verifyPrivyAccessToken } from "@/lib/privyServer";
 import { getDb } from "@/lib/mongoClient";
 import { CASH_TOKENS } from "@/lib/cashTokens";
+import { checkLimit, lightWriteLimiter } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -18,6 +19,8 @@ interface Holding { address: string; symbol: string; name: string; amount: numbe
 export async function POST(req: NextRequest) {
   const session = await getAppSession();
   if (!session?.user?.id || !ObjectId.isValid(session.user.id)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const rl = await checkLimit(lightWriteLimiter, `holdings:${session.user.id}`);
+  if (!rl.success) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   try {
     const db = await getDb();
     const bearer = req.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];

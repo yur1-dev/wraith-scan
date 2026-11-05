@@ -8,6 +8,9 @@ import { effectiveTier } from "@/lib/effectiveTier";
 import { CHAINS } from "@/lib/chains";
 import type { Signal } from "@/app/api/signals/route";
 import type { SignalCall } from "@/lib/signalCalls";
+import { callGet } from "@/lib/internalCall";
+import { checkLimit, telegramChatLimiter } from "@/lib/ratelimit";
+import { sameSecret, webhookSecret } from "@/lib/telegramSecret";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const API = `https://api.telegram.org/bot${TOKEN}`;
@@ -127,17 +130,9 @@ async function msgStatus(chatId: number) {
   }
 }
 
-async function appJson<T>(path: string, origin: string): Promise<T | null> {
-  try {
-    const r = await fetch(`${origin}${path}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-    return r.ok ? ((await r.json()) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
 async function cmdTop(chatId: number, origin: string) {
-  const data = await appJson<{ signals?: Signal[] }>("/api/signals", origin);
+  // in-process call: fetching our own /api/signals over HTTP has no session cookie, so proxy.ts answered 401 and /top always said "warming up"
+  const data = await callGet<{ signals?: Signal[] }>(() => import("@/app/api/signals/route"), `${origin}/api/signals`, 20_000).catch(() => null);
   const list = (data?.signals ?? []).slice(0, 6);
   if (!list.length) return send(chatId, `👻 <b>TOP SIGNALS</b>\n${rule}\nThe feed is warming up. Try again in a minute.`, openApp);
   const lines = list.map((s, i) => {
@@ -265,10 +260,11 @@ async function handleCallback(cb: { id: string; data?: string; message?: { chat:
 }
 
 export async function POST(req: NextRequest) {
-  // Optional shared secret set via setWebhook (see /api/telegram/setup)
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-  if (!secret && process.env.NODE_ENV === "production") console.warn("[tg-bot] TELEGRAM_WEBHOOK_SECRET is not set: webhook accepts unauthenticated updates");
-  if (secret && req.headers.get("x-telegram-bot-api-secret-token") !== secret) {
+  // Every update must carry the secret registered with setWebhook (see /api/telegram/setup). It used to be optional, which left the
+  // webhook open: anyone could POST a fake update and unlink people, change their alert settings or run commands as them.
+  const secret = webhookSecret();
+  if (!secret) return NextResponse.json({ ok: false }, { status: 503 });
+  if (!sameSecret(req.headers.get("x-telegram-bot-api-secret-token") ?? "", secret)) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
@@ -277,6 +273,13 @@ export async function POST(req: NextRequest) {
     update = await req.json();
   } catch {
     return NextResponse.json({ ok: false }, { status: 400 });
+  }
+
+  // one chat cannot flood the bot (every command reads the database or calls a market API); always answer 200 so Telegram does not retry
+  const rateId = update.callback_query?.message?.chat.id ?? update.message?.chat.id;
+  if (rateId !== undefined) {
+    const rl = await checkLimit(telegramChatLimiter, `tg:${rateId}`);
+    if (!rl.success) return NextResponse.json({ ok: true });
   }
 
   if (update.callback_query) {
@@ -301,13 +304,18 @@ export async function POST(req: NextRequest) {
         break;
       }
       const db = (await clientPromise).db();
-      const link = await db.collection("telegram_links").findOne({ token: param, expiresAt: { $gt: new Date() } });
+      // take the one-time token atomically: two chats pressing the same link at once can no longer both win
+      const taken = /^[A-Za-z0-9_-]{16,100}$/.test(param)
+        ? await db.collection("telegram_links").findOneAndDelete({ token: param, expiresAt: { $gt: new Date() } })
+        : null;
+      const link = taken?.value ?? null;
       if (!link) {
         await send(chatId, `⚠️ <b>Link expired</b>\n${rule}\nThat connect link was already used or timed out (they last 10 minutes).\n\nGenerate a fresh one from <b>Profile → Connect Telegram</b> in Wraith.`, openApp);
         break;
       }
+      // one Telegram chat belongs to one Wraith account: unlink it from any other account first
+      await db.collection("users").updateMany({ telegramChatId: String(chatId), _id: { $ne: link.userId } }, { $unset: { telegramChatId: "", telegramLinkedAt: "" } });
       await db.collection("users").updateOne({ _id: link.userId }, { $set: { telegramChatId: String(chatId), telegramLinkedAt: new Date() } });
-      await db.collection("telegram_links").deleteOne({ token: param });
       const u = await db.collection("users").findOne({ _id: link.userId }, { projection: { tier: 1, tierSource: 1 } });
       const tier = effectiveTier(u as { tier?: unknown; tierSource?: unknown });
       const eligible = tier === "SPECTER" || tier === "WRAITH";

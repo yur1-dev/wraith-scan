@@ -29,19 +29,24 @@ export async function POST(req: NextRequest) {
   let balance: string | null = null;
   let source: "whitelist" | "early-access" | "chain" | "none" = "none";
 
-  if (isEmailWhitelisted(session.user.email) || (wallet && isWhitelisted(wallet))) {
+  // The wallet must belong to this account before it is used for ANYTHING. The whitelist check used to trust the address the
+  // browser sent, so anyone who knew a whitelisted wallet could claim top tier, and any address could be stored as "their" wallet.
+  let walletOwned = false;
+  if (wallet) {
+    try {
+      const privy = getPrivyClient();
+      const pu = privy && user?.privyUserId ? await privy.getUser(String(user.privyUserId)) : null;
+      walletOwned = Boolean(pu?.linkedAccounts?.some((a) => a.type === "wallet" && "address" in a && a.address === wallet));
+    } catch { walletOwned = false; }
+  }
+  const verifiedWallet = wallet && walletOwned ? wallet : null;
+
+  if (isEmailWhitelisted(session.user.email) || (verifiedWallet && isWhitelisted(verifiedWallet))) {
     tier = "WRAITH"; source = "whitelist";
   } else if (EARLY_ACCESS) {
     tier = "WRAITH"; source = "early-access";
   } else if (wallet && omenConfigured()) {
-    // The wallet must belong to this account, otherwise anyone could post a whale's address.
-    let owned = false;
-    try {
-      const privy = getPrivyClient();
-      const pu = privy && user?.privyUserId ? await privy.getUser(String(user.privyUserId)) : null;
-      owned = Boolean(pu?.linkedAccounts?.some((a) => a.type === "wallet" && "address" in a && a.address === wallet));
-    } catch { owned = false; }
-    if (!owned) return NextResponse.json({ error: "Wallet is not linked to this account" }, { status: 403 });
+    if (!walletOwned) return NextResponse.json({ error: "Wallet is not linked to this account" }, { status: 403 });
     try {
       const { raw, decimals } = await getOmenRaw(wallet);
       tier = tierForRaw(raw, decimals);
@@ -56,7 +61,7 @@ export async function POST(req: NextRequest) {
 
   await users.updateOne(
     { _id: new ObjectId(session.user.id) },
-    { $set: { tier, tierSource: source, ...(wallet ? { walletAddress: wallet } : {}), tierUpdatedAt: new Date() } },
+    { $set: { tier, tierSource: source, ...(verifiedWallet ? { walletAddress: verifiedWallet } : {}), tierUpdatedAt: new Date() } },
   );
   return NextResponse.json({ ok: true, tier, balance, source });
 }

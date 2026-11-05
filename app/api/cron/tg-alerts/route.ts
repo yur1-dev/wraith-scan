@@ -11,12 +11,14 @@ import type { Signal } from "@/app/api/signals/route";
 import { broadcast, claim, milestoneFor, signalMessage, winMessage } from "@/lib/telegramBot";
 import { tokenKeyboard } from "@/lib/telegramUi";
 import { runPushAlerts, pushBroadcast } from "@/lib/push";
+import { signQuery } from "@/lib/signedUrl";
 
 export const maxDuration = 60;
 
 function bannerUrl(origin: string, q: Record<string, string | number | undefined>) {
   const u = new URL("/api/banner", origin);
   for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") u.searchParams.set(k, String(v));
+  u.searchParams.set("sig", signQuery(u.searchParams)); // /api/banner refuses unsigned or edited URLs
   return u.toString();
 }
 
@@ -28,6 +30,8 @@ export async function GET(req: NextRequest) {
     if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (req.nextUrl.searchParams.get("grouptest") === "1") {
+    // manual test posts go to the public group, so they always need the secret, even if the normal run is left open
+    if (!secret) return NextResponse.json({ error: "Set CRON_SECRET to use the test mode" }, { status: 403 });
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const gid = process.env.TELEGRAM_GROUP_CHAT_ID;
     const thread = Number(process.env.TELEGRAM_GROUP_THREAD_ID);

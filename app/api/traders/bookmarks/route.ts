@@ -2,6 +2,9 @@ import { getPrivySession } from "@/lib/privyAuth";
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongoClient";
+import { checkLimit, reactLimiter } from "@/lib/ratelimit";
+
+const MAX_BOOKMARKS = 300;
 
 async function getUserId() {
   const session = await getPrivySession();
@@ -13,6 +16,8 @@ export async function POST(request: NextRequest) {
   if (!userId) {
     return NextResponse.json({ error: "Sign in to save traders." }, { status: 401 });
   }
+  const rl = await checkLimit(reactLimiter, `bookmark:${userId}`);
+  if (!rl.success) return NextResponse.json({ error: "Slow down." }, { status: 429 });
 
   try {
     const body: unknown = await request.json();
@@ -39,6 +44,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // $addToSet had no ceiling, so one account could grow its settings document without limit
+    const settings = await db.collection("user_settings").findOne({ userId }, { projection: { bookmarkedTraders: 1 } });
+    const current = Array.isArray(settings?.bookmarkedTraders) ? settings.bookmarkedTraders.length : 0;
+    if (current >= MAX_BOOKMARKS && !(settings?.bookmarkedTraders as string[]).includes(traderId)) {
+      return NextResponse.json({ error: `You can save up to ${MAX_BOOKMARKS} traders.` }, { status: 400 });
+    }
     await db.collection("user_settings").updateOne(
       { userId },
       {

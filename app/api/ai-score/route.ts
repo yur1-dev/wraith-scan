@@ -3,6 +3,7 @@ import { getAppSession } from "@/lib/session";
 import { getDb } from "@/lib/mongoClient";
 import { Collection } from "mongodb";
 import { ITokenHistory, TOKEN_HISTORY_COLLECTION } from "@/models/TokenHistory";
+import { checkLimit, lightWriteLimiter } from "@/lib/ratelimit";
 
 // ─── POST /api/ai-score ───────────────────────────────────────────────────────
 // Scores a new token candidate against your historical win patterns.
@@ -54,9 +55,13 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = (await req.json()) as ScoreRequest;
+  const rl = await checkLimit(lightWriteLimiter, `score:${session.user.id}`);
+  if (!rl.success) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
 
-  if (!body.keyword || !body.contractAddress) {
+  let body: ScoreRequest;
+  try { body = (await req.json()) as ScoreRequest; } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+
+  if (typeof body.keyword !== "string" || body.keyword.length > 80 || !body.contractAddress) {
     return NextResponse.json(
       { error: "keyword and contractAddress required" },
       { status: 400 },

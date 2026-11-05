@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPrivySession } from "@/lib/privyAuth";
 import { getDb } from "@/lib/mongoClient";
 import type { PushSub } from "@/lib/push";
+import { MAX_PUSH_DEVICES } from "@/lib/pushEndpoint";
+import { checkLimit, pushSubscribeLimiter } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 const MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -19,6 +21,8 @@ async function userId() {
 export async function POST(req: NextRequest) {
   const uid = await userId();
   if (!uid) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  const rl = await checkLimit(pushSubscribeLimiter, uid);
+  if (!rl.success) return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
   let body: { token?: string; verify?: boolean; prefs?: Record<string, unknown>; saved?: { mint?: string; symbol?: string }[] };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad request." }, { status: 400 }); }
   const token = String(body.token ?? "");
@@ -36,6 +40,10 @@ export async function POST(req: NextRequest) {
     .filter((s): s is { mint: string; symbol: string } => typeof s?.mint === "string" && MINT_RE.test(s.mint))
     .slice(0, 60)
     .map((s) => ({ mint: s.mint, symbol: String(s.symbol ?? "").replace(/[^A-Za-z0-9]/g, "").slice(0, 20) || "TOKEN" }));
+  const known = await col.findOne({ _id: `fcm:${token}` }, { projection: { userId: 1 } });
+  if (!known && (await col.countDocuments({ userId: uid })) >= MAX_PUSH_DEVICES) {
+    return NextResponse.json({ error: "Too many devices on this account. Remove one first." }, { status: 400 });
+  }
   await col.updateOne(
     { _id: `fcm:${token}` },
     {

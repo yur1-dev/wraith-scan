@@ -6,6 +6,7 @@ import {
   McapSnapshot,
   TOKEN_HISTORY_COLLECTION,
 } from "@/models/TokenHistory";
+import { checkLimit, lightWriteLimiter } from "@/lib/ratelimit";
 
 // ─── POST /api/history/refresh ────────────────────────────────────────────────
 // Bulk-updates currentMcap + peakMcap for multiple tokens at once.
@@ -16,11 +17,17 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { updates } = (await req.json()) as {
-    updates: { keyword: string; mcap: number }[];
-  };
+  const rl = await checkLimit(lightWriteLimiter, `refresh:${session.user.id}`);
+  if (!rl.success) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
 
-  if (!Array.isArray(updates) || updates.length === 0)
+  let parsed: { updates?: { keyword: string; mcap: number }[] };
+  try { parsed = (await req.json()) as { updates?: { keyword: string; mcap: number }[] }; } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+  // only well-formed rows, and a sane number of them per call
+  const updates = (Array.isArray(parsed.updates) ? parsed.updates : [])
+    .filter((u) => u && typeof u.keyword === "string" && u.keyword.length <= 80 && typeof u.mcap === "number" && Number.isFinite(u.mcap))
+    .slice(0, 200);
+
+  if (updates.length === 0)
     return NextResponse.json({ ok: true, updated: 0 });
 
   const userId = session.user.id;

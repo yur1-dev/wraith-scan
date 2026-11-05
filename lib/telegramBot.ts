@@ -14,9 +14,16 @@ export interface TgPrefs { signals: boolean; wins: boolean; minScore: number; ch
 export const DEFAULT_PREFS: TgPrefs = { signals: true, wins: true, minScore: 70, chains: [], muteUntil: 0 };
 export const prefsOf = (u: { tgPrefs?: Partial<TgPrefs> } | null | undefined): TgPrefs => ({ ...DEFAULT_PREFS, ...(u?.tgPrefs ?? {}) });
 
-export async function tg<T = unknown>(method: string, body: unknown): Promise<{ ok: boolean; result?: T; description?: string }> {
+export type TgResult<T = unknown> = { ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number } };
+
+export async function tg<T = unknown>(method: string, body: unknown): Promise<TgResult<T>> {
   try {
-    const r = await fetch(`https://api.telegram.org/bot${TOKEN()}/${method}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const r = await fetch(`https://api.telegram.org/bot${TOKEN()}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    });
     return await r.json();
   } catch {
     return { ok: false, description: "network" };
@@ -36,30 +43,40 @@ export async function claim(key: string): Promise<boolean> {
 
 type Markup = ReturnType<typeof tokenKeyboard>;
 
-/** Send to every linked, eligible user whose prefs allow it. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+// Telegram answers these when a person blocked the bot, deleted their account or the chat is gone: keep sending is pointless
+const GONE = /bot was blocked|user is deactivated|chat not found|bot was kicked|PEER_ID_INVALID/i;
+
+/** Photo with caption when there is an image (and the caption fits), plain message otherwise; one retry if Telegram says "slow down". */
+async function post(chat: string | number, text: string, opts: { imageUrl?: string; markup?: Markup }, extra: Record<string, unknown> = {}): Promise<TgResult> {
+  const sendOnce = async (): Promise<TgResult> => {
+    let res: TgResult = { ok: false };
+    if (opts.imageUrl && text.length < 1000) {
+      res = await tg("sendPhoto", { chat_id: chat, photo: opts.imageUrl, caption: text, parse_mode: "HTML", reply_markup: opts.markup, ...extra });
+    }
+    if (!res.ok) res = await tg("sendMessage", { chat_id: chat, text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: opts.markup, ...extra });
+    return res;
+  };
+  let res = await sendOnce();
+  if (!res.ok && res.error_code === 429) {
+    const wait = Math.min(5, res.parameters?.retry_after ?? 1);
+    await sleep(wait * 1000);
+    res = await sendOnce();
+  }
+  return res;
+}
+
+/**
+ * Send to the public group, then to every linked, eligible user whose prefs allow it.
+ *
+ * The old version walked the subscribers one by one and posted to the public group last. At a few hundred subscribers that is
+ * longer than the cron's 60 second limit: the run was killed half way, the de-dupe key was already used, so the remaining people
+ * never got the alert and the group never got its post. Now the group goes first, subscribers are sent in parallel batches paced
+ * to Telegram's ~30 messages per second, anyone who blocked the bot is unlinked, and the run stops cleanly before the time limit.
+ */
 export async function broadcast(kind: "signal" | "win", text: string, opts: { chain?: string; score?: number; markup?: Markup; imageUrl?: string }) {
   const db = await getDb();
-  const users = await db
-    .collection("users")
-    .find({ telegramChatId: { $exists: true, $ne: null }, tier: { $in: ["SPECTER", "WRAITH"] }, tierSource: { $in: ["chain", "whitelist"] } }, { projection: { telegramChatId: 1, tgPrefs: 1 } })
-    .toArray();
   const chain = opts.chain ?? "solana";
-  let sent = 0;
-  let skipped = 0;
-  for (const u of users) {
-    const p = prefsOf(u as { tgPrefs?: Partial<TgPrefs> });
-    const ok =
-      p.muteUntil < Date.now() &&
-      (kind === "signal" ? p.signals && (opts.score ?? 100) >= p.minScore : p.wins) &&
-      (p.chains.length === 0 || p.chains.includes(chain));
-    if (!ok) { skipped++; continue; }
-    const chat = String(u.telegramChatId);
-    let res = opts.imageUrl && text.length < 1000
-      ? await tg("sendPhoto", { chat_id: chat, photo: opts.imageUrl, caption: text, parse_mode: "HTML", reply_markup: opts.markup })
-      : { ok: false };
-    if (!res.ok) res = await tg("sendMessage", { chat_id: chat, text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: opts.markup });
-    if (res.ok) sent++;
-  }
 
   // Optional public group/topic feed: set TELEGRAM_GROUP_CHAT_ID (e.g. -1001234567890) and, for a forum topic,
   // TELEGRAM_GROUP_THREAD_ID. Wins always post there; signals only if TELEGRAM_GROUP_SIGNALS=1.
@@ -67,13 +84,47 @@ export async function broadcast(kind: "signal" | "win", text: string, opts: { ch
   if (gid && (kind === "win" || process.env.TELEGRAM_GROUP_SIGNALS === "1")) {
     const thread = Number(process.env.TELEGRAM_GROUP_THREAD_ID);
     const extra = Number.isFinite(thread) && thread > 0 ? { message_thread_id: thread } : {};
-    let res = opts.imageUrl && text.length < 1000
-      ? await tg("sendPhoto", { chat_id: gid, photo: opts.imageUrl, caption: text, parse_mode: "HTML", reply_markup: opts.markup, ...extra })
-      : { ok: false };
-    if (!res.ok) res = await tg("sendMessage", { chat_id: gid, text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: opts.markup, ...extra });
-    if (!res.ok) console.error("[telegram] group post failed", (res as { description?: string }).description);
+    const res = await post(gid, text, opts, extra);
+    if (!res.ok) console.error("[telegram] group post failed", res.description);
   }
-  return { sent, skipped };
+
+  const users = await db
+    .collection("users")
+    .find({ telegramChatId: { $exists: true, $ne: null }, tier: { $in: ["SPECTER", "WRAITH"] }, tierSource: { $in: ["chain", "whitelist"] } }, { projection: { telegramChatId: 1, tgPrefs: 1 } })
+    .toArray();
+  const now = Date.now();
+  const targets = users.filter((u) => {
+    const p = prefsOf(u as { tgPrefs?: Partial<TgPrefs> });
+    return (
+      p.muteUntil < now &&
+      (kind === "signal" ? p.signals && (opts.score ?? 100) >= p.minScore : p.wins) &&
+      (p.chains.length === 0 || p.chains.includes(chain))
+    );
+  });
+  const skipped = users.length - targets.length;
+
+  const BATCH = 25; // per second, safely under Telegram's bulk limit
+  const deadline = Date.now() + 45_000;
+  let sent = 0;
+  let unsent = 0;
+  const gone: unknown[] = [];
+  for (let i = 0; i < targets.length; i += BATCH) {
+    if (Date.now() > deadline) { unsent = targets.length - i; console.warn(`[telegram] time budget reached, ${unsent} subscribers not reached`); break; }
+    const started = Date.now();
+    await Promise.all(
+      targets.slice(i, i + BATCH).map(async (u) => {
+        const res = await post(String(u.telegramChatId), text, opts);
+        if (res.ok) sent++;
+        else if (GONE.test(res.description ?? "")) gone.push(u._id);
+      }),
+    );
+    const took = Date.now() - started;
+    if (took < 1000 && i + BATCH < targets.length) await sleep(1000 - took);
+  }
+  if (gone.length) {
+    await db.collection("users").updateMany({ _id: { $in: gone as never[] } }, { $unset: { telegramChatId: "", telegramLinkedAt: "" } }).catch(() => undefined);
+  }
+  return { sent, skipped, unsent, unlinked: gone.length };
 }
 
 // ── message layouts ────────────────────────────────────────────────────────

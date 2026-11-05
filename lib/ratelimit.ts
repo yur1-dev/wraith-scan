@@ -75,3 +75,28 @@ export const analyzeLimiter = new Ratelimit({
   limiter: Ratelimit.slidingWindow(30, "10 m"),
   prefix: "wraith_analyze",
 });
+
+// ─── ABUSE LIMITERS (security audit) ─────────────────────────────────────────
+// Every route that writes to the database, spends server money (gas, RPC, third-party quota) or fans out to other users gets a
+// budget. Keys are the signed-in user id, or the caller IP for anonymous endpoints. Use checkLimit(limiter, id, false) on routes
+// that move money so an Upstash outage blocks them instead of opening them.
+type Win = `${number} ${"s" | "m" | "h" | "d"}`;
+const make = (tokens: number, window: Win, prefix: string) =>
+  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(tokens, window), prefix: `wraith_${prefix}` });
+
+export const calloutPostLimiter = make(8, "10 m", "callout_post");    // posting a callout
+export const calloutReadLimiter = make(240, "1 m", "callout_read");   // feed polling
+export const reactLimiter = make(60, "1 m", "react");                 // heart, repost, follow, bookmark
+export const commentLimiter = make(20, "5 m", "comment");             // callout comments
+export const pushSubscribeLimiter = make(20, "1 h", "push_sub");      // registering a device for push
+export const pushTestLimiter = make(5, "10 m", "push_test");          // "send me a test notification"
+export const gasDripLimiter = make(6, "1 h", "gas_drip");             // treasury gas top-ups (real money)
+export const airdropLimiter = make(6, "1 h", "airdrop");              // devnet faucet
+export const activityLimiter = make(90, "1 m", "activity");           // on-chain activity pings
+export const bannerLimiter = make(40, "1 m", "banner");               // server-rendered share images (CPU heavy), per IP
+export const publicReadLimiter = make(60, "1 m", "public_read");      // anonymous search / lookup endpoints, per IP
+export const telegramChatLimiter = make(20, "1 m", "tg_chat");        // bot commands per Telegram chat
+export const telegramLinkLimiter = make(10, "1 h", "tg_link");        // generating Telegram link codes
+export const syncLimiter = make(12, "10 m", "sync");                  // chain re-scan (dozens of RPC calls per request)
+export const quoteLimiter = make(40, "1 m", "quote");                 // swap quotes (paid third-party quota)
+export const lightWriteLimiter = make(120, "10 m", "light_write");    // history / scoring / small writes

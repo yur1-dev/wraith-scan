@@ -11,9 +11,10 @@ import { ataOf, TOKEN_PROGRAM_ID, transferCheckedIx } from "@/lib/splLite";
 import type { SandboxTok } from "@/lib/useSandboxTokens";
 import { useWraithTier } from "@/hooks/useWraithTier";
 import ExitBox from "@/components/ExitBox";
+import { DEVNET_RPC_PUBLIC } from "@/lib/publicRpc";
 import { armLiveExit, disarmLiveExit, EXIT_PREFS_KEY, LIVE_EXITS_EVENT, readRules, writeRules, type LiveExitRule } from "@/lib/liveExits";
 
-const DEVNET_RPC = process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com";
+const DEVNET_RPC = DEVNET_RPC_PUBLIC;
 const SELL_PRESETS = [25, 50, 100];
 const BUY_PRESETS = [0.1, 0.5, 1];
 const fmt = (n: number, d = 4) => (Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: d }) : "0");

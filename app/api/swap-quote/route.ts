@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAppSession } from "@/lib/session";
+import { quoteLimiter, checkLimit } from "@/lib/ratelimit";
+import { clientIp } from "@/lib/clientIp";
 
 // Thin proxy to LI.FI so an API key (LIFI_API_KEY) can be added later without touching the client.
 export const dynamic = "force-dynamic";
 const OK = new Set(["fromChain", "toChain", "fromToken", "toToken", "fromAmount", "fromAddress", "toAddress", "slippage", "skipSimulation", "order", "denyExchanges", "denyBridges"]);
 
 export async function GET(req: NextRequest) {
+  // quotes spend our LI.FI quota (and carry the platform fee), so they are budgeted per account
+  const session = await getAppSession().catch(() => null);
+  const rl = await checkLimit(quoteLimiter, session?.user?.id ?? `ip:${clientIp(req)}`);
+  if (!rl.success) return NextResponse.json({ error: "Too many quote requests" }, { status: 429 });
   const incoming = req.nextUrl.searchParams;
   const q = new URLSearchParams();
   for (const [k, v] of incoming) if (OK.has(k) && v.length < 80) q.set(k, v);

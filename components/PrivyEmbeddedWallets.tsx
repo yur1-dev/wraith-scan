@@ -14,12 +14,13 @@ import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { defineChain } from "viem";
 import { arc, base, bsc, mainnet, monad, robinhood } from "viem/chains";
 import { PRIVY_APP_ID, PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
+import { DEVNET_RPC_PUBLIC } from "@/lib/publicRpc";
 // viem ships Arc with no RPC URL, so give Privy one.
 const arcWithRpc = defineChain({ ...arc, rpcUrls: { default: { http: [process.env.NEXT_PUBLIC_ARC_RPC || "https://rpc.arc.network"] } } });
 const evmChains = [base, mainnet, bsc, monad, arcWithRpc, robinhood];
 
 // Lets Privy sign for the Testnet tab (Solana devnet).
-const DEVNET_HTTP = process.env.NEXT_PUBLIC_DEVNET_RPC_URL || "https://api.devnet.solana.com";
+const DEVNET_HTTP = DEVNET_RPC_PUBLIC; // keyless on purpose: NEXT_PUBLIC_* values are visible to every visitor
 const solanaRpcs = {
   "solana:devnet": {
     rpc: createSolanaRpc(DEVNET_HTTP),

@@ -134,6 +134,21 @@ select {
   object-fit: cover;
 }
 
+/* Neutral stand-in while the saved photo is still being fetched: no flash of the default ghost before the real photo. */
+.wraith-avatar-skel {
+  border-radius: 50%;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.05) 30%, rgba(255, 255, 255, 0.12) 50%, rgba(255, 255, 255, 0.05) 70%);
+  background-size: 220% 100%;
+  animation: wraith-skel 1.1s linear infinite;
+}
+@keyframes wraith-skel {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wraith-avatar-skel { animation: none; }
+}
+
 .wraith-app-header {
   position: sticky;
   top: 0;

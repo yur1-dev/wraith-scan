@@ -1,29 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongoClient";
+import { checkLimit, publicReadLimiter } from "@/lib/ratelimit";
+import { clientIp } from "@/lib/clientIp";
 
-const RATE_WINDOW_MS = 10_000;
-const RATE_LIMIT = 20;
-const ipMap = new Map<string, { count: number; resetAt: number }>();
-
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = ipMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    ipMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return false;
-  }
-  entry.count++;
-  return entry.count > RATE_LIMIT;
-}
 
 export async function GET(request: NextRequest) {
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown";
-  if (isRateLimited(ip))
+  // the old limiter lived in one server instance's memory, so it never added up across instances; this one is shared
+  const rl = await checkLimit(publicReadLimiter, `search:${clientIp(request)}`);
+  if (!rl.success)
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
-  const q = request.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const q = (request.nextUrl.searchParams.get("q")?.trim() ?? "").slice(0, 40);
   if (q.length < 1)
     return NextResponse.json({ traders: [] });
 

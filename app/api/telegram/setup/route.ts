@@ -2,17 +2,18 @@
 // One-time: points the bot webhook at /api/telegram/bot, registers the command menu, name and description.
 import { NextRequest, NextResponse } from "next/server";
 import { APP_URL } from "@/lib/telegramUi";
+import { sameSecret, webhookSecret } from "@/lib/telegramSecret";
 
 export async function GET(req: NextRequest) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const key = process.env.TELEGRAM_SETUP_KEY;
   if (!token || !key) return NextResponse.json({ error: "Set TELEGRAM_BOT_TOKEN and TELEGRAM_SETUP_KEY" }, { status: 503 });
-  if (req.nextUrl.searchParams.get("key") !== key) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!sameSecret(req.nextUrl.searchParams.get("key") ?? "", key)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const base = (req.nextUrl.searchParams.get("url") || APP_URL).replace(/\/$/, "");
   const api = (m: string, body: unknown) =>
     fetch(`https://api.telegram.org/bot${token}/${m}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
   const out = {
-    webhook: await api("setWebhook", { url: `${base}/api/telegram/bot`, allowed_updates: ["message", "callback_query"], ...(process.env.TELEGRAM_WEBHOOK_SECRET ? { secret_token: process.env.TELEGRAM_WEBHOOK_SECRET } : {}) }),
+    webhook: await api("setWebhook", { url: `${base}/api/telegram/bot`, allowed_updates: ["message", "callback_query"], secret_token: webhookSecret() }),
     commands: await api("setMyCommands", {
       commands: [
         { command: "start", description: "Set up Wraith alerts" },

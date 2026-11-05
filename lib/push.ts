@@ -2,6 +2,7 @@
 // Needs env: NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (mailto:you@example.com) for web push,
 // and FIREBASE_SERVICE_ACCOUNT for the Android app.
 import webpush from "web-push";
+import { isPushEndpoint } from "@/lib/pushEndpoint";
 import { getDb } from "@/lib/mongoClient";
 import { fcmConfigured, sendFcm } from "@/lib/fcm";
 import type { SignalCall } from "@/lib/signalCalls";
@@ -75,6 +76,7 @@ async function deliver(sub: PushSub, msg: Msg): Promise<Outcome> {
     return { ok: false, dead: false, error: r.code };
   }
   if (!pushConfigured()) return { ok: false, dead: false, error: "web-push-not-configured" };
+  if (!isPushEndpoint(sub._id)) return { ok: false, dead: true }; // not a push-service URL: never call it, and drop the row
   try {
     await webpush.sendNotification({ endpoint: sub._id, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify(msg), { TTL: 3600, urgency: "high" });
     return { ok: true, dead: false };

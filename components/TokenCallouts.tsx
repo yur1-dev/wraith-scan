@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { ImageIcon, Repeat2, MessageCircle } from "lucide-react";
+import { shrinkImage } from "@/lib/shrinkImage";
 
 interface CalloutPosition {
   amountSol: number;
@@ -126,10 +127,16 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
 
   const handleImage = (file: File | null | undefined) => {
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { setPostErr("Image must be under 2 MB."); return; }
-    const reader = new FileReader();
-    reader.onload = (e) => setImagePreview(e.target?.result as string);
-    reader.readAsDataURL(file);
+    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) { setPostErr("Use a PNG, JPG, WebP or GIF image."); return; }
+    if (file.size > 8 * 1024 * 1024) { setPostErr("Image must be under 8 MB."); return; }
+    setPostErr("");
+    // shrink first: the server only keeps small images, and a big one would slow the feed for everybody
+    void shrinkImage(file)
+      .then((data) => {
+        if (data.length > 430_000) { setPostErr("That image is too large. Try a smaller one."); return; }
+        setImagePreview(data);
+      })
+      .catch(() => setPostErr("Could not read that image."));
   };
 
   const post = async () => {

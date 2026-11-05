@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAppSession } from "@/lib/session";
 import { getDb } from "@/lib/mongoClient";
+import { checkLimit, lightWriteLimiter } from "@/lib/ratelimit";
 import {
   ITokenHistory,
   McapSnapshot,
@@ -29,6 +30,9 @@ export async function POST(req: NextRequest) {
   const session = await getAppSession();
   if (!session?.user?.id)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const rl = await checkLimit(lightWriteLimiter, `history:${session.user.id}`);
+  if (!rl.success) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
 
   const body = await req.json();
   const {
@@ -62,7 +66,7 @@ export async function POST(req: NextRequest) {
     crossPlatforms?: number;
   };
 
-  if (!keyword)
+  if (!keyword || typeof keyword !== "string" || keyword.length > 80)
     return NextResponse.json({ error: "keyword required" }, { status: 400 });
 
   const userId = session.user.id;

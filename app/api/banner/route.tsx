@@ -4,6 +4,9 @@ import type { NextRequest } from "next/server";
 import { drawBanner, type BannerData, type BannerStat } from "@/lib/telegramBanner";
 import { SHARE_RANKS } from "@/lib/shareCard";
 import { safeFetchImage } from "@/lib/safeFetch";
+import { verifyQuery } from "@/lib/signedUrl";
+import { bannerLimiter, checkLimit } from "@/lib/ratelimit";
+import { clientIp } from "@/lib/clientIp";
 
 // Telegram banner (signals + wins), drawn on the server and returned as a PNG.
 // /api/banner?kind=win&sym=FOO&x=3.5&called=13000&now=45500&peak=45500&chain=solana&img=<token image url>
@@ -63,8 +66,12 @@ function num(sp: URLSearchParams, key: string): number | null {
 }
 
 export async function GET(req: NextRequest) {
-  fonts();
   const sp = req.nextUrl.searchParams, origin = req.nextUrl.origin;
+  // only banners the server itself signed (alert cron) are drawn: no forged "WIN" images on our domain, no free CPU for strangers
+  if (!verifyQuery(sp)) return new Response("Forbidden", { status: 403 });
+  const rl = await checkLimit(bannerLimiter, clientIp(req));
+  if (!rl.success) return new Response("Too many requests", { status: 429 });
+  fonts();
   const kind = sp.get("kind") === "signal" ? "signal" : "win";
   const sym = clean(sp.get("sym"), 12) || "TOKEN";
   const x = Math.max(1, num(sp, "x") ?? 1);

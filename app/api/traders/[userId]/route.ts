@@ -60,8 +60,11 @@ export async function GET(
     } else {
       // Username lookup — strip leading @
       const handle = userId.replace(/^@/, "");
+      // the handle went straight into a regular expression, so a crafted URL could run any pattern against the profiles collection
+      if (!/^[A-Za-z0-9_.-]{1,32}$/.test(handle)) return NextResponse.json({ error: "Trader not found" }, { status: 404 });
+      const safeHandle = handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       profile = await db.collection("profiles").findOne(
-        { username: new RegExp(`^${handle}$`, "i"), publicTrading: true },
+        { username: new RegExp(`^${safeHandle}$`, "i"), publicTrading: true },
         {
           projection: {
             _id: 0,

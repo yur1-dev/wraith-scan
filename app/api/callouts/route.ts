@@ -3,10 +3,43 @@ import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongoClient";
 import { getPrivySession } from "@/lib/privyAuth";
 import { checkTokenHolding, hasTradedToken } from "@/lib/holdingCheck";
+import { calloutPostLimiter, calloutReadLimiter, checkLimit } from "@/lib/ratelimit";
+import { clientIp } from "@/lib/clientIp";
 
 const TEXT_MAX = 280;
 const MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const EVM_RE = /^0x[0-9a-fA-F]{40}$/;
+// Only small raster images are kept inline (the composer shrinks photos before upload). SVG and anything else is refused.
+const IMAGE_MAX_CHARS = 450_000;
+const IMAGE_RE = /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+// One feed response may carry at most this many characters of inline images, so a few big legacy posts cannot push the response
+// over the platform limit and take the whole feed down.
+const FEED_IMAGE_BUDGET = 2_800_000;
+const intParam = (raw: string | null, def: number, min: number, max: number) => {
+  const n = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
+};
+
+/** Market cap of the token right now from DexScreener (the server's own number, never the browser's). */
+async function verifiedMcap(mint: string): Promise<number | null> {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/tokens/v1/solana/${mint}`, { signal: AbortSignal.timeout(3500), cache: "no-store" });
+    if (!res.ok) return null;
+    const pairs: unknown = await res.json();
+    if (!Array.isArray(pairs)) return null;
+    let best: { mc: number; liq: number } | null = null;
+    for (const raw of pairs) {
+      const p = raw as { marketCap?: unknown; fdv?: unknown; liquidity?: { usd?: unknown } };
+      const mc = Number(p.marketCap ?? p.fdv);
+      const liq = Number(p.liquidity?.usd ?? 0);
+      if (!Number.isFinite(mc) || mc <= 0) continue;
+      if (!best || liq > best.liq) best = { mc, liq: Number.isFinite(liq) ? liq : 0 };
+    }
+    return best ? best.mc : null;
+  } catch {
+    return null;
+  }
+}
 
 function jsonError(msg: string, status: number) {
   return NextResponse.json({ error: msg }, { status });
@@ -18,13 +51,18 @@ export async function GET(request: NextRequest) {
   const mint = EVM_RE.test(rawMint) ? rawMint.toLowerCase() : rawMint; // EVM tokens are keyed by lowercase address
   const userId = params.get("userId") ?? null;
   const following = params.get("following") === "1";
-  const limit = Math.min(Number(params.get("limit") ?? "30"), 50);
-  const offset = Math.max(Number(params.get("offset") ?? "0"), 0);
+  // limit=0 used to mean "no limit" to MongoDB, so one anonymous request could pull every callout with every image
+  const limit = intParam(params.get("limit"), 30, 1, 50);
+  const offset = intParam(params.get("offset"), 0, 0, 2000);
 
   if (mint && !MINT_RE.test(mint) && !EVM_RE.test(mint)) return jsonError("Invalid mint.", 400);
 
   const session = await getPrivySession();
   const viewerId = session?.user?.id ?? null;
+
+  // this endpoint is public (the landing page and share links read it), so it is limited per person, or per IP when signed out
+  const rl = await checkLimit(calloutReadLimiter, viewerId ?? `ip:${clientIp(request)}`);
+  if (!rl.success) return jsonError("Too many requests.", 429);
 
   try {
     const db = await getDb();
@@ -95,8 +133,14 @@ export async function GET(request: NextRequest) {
     const repostedSet = new Set((viewerReposts as unknown as { calloutId: string }[]).map((r) => r.calloutId));
     const commentCountMap = new Map((commentCounts as { _id: string; count: number }[]).map((c) => [c._id, c.count]));
 
+    let imageBudget = FEED_IMAGE_BUDGET;
     const callouts = docs.map((d) => {
       const id = (d._id as ObjectId).toHexString();
+      let image: string | null = typeof d.imageUrl === "string" ? d.imageUrl : null;
+      if (image) {
+        if (image.length > imageBudget) image = null;
+        else imageBudget -= image.length;
+      }
       const profile = profileMap.get(d.userId as string);
       const position = positionMap.get(d.userId as string);
       return {
@@ -115,7 +159,7 @@ export async function GET(request: NextRequest) {
         reposted: repostedSet.has(id),
         comments: commentCountMap.get(id) ?? 0,
         mint: d.mint as string | undefined,
-        imageUrl: d.imageUrl ?? null,
+        imageUrl: image,
         repostedFrom: d.repostedFrom ?? null,
         position: position
           ? {
@@ -141,6 +185,9 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.id) return jsonError("Unauthorized", 401);
   const userId = session.user.id;
 
+  const rl = await checkLimit(calloutPostLimiter, userId);
+  if (!rl.success) return jsonError("You're posting too fast. Wait a few minutes.", 429);
+
   let body: unknown;
   try {
     body = await request.json();
@@ -155,7 +202,7 @@ export async function POST(request: NextRequest) {
   const trimmed = text.trim().slice(0, TEXT_MAX);
 
   const safeImageUrl =
-    typeof imageUrl === "string" && imageUrl.startsWith("data:image/") && imageUrl.length < 1_500_000
+    typeof imageUrl === "string" && imageUrl.length <= IMAGE_MAX_CHARS && IMAGE_RE.test(imageUrl)
       ? imageUrl
       : null;
 
@@ -201,12 +248,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // "spotted at" market cap feeds the wins board, so it comes from the server's own lookup; the browser's number is only used when
+    // the lookup finds nothing (brand-new tokens), and is clamped to a sane range either way
+    const isReply = typeof parentId === "string" && /^[a-f0-9]{24}$/.test(parentId);
+    const clientMc = typeof mcapAtPost === "number" && Number.isFinite(mcapAtPost) && mcapAtPost > 0 && mcapAtPost < 1e13 ? mcapAtPost : null;
+    const serverMc = isReply ? null : await verifiedMcap(commentMint);
     const doc: Record<string, unknown> = {
       userId,
       mint: commentMint,
       text: trimmed,
       createdAt: now,
-      mcapAtPost: typeof mcapAtPost === "number" && isFinite(mcapAtPost) ? mcapAtPost : null,
+      mcapAtPost: serverMc ?? clientMc,
       hearts: 0,
       reposts: 0,
     };

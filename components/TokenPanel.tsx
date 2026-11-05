@@ -22,6 +22,7 @@ import { readTokenFavorites, toggleTokenFavorite, TOKEN_FAVORITES_EVENT } from "
 import { changeColor, fmtAge, fmtCount, fmtPct, fmtPrice, fmtUsd, shortAddr } from "@/lib/market";
 import { useLiveTrades } from "@/lib/useLiveTrades";
 import { PublicKey } from "@solana/web3.js";
+import { SOLANA_WS_PUSH } from "@/lib/publicRpc";
 
 interface Windowed<T> {
   m5: T;
@@ -213,8 +214,9 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
     let ws: WebSocket | null = null;
     let baseAmt = 0;
     let quoteAmt = 0;
-    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC || "";
-    const wsUrl = rpcUrl.startsWith("https://") ? rpcUrl.replace("https://", "wss://") : "";
+    // Push streaming only runs when a keyless (or domain-locked) wss URL is configured, see lib/publicRpc.ts. Otherwise the poll below
+    // keeps the price live; it never needs a provider key in the browser.
+    const wsUrl = SOLANA_WS_PUSH;
     const push = () => {
       if (!(baseAmt > 0 && quoteAmt > 0) || !(solUsdRef.current > 0)) return;
       const priceUsd = (quoteAmt / baseAmt) * solUsdRef.current;
@@ -271,9 +273,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
   // ── pump.fun bonding curve: stream the curve account itself, price moves with every trade ──
   const onCurveNow = snap?.onCurve ?? false;
   useEffect(() => {
-    if (!mint || !onCurveNow || typeof WebSocket === "undefined") return;
-    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC || "";
-    if (!rpcUrl.startsWith("https://")) return;
+    if (!mint || !onCurveNow) return;
     let curve: string;
     try {
       curve = PublicKey.findProgramAddressSync(
@@ -302,9 +302,32 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
         setSnap((cur) => (cur ? { ...cur, priceUsd, marketCap: priceUsd * (cur.supply ?? 1_000_000_000) } : cur));
       } catch { /* ignore */ }
     };
+    // No push socket configured (the default): poll the curve account through our own server, which caches it for a moment so many
+    // viewers of the same token share one RPC read.
+    if (!SOLANA_WS_PUSH || typeof WebSocket === "undefined") {
+      let stopped = false;
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      const poll = async () => {
+        if (stopped) return;
+        if (!document.hidden) {
+          try {
+            const r = await fetch(`/api/live-price?mint=${encodeURIComponent(mint)}&curve=1`, { cache: "no-store" });
+            if (r.ok) {
+              const d: { curve?: string } = await r.json();
+              if (d.curve) apply(d.curve);
+            } else if (r.status === 404) {
+              return; // curve account is gone (token graduated): stop polling
+            }
+          } catch { /* retry */ }
+        }
+        if (!stopped) pollTimer = setTimeout(poll, document.hidden ? 5000 : 1500);
+      };
+      void poll();
+      return () => { stopped = true; if (pollTimer) clearTimeout(pollTimer); };
+    }
     const connect = () => {
       if (!alive) return;
-      try { ws = new WebSocket(rpcUrl.replace("https://", "wss://")); } catch { return; }
+      try { ws = new WebSocket(SOLANA_WS_PUSH); } catch { return; }
       const sock = ws;
       sock.onopen = () => {
         retry = 0;

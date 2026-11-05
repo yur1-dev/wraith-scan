@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrivySession } from "@/lib/privyAuth";
 import { getDb } from "@/lib/mongoClient";
+import { checkLimit, reactLimiter } from "@/lib/ratelimit";
+
+const MAX_FOLLOWS = 500; // the feed and alerts read at most this many, so more only adds load
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -39,6 +42,8 @@ export async function POST(request: NextRequest) {
   const session = await getPrivySession();
   const followerId = session?.user?.id;
   if (!followerId) return jsonError("Sign in to follow traders.", 401);
+  const rl = await checkLimit(reactLimiter, `follow:${followerId}`);
+  if (!rl.success) return jsonError("Slow down.", 429);
 
   try {
     const body: unknown = await request.json();
@@ -48,6 +53,10 @@ export async function POST(request: NextRequest) {
     const db = await getDb();
     const profile = await db.collection("profiles").findOne({ userId: traderId, publicTrading: true }, { projection: { _id: 1 } });
     if (!profile) return jsonError("This trader is not publicly available.", 404);
+    const already = await db.collection("trader_follows").findOne({ followerId, traderId }, { projection: { _id: 1 } });
+    if (!already && (await db.collection("trader_follows").countDocuments({ followerId })) >= MAX_FOLLOWS) {
+      return jsonError(`You can follow up to ${MAX_FOLLOWS} traders.`, 400);
+    }
     await db.collection("trader_follows").updateOne(
       { followerId, traderId },
       { $setOnInsert: { followerId, traderId, createdAt: new Date() } },

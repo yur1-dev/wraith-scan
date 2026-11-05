@@ -74,37 +74,30 @@ function paintEyes(c: Ctx, rank: number, style: number, col: string) {
   c.fillStyle = "#0a0605"; c.beginPath(); c.ellipse(cx, ey, g.rx, 68, 0, 0, Math.PI * 2); c.fill();
   c.fillStyle = col; c.strokeStyle = col; c.shadowColor = col; c.shadowBlur = 38; c.lineCap = "round"; c.lineJoin = "round";
   const pair = (fn: (x: number) => void) => { fn(cx - sp); fn(cx + sp); };
-  const dark = "#0a0605";
-  if (style === 1) { // glowing orbs
+    if (style === 1) { // glowing orbs
     pair((x) => { c.beginPath(); c.arc(x, ey, u * 0.62, 0, Math.PI * 2); c.fill(); });
-    c.shadowBlur = 0; c.fillStyle = "rgba(255,255,255,0.85)"; pair((x) => { c.beginPath(); c.arc(x - u * 0.12, ey - u * 0.14, u * 0.26, 0, Math.PI * 2); c.fill(); });
   } else if (style === 2) { // sleepy half-closed
     pair((x) => { c.beginPath(); c.arc(x, ey - 4, u * 0.78, 0, Math.PI); c.closePath(); c.fill(); });
     c.lineWidth = u * 0.14; pair((x) => { c.beginPath(); c.moveTo(x - u * 0.9, ey - 4); c.lineTo(x + u * 0.9, ey - 4); c.stroke(); });
-  } else if (style === 3) { // wide awake with pupils
+  } else if (style === 3) { // wide awake
     pair((x) => { c.beginPath(); c.ellipse(x, ey, u * 0.5, u * 0.8, 0, 0, Math.PI * 2); c.fill(); });
-    c.shadowBlur = 0; c.fillStyle = dark; pair((x) => { c.beginPath(); c.arc(x, ey + u * 0.05, u * 0.22, 0, Math.PI * 2); c.fill(); });
   } else if (style === 4) { // cyclops
     c.beginPath(); c.arc(cx, ey, u * 1.15, 0, Math.PI * 2); c.fill();
-    c.shadowBlur = 0; c.fillStyle = dark; c.beginPath(); c.ellipse(cx, ey, u * 0.2, u * 0.72, 0, 0, Math.PI * 2); c.fill();
   } else if (style === 5) { // three eyes
     pair((x) => { c.beginPath(); c.arc(x, ey + u * 0.15, u * 0.46, 0, Math.PI * 2); c.fill(); });
     c.beginPath(); c.arc(cx, ey - u * 1.0, u * 0.4, 0, Math.PI * 2); c.fill();
   } else if (style === 6) { // dead X eyes
     c.lineWidth = u * 0.24; pair((x) => { const k = u * 0.5; c.beginPath(); c.moveTo(x - k, ey - k); c.lineTo(x + k, ey + k); c.moveTo(x + k, ey - k); c.lineTo(x - k, ey + k); c.stroke(); });
-  } else if (style === 7) { // cat slits
-    pair((x) => { c.beginPath(); c.ellipse(x, ey, u * 0.62, u * 0.86, 0, 0, Math.PI * 2); c.fill(); });
-    c.shadowBlur = 0; c.fillStyle = dark; pair((x) => { c.beginPath(); c.ellipse(x, ey, u * 0.11, u * 0.78, 0, 0, Math.PI * 2); c.fill(); });
+  } else if (style === 7) { // tall slits
+    pair((x) => { c.beginPath(); c.roundRect(x - u * 0.2, ey - u * 0.95, u * 0.4, u * 1.9, u * 0.2); c.fill(); });
   } else if (style === 8) { // visor bar
     const hw = sp + u * 0.95, h = u * 0.42; c.beginPath(); c.roundRect(cx - hw, ey - h / 2, hw * 2, h, h / 2); c.fill();
-    c.shadowBlur = 0; c.fillStyle = "rgba(255,255,255,0.8)"; c.beginPath(); c.roundRect(cx - hw + h * 0.5, ey - h * 0.22, hw * 2 - h, h * 0.2, h * 0.1); c.fill();
   } else if (style === 9) { // diamonds
     pair((x) => { c.beginPath(); c.moveTo(x, ey - u * 0.9); c.lineTo(x + u * 0.62, ey); c.lineTo(x, ey + u * 0.9); c.lineTo(x - u * 0.62, ey); c.closePath(); c.fill(); });
   } else if (style === 10) { // happy arcs
     c.lineWidth = u * 0.26; pair((x) => { c.beginPath(); c.arc(x, ey + u * 0.35, u * 0.62, Math.PI * 1.12, Math.PI * 1.88); c.stroke(); });
-  } else { // hollow rings
+  } else { // rings
     c.lineWidth = u * 0.2; pair((x) => { c.beginPath(); c.arc(x, ey, u * 0.58, 0, Math.PI * 2); c.stroke(); });
-    c.shadowBlur = 0; pair((x) => { c.beginPath(); c.arc(x, ey, u * 0.16, 0, Math.PI * 2); c.fill(); });
   }
   c.shadowBlur = 0; c.lineCap = "butt";
 }

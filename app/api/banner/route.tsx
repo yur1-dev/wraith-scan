@@ -2,7 +2,7 @@ import { createCanvas, loadImage, GlobalFonts, type Image } from "@napi-rs/canva
 import path from "path";
 import type { NextRequest } from "next/server";
 import { drawBanner, type BannerData, type BannerStat } from "@/lib/telegramBanner";
-import { accessory, SHARE_RANKS, type ShareParams } from "@/lib/shareCard";
+import { SHARE_RANKS } from "@/lib/shareCard";
 
 // Telegram banner (signals + wins), drawn on the server and returned as a PNG.
 // /api/banner?kind=win&sym=FOO&x=3.5&called=13000&now=45500&peak=45500&chain=solana&img=<token image url>
@@ -82,16 +82,16 @@ export async function GET(req: NextRequest) {
     if (vol !== null) stats.push({ label: "Vol 1h", value: usd(vol) });
   }
 
-  // every token gets its own character: a colourway (hue) and, most of the time, an accessory (crown, shades, halo, horns...)
+  // every token gets its own character: a colourway (hue) plus its own eyes (look + glow colour)
   const hv = hash(sym + kind);
   const hue = [0, 0, 165, 205, 262, 330][hv % 6];
-  const char = [0, 0, 1, 2, 3, 4, 5, 6, 7, 8][(hv >>> 8) % 10];
   const baseRank = SHARE_RANKS[rank];
   const accent = hue ? rotate(baseRank.accent, hue) : baseRank.accent;
-  const sp2 = { rank: { ...baseRank, accent, glow: `${accent}55` } } as unknown as ShareParams;
-  const deco = char ? (c: CanvasRenderingContext2D, x: number, y: number, sc: number) => { c.save(); c.translate(x, y); c.scale(sc, sc); accessory(c, 1, sp2, char, false); c.restore(); } : null;
+  const eyeStyle = (hv >>> 8) % 12; // 0 keeps the original angry eyes
+  const eyeColor = ["#ffffff", "#ffd34a", "#ff3b4d", "#46f0ff", "#6dff9f", "#ff7bd5", "#b58cff", "#ff9a3d"][(hv >>> 16) % 8];
+  const eyes = { style: eyeStyle, color: eyeColor };
 
-  const data: BannerData = { kind, symbol: sym, chain, tier, score, mult: x, stats, rank, logo, token, art: artImg, accent, hue, deco };
+  const data: BannerData = { kind, symbol: sym, chain, tier, score, mult: x, stats, rank, logo, token, art: artImg, accent, hue, eyes };
   const S = 1.5;
   const canvas = createCanvas(960 * S, 540 * S);
   const ctx = canvas.getContext("2d");

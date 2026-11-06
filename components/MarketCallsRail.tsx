@@ -109,11 +109,11 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
         {state === "loading" ? (
           Array.from({ length: 3 }).map((_, i) => <div key={i} className="wx-skel" style={{ height: 78, margin: "6px 14px", borderRadius: 12 }} />)
         ) : signedOut ? (
-          <p className="mc-empty">Sign in to see callouts from traders you follow.</p>
+          <p className="mc-empty">Sign in to see intel from traders you follow.</p>
         ) : state === "error" ? (
-          <p className="mc-empty">Could not load callouts right now.</p>
+          <p className="mc-empty">Could not load intel right now.</p>
         ) : callouts.length === 0 ? (
-          <p className="mc-empty">Nothing yet. Follow traders and their callouts show up here. <Link href="/app/traders">Find traders →</Link></p>
+          <p className="mc-empty">Nothing yet. Follow traders and their intel shows up here. <Link href="/app/traders">Find traders →</Link></p>
         ) : (
           callouts.map((c) => {
             const m = c.mint ? meta[c.mint] : undefined;

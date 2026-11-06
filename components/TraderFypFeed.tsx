@@ -67,7 +67,7 @@ export default function TraderFypFeed({ onSelectMeme }: { onSelectMeme: (meme: M
       <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 13px 10px" }}>
         <Radio size={14} color="var(--orange-hot)" />
         <strong style={{ fontSize: 11, letterSpacing: ".12em" }}>FOLLOWING ACTIVITY</strong>
-        <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{callouts.length} callouts</span>
+        <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{callouts.length} intel</span>
       </header>
       <div style={{ overflowY: "auto", minHeight: 0, padding: "0 9px 8px" }}>
         {loading ? <div style={{ padding: "14px 8px", color: "var(--text-muted)", fontSize: 11 }}>Loading followed traders…</div> : error ? <div style={{ padding: "14px 8px", color: "var(--text-muted)", fontSize: 11 }}>{error}</div> : callouts.length ? callouts.slice(0, 8).map((item, index) => {

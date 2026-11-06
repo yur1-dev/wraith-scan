@@ -261,7 +261,7 @@ export async function runPushAlerts(): Promise<{ subs: number; sent: number; fai
       if (mine && wants(sub, "callout")) {
         for (const c of callouts) {
           if (!mine.has(c.userId) || c.ts <= cur || c.ts > now) continue;
-          msgs.push({ title: `${c.name} posted a callout`, body: c.text.slice(0, 110), url: c.mint ? `/app/token/${c.mint}` : `/app/u/${encodeURIComponent(c.userId)}`, tag: `c:${c.id}` });
+          msgs.push({ title: `${c.name} posted intel`, body: c.text.slice(0, 110), url: c.mint ? `/app/token/${c.mint}` : `/app/u/${encodeURIComponent(c.userId)}`, tag: `c:${c.id}` });
         }
       }
       const base = { ...(sub.base ?? {}) };

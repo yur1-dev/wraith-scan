@@ -239,7 +239,7 @@ export default function FollowingIntelSidebar({ embedded = false }: { embedded?:
       ) : callouts.length === 0 ? (
         <div className="fi-empty">
           <strong>No intels yet</strong>
-          <span>Follow traders to see their callouts here.</span>
+          <span>Follow traders to see their intel here.</span>
         </div>
       ) : (
         <div className="fi-feed">

@@ -293,7 +293,7 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
         )}
         {!loading && callouts.length === 0 && (
           <div className="callouts-empty">
-            <strong>No callouts yet</strong>
+            <strong>No intel yet</strong>
             <span>Be the first to share your take on this token.</span>
           </div>
         )}

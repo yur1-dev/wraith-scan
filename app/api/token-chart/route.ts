@@ -34,6 +34,7 @@ import {
 } from "@/lib/marketProviders";
 import { getSandboxToken, sandboxCandles } from "@/lib/devnetTokens";
 import { fetchTokenSwaps, swapsToCandles } from "@/lib/heliusSwaps";
+import { candlesFromOwnTrades, noteWatch } from "@/lib/ownTrades";
 
 interface Candle {
   t: number; // bucket start, ms
@@ -69,6 +70,10 @@ const ONCHAIN_BUDGET_MS = 12_000;
 const cache = new Map<string, { candles: Candle[]; source: string; ts: number }>();
 const lastGood = new Map<string, { candles: Candle[]; source: string; ts: number }>();
 const inflight = new Map<string, Promise<{ candles: Candle[]; source: string } | null>>();
+// After every provider failed for a token, answer "nothing yet" for a short while instead of hitting them all again on the
+// next poll (the chart polls every few seconds, which is what used up the GeckoTerminal budget).
+const EMPTY_TTL_MS = 20_000;
+const emptyUntil = new Map<string, number>();
 
 // ── circuit breaker (per provider) ──────────────────────────────────────
 const downUntil: Record<string, number> = { gecko: 0, birdeye: 0, paprika: 0 };
@@ -176,7 +181,9 @@ async function fromBirdeye(mint: string, tf: Tf): Promise<Candle[] | null> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn("[token-chart] birdeye failed:", msg);
-    if (msg.startsWith("400") || msg.startsWith("401") || msg.startsWith("429")) markDown("birdeye", 5 * 60_000);
+    // 400 here has meant "compute units usage limit exceeded" (monthly quota): no point asking again for an hour.
+    if (msg.startsWith("400") || msg.startsWith("401") || msg.startsWith("403")) markDown("birdeye", 60 * 60_000);
+    else if (msg.startsWith("429")) markDown("birdeye", 5 * 60_000);
     return null;
   }
 }
@@ -268,6 +275,7 @@ function clean(rows: Candle[], sec: number): Candle[] {
 
 // ── orchestration ───────────────────────────────────────────────────────
 const MIN_GOOD = 3;
+const OWN_WIN_MIN = 30; // our own recorded trades must cover this many candles to beat the indexers outright
 
 async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: Candle[]; source: string } | null> {
   // Race Gecko and Birdeye simultaneously — take the first provider that returns
@@ -277,7 +285,9 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
   const birdeyeJob = fromBirdeye(mint, tf);
   // When Gecko is already known to be limited, start the fallback source immediately.
   const papJob = isDown("gecko") ? fromPaprika(mint, tf) : null;
-  const helJob = fromHelius(mint, tf);
+  // Our own recorded trades first (free). Helius is only asked when they are not enough, so its credits are not burned.
+  const ownJob = candlesFromOwnTrades(mint, tf.sec, tf.limit);
+  const helJob = ownJob.then((own) => (own && own.length >= OWN_WIN_MIN ? null : fromHelius(mint, tf)));
 
   type Tagged = { rows: Candle[]; source: string };
   const toTagged = (rows: Candle[] | null, src: string): Tagged | null =>
@@ -294,6 +304,13 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
       if (!t) throw new Error("birdeye: insufficient");
       return t;
     }),
+    (async () => {
+      const r = await ownJob;
+      if (!r || r.length < OWN_WIN_MIN) throw new Error("own: insufficient"); // shorter than this: only used as a last resort (sparse)
+      // Our worker only knows trades since it started watching, so give the indexers a short head start for longer history.
+      await new Promise((res) => setTimeout(res, isDown("gecko") ? 0 : 250));
+      return { rows: r, source: "wraith-trades" } as Tagged;
+    })(),
     (async () => {
       // Give the indexers a head start (they carry longer history); Helius answers fast when they do not.
       await new Promise((r) => setTimeout(r, isDown("gecko") ? 0 : 350));
@@ -340,8 +357,8 @@ async function load(mint: string, tf: Tf, onCurve = false): Promise<{ candles: C
   }
 
   // Sparse-but-real beats nothing (brand-new token with 1-2 trades).
-  const [gecko, birdeye, hel] = await Promise.all([geckoJob, birdeyeJob, helJob]);
-  const sparse = [gecko, birdeye, hel].find((x) => x && x.length);
+  const [gecko, birdeye, hel, own] = await Promise.all([geckoJob, birdeyeJob, helJob, ownJob]);
+  const sparse = [gecko, birdeye, own, hel].find((x) => x && x.length);
   if (sparse) {
     const candles = clean(sparse, tf.sec);
     if (candles.length) return { candles, source: "sparse" };
@@ -394,6 +411,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ candles: sandboxCandles(sandboxTok.priceSol * solUsd, tf.sec), source: "sandbox", intervalSec: tf.sec, updatedAt: Date.now() });
   }
   const key = `${mint}:${tfKey in TF ? tfKey : "15m"}`;
+  noteWatch(mint); // the ingest worker starts recording this token's trades
 
   let hit = cache.get(key);
   let fromSaved = false;
@@ -420,6 +438,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ candles: hit.candles, source: hit.source, ...(Date.now() - hit.ts > 120_000 ? { stale: true } : {}), intervalSec: tf.sec, updatedAt: hit.ts });
   }
 
+  if ((emptyUntil.get(key) ?? 0) > Date.now() && !inflight.has(key)) {
+    const stale = lastGood.get(key);
+    if (stale && Date.now() - stale.ts < STALE_MS) return NextResponse.json({ candles: stale.candles, source: stale.source, stale: true, intervalSec: tf.sec, updatedAt: stale.ts });
+    return NextResponse.json({ candles: [], source: "none", intervalSec: tf.sec });
+  }
+
   const t0 = Date.now();
   let job = inflight.get(key);
   if (!job) {
@@ -436,6 +460,7 @@ export async function GET(req: NextRequest) {
 
   if (result) {
     const entry = { ...result, ts: Date.now() };
+    emptyUntil.delete(key);
     cache.set(key, entry);
     if (result.source !== "sparse" || !lastGood.has(key)) persist(key, result.candles, result.source);
     // Never let a thin result overwrite a richer one we already served.
@@ -459,5 +484,7 @@ export async function GET(req: NextRequest) {
     cache.set(key, { ...derived, ts: Date.now() - CACHE_MS + 3000 });
     return NextResponse.json({ candles: derived.candles, source: derived.source, derived: true, stale: true, intervalSec: tf.sec, updatedAt: Date.now() });
   }
+  emptyUntil.set(key, Date.now() + EMPTY_TTL_MS);
+  if (emptyUntil.size > 500) for (const [k, v] of emptyUntil) if (v < Date.now()) emptyUntil.delete(k);
   return NextResponse.json({ candles: [], source: "none", intervalSec: tf.sec });
 }

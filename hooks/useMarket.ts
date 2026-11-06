@@ -69,9 +69,12 @@ export function useMarket(category: MarketCategory, intervalMs = 60_000): UseMar
     const t = setInterval(() => {
       if (!document.hidden) void load();
     }, intervalMs);
+    const onPull = () => void load(); // pull-to-refresh
+    window.addEventListener("wraith:refresh", onPull);
     return () => {
       reqId.current++;
       clearInterval(t);
+      window.removeEventListener("wraith:refresh", onPull);
     };
   }, [load, intervalMs]);
 

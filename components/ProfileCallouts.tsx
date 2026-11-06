@@ -63,7 +63,7 @@ export default function ProfileCallouts({ userId }: { userId: string }) {
   if (callouts.length === 0) {
     return (
       <div className="fp-empty">
-        <strong>No callouts yet</strong>
+        <strong>No intel yet</strong>
         <span>Open a token and share your take to see it here.</span>
       </div>
     );

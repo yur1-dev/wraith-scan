@@ -1,6 +1,6 @@
 "use client";
 
-// Desktop-only live feed of what traders are calling right now (public callouts, newest first).
+// Live feed of what traders are calling right now (public callouts, newest first).
 // Keeps the last good list when the connection drops, can be paused, and never reflows while you read.
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -82,9 +82,9 @@ export default function HotCalloutsFeed({ onSelectMeme }: { onSelectMeme: (meme:
   };
 
   return (
-    <section className="hc-wrap" aria-label="Hot callouts">
+    <section className="hc-wrap" aria-label="Hot intel">
       <header className="hc-head">
-        <strong>Hot callouts</strong>
+        <strong>Hot intel</strong>
         <span className="hc-sub">Live calls from Wraith traders</span>
         {stale && <span className="hc-off" title="Showing the last saved list"><WifiOff size={12} /> offline</span>}
         <button type="button" className="hc-btn" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
@@ -94,7 +94,7 @@ export default function HotCalloutsFeed({ onSelectMeme }: { onSelectMeme: (meme:
       {loading ? (
         <div className="hc-list">{[0, 1, 2, 3].map((i) => <div key={i} className="wx-skel" style={{ height: 96, borderRadius: 14 }} />)}</div>
       ) : items.length === 0 ? (
-        <div className="hc-empty">No callouts yet. Post one from any token page and it shows up here.</div>
+        <div className="hc-empty">No intel yet. Post one from any token page and it shows up here.</div>
       ) : (
         <div className="hc-list">
           {items.map((c) => {

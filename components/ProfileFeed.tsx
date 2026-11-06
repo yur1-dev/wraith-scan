@@ -1,6 +1,6 @@
 "use client";
 
-// One flowing feed for the profile: Following (traders you follow) and My callouts, switched by tabs.
+// One flowing feed for the profile: Following (traders you follow) and My intel, switched by tabs.
 
 import { useState } from "react";
 import FollowingIntelSidebar from "@/components/FollowingIntelSidebar";
@@ -20,7 +20,7 @@ export default function ProfileFeed({ userId }: { userId?: string | null }) {
         </button>
         {userId && (
           <button type="button" role="tab" aria-selected={active === "mine"} className={active === "mine" ? "on" : ""} onClick={() => setTab("mine")}>
-            My callouts
+            My intel
           </button>
         )}
       </div>

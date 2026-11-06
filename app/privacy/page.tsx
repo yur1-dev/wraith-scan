@@ -10,13 +10,13 @@ export default function PrivacyPage() {
 
       <H>What we collect</H>
       <p>When you sign in with Google, email or a wallet, authentication is handled by Privy. We receive your account identifier, your email address if you used one, your display name and profile picture from your sign-in provider, and your wallet address.</p>
-      <p>We also store what you do in the app: paper and live trades, positions, watchlists, followed traders, callouts you post, notification settings and your profile settings.</p>
+      <p>We also store what you do in the app: paper and live trades, positions, watchlists, followed traders, intel you post, notification settings and your profile settings.</p>
 
       <H>How we use it</H>
       <p>We use this information to sign you in, run your account, show your portfolio and trade history, power leaderboards and profiles you choose to make public, send notifications you turn on, and keep the service secure. We do not sell your personal information.</p>
 
       <H>What is public</H>
-      <p>Your username, avatar and callouts can be seen by other users. Your trading stats are shown to others only if you turn public trading on in your profile.</p>
+      <p>Your username, avatar and intel posts can be seen by other users. Your trading stats are shown to others only if you turn public trading on in your profile.</p>
 
       <H>Service providers</H>
       <p>We rely on Privy for authentication and wallets, MongoDB for storage, Vercel for hosting, and third-party market data and analytics providers. They process data only to provide their service to us.</p>

@@ -15,7 +15,7 @@ type Item = {
   key: string;
   label: string;
   href: string;
-  view?: "market" | "scanner";
+  view?: "market" | "scanner" | "intel";
   icon: ReactNode;
 };
 
@@ -57,6 +57,18 @@ const ITEMS: Item[] = [
     ),
   },
   {
+    key: "intel",
+    label: "Intel",
+    href: "/app",
+    view: "intel",
+    icon: (
+      <svg {...stroke}>
+        <path d="M4 5h16v11H9l-5 4V5z" />
+        <path d="M8 9h8M8 12h5" />
+      </svg>
+    ),
+  },
+  {
     key: "traders",
     label: "Traders",
     href: "/app/traders",
@@ -80,10 +92,11 @@ const ITEMS: Item[] = [
   },
 ];
 
-function homeView(): "market" | "scanner" | "wins" {
+function homeView(): "market" | "scanner" | "wins" | "intel" {
   try {
     const v = localStorage.getItem("wraith_home_view");
-    if (v === "scanner" || v === "wins") return v;
+    if (v === "scanner" || v === "wins" || v === "intel") return v;
+    if (v === "callouts") return "intel";
   } catch {
     /* ignore */
   }
@@ -96,7 +109,7 @@ export default function MobileTabBar() {
 
   const onHome = path === "/app";
   const activeKey = onHome
-    ? (typeof window !== "undefined" && homeView() === "scanner" ? "scanner" : "market")
+    ? (typeof window !== "undefined" ? (homeView() === "scanner" ? "scanner" : homeView() === "intel" ? "intel" : "market") : "market")
     : path.startsWith("/app/traders")
       ? "traders"
       : path.startsWith("/app/profile")

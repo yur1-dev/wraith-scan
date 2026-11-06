@@ -1010,4 +1010,4 @@ a.hold-row:hover{background:rgba(255,255,255,.05)}
 .hc-pos { text-align: right; }
 .hc-foot { display: flex; gap: 16px; margin-top: 10px; color: var(--text-muted); font-size: 12px; }
 .hc-empty { padding: 40px 10px; text-align: center; color: var(--text-muted); font-size: 13px; }
-@media (max-width: 767px) { .wx-subnav button[data-view="callouts"] { display: none !important; } }
+/* Intel now shows on phones too */

@@ -834,9 +834,12 @@ export default function TokenChart({
       );
     };
     tick();
+    const onPull = () => void load(true); // pull-to-refresh
+    window.addEventListener("wraith:refresh", onPull);
     return () => {
       reqRef.current++;
       clearTimeout(timer);
+      window.removeEventListener("wraith:refresh", onPull);
     };
   // mint and tf are also captured via peekCandles — adding them is redundant
   // (load already re-creates when they change) but keeps exhaustive-deps happy.

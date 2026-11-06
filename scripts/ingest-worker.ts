@@ -84,10 +84,21 @@ const PUMP_AMM_PROGRAM_ID = new PublicKey(
 // ─── DYNAMIC WATCHLIST CONFIG ──────────────────────────────────────────────
 const ACTIVE_WINDOW_MS = 30 * 60 * 1000; // consider a mint "active" if tokenHistory.lastChecked within this window
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000; // how often to re-poll tokenHistory and diff subscriptions
+const MAX_MINTS = Number(process.env.INGEST_MAX_MINTS ?? 80); // one websocket subscription per mint: stay inside free-tier limits
+const TRADE_TTL_SECONDS = 12 * 3600; // trades are deleted after 12h: ~8 trades/s across 11 tokens would fill the free 512MB MongoDB tier in days
+const MIN_TRADE_SOL = 0.003; // dust trades are dropped by the candle builder anyway, so do not store them
 
 async function loadWatchedMints(): Promise<string[]> {
   const db = await getDb();
   const cutoff = Date.now() - ACTIVE_WINDOW_MS;
+  // 1) tokens people are looking at right now (the chart route writes these), newest first
+  const watched = await db
+    .collection("watch")
+    .find({ seenAt: { $gte: cutoff } }, { projection: { _id: 1 } })
+    .sort({ seenAt: -1 })
+    .limit(MAX_MINTS)
+    .toArray();
+  // 2) tokens the scanner is tracking
   const docs = await db
     .collection("tokenHistory")
     .find(
@@ -98,7 +109,9 @@ async function loadWatchedMints(): Promise<string[]> {
       { projection: { contractAddress: 1, _id: 0 } },
     )
     .toArray();
-  return [...new Set(docs.map((d) => d.contractAddress as string))];
+  const all = [...new Set([...watched.map((d) => String(d._id)), ...docs.map((d) => d.contractAddress as string)])];
+  // Solana mints only (the scanner also tracks EVM tokens, which this worker cannot decode)
+  return all.filter((m) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)).slice(0, MAX_MINTS);
 }
 
 // ─── ANCHOR EVENT DECODERS — one per program, tokens can be in either phase ─
@@ -151,14 +164,19 @@ const tradeSchema = new mongoose.Schema(
     signature: { type: String, required: true, unique: true },
     slot: { type: Number, required: true },
     timestamp: { type: Number, required: true, index: true },
+    // TTL: MongoDB removes the document once this date is TRADE_TTL_SECONDS old
+    at: { type: Date, default: () => new Date(), index: { expireAfterSeconds: TRADE_TTL_SECONDS } },
   },
   { collection: "trades" },
 );
 const Trade = mongoose.models.Trade || mongoose.model("Trade", tradeSchema);
 
 async function connectMongo() {
-  await mongoose.connect(MONGODB_URI!);
+  // Same database the app reads from (lib/mongoClient.ts), otherwise the charts would never see these trades.
+  await mongoose.connect(MONGODB_URI!, { dbName: process.env.MONGODB_DB || "wraith" });
   console.log("[ingest-worker] Mongo connected");
+  await Trade.syncIndexes().catch((e) => console.error("[ingest-worker] index sync failed", e)); // creates the TTL + mint/timestamp indexes
+  try { await mongoose.connection.collection("watch").createIndex({ seenAt: -1 }); } catch { /* optional */ }
 
   // Dynamic import — see comment near config() above for why this can't
   // be a static top-level import.
@@ -243,6 +261,7 @@ async function subscribeToMint(connection: Connection, mint: string) {
         }
 
         const price = tokenAmount > 0 ? solAmount / tokenAmount : 0;
+        if (solAmount < MIN_TRADE_SOL || price <= 0) continue;
 
         console.log(
           `[trade #${tradeCount}] (${data._phase}) ${isBuy ? "BUY " : "SELL"} ${mintStr.slice(0, 6)}… ` +

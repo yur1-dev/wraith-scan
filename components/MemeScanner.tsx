@@ -813,6 +813,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     | "safe"
     | "fresh"
     | "ultra"
+    | "ideas"
   >("all");
   const [enriching, setEnriching] = useState(false);
 
@@ -1049,8 +1050,13 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     return { label: "WATCH", color: "#555" };
   };
 
+  // A "real" result is a token that exists on-chain with a market cap. Everything else is only a keyword guessed from
+  // headlines / social posts (no contract, no price), so it is kept out of the main lists and shown under IDEAS.
+  const isReal = (t: MemeTrend) => !!t.contractAddress && (t.mcap ?? 0) > 0;
   const filtered = trends.filter((t) => {
     const p = t.platforms || [];
+    if (filter === "ideas") return !isReal(t);
+    if (!isReal(t)) return false;
     if (filter === "celeb") return t.onCeleb || p.includes("celebrity");
     if (filter === "new") return t.isNewCoin;
     if (filter === "fresh") return (t.ageMinutes || Infinity) < 1440;
@@ -1095,6 +1101,7 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
     { key: "social", label: "SOCIAL" },
     { key: "onchain", label: "ON-CHAIN" },
     { key: "safe", label: "SAFE" },
+    { key: "ideas", label: `IDEAS ${trends.filter((t) => !isReal(t)).length}` },
   ];
 
   const SCAN_SOURCES = [

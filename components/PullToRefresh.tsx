@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 // Pull down from the top of any screen to reload, like Facebook / Instagram. Touch devices only, and only when the screen is
 // already scrolled to the very top, so it never fights normal scrolling, the chart, sheets or text boxes.
@@ -20,6 +20,7 @@ function scrolledAncestor(el: Element | null): boolean {
 
 export default function PullToRefresh() {
   const path = usePathname();
+  const router = useRouter();
   const [pull, setPull] = useState(0);
   const [busy, setBusy] = useState(false);
   const start = useRef<{ y: number; x: number } | null>(null);
@@ -56,8 +57,11 @@ export default function PullToRefresh() {
       if (v >= TRIGGER / 2 + 10) {
         setBusy(true);
         setPull(TRIGGER / 2);
+        // Refresh in place (like Facebook / Instagram): no page reload, so no splash screen and no lost scroll or lock state.
         window.dispatchEvent(new Event("wraith:refresh"));
-        window.setTimeout(() => window.location.reload(), 350);
+        window.dispatchEvent(new Event("focus")); // live lists (callouts, rails) refetch on focus
+        try { router.refresh(); } catch { /* ignore */ }
+        window.setTimeout(() => { setBusy(false); setPull(0); }, 900);
       } else {
         setPull(0);
       }
@@ -73,7 +77,7 @@ export default function PullToRefresh() {
       document.removeEventListener("touchend", onEnd);
       document.removeEventListener("touchcancel", onEnd);
     };
-  }, [enabled]);
+  }, [enabled, router]);
 
   if (!enabled || (pull <= 0 && !busy)) return null;
   const ready = pull >= TRIGGER / 2 + 10;

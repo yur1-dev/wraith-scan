@@ -35,12 +35,12 @@ export interface MemeTrend {
   aiContext?: string;
 }
 
-type View = "market" | "scanner" | "wins" | "callouts";
+type View = "market" | "scanner" | "wins" | "intel";
 const VIEWS: { key: View; label: string; hint: string }[] = [
   { key: "market", label: "Market", hint: "Live Solana tokens" },
   { key: "scanner", label: "Scanner", hint: "Live momentum signals" },
   { key: "wins", label: "Wins", hint: "How our calls performed" },
-  { key: "callouts", label: "Callouts", hint: "What traders are calling right now" },
+  { key: "intel", label: "Intel", hint: "What traders are calling right now" },
 ];
 
 export default function Home() {
@@ -51,8 +51,8 @@ export default function Home() {
   useEffect(() => {
     try {
       const v = localStorage.getItem("wraith_home_view");
-      if (v === "market" || v === "scanner" || v === "wins") setView(v);
-      else if (v === "callouts" && window.matchMedia("(min-width: 768px)").matches) setView(v);
+      if (v === "market" || v === "scanner" || v === "wins" || v === "intel") setView(v);
+      else if (v === "callouts") setView("intel"); // old saved value from before the rename
     } catch {
       /* storage unavailable */
     }
@@ -62,7 +62,7 @@ export default function Home() {
   useEffect(() => {
     const h = (e: Event) => {
       const v = (e as CustomEvent).detail;
-      if (v === "market" || v === "scanner" || v === "wins") setView(v);
+      if (v === "market" || v === "scanner" || v === "wins" || v === "intel") setView(v);
     };
     window.addEventListener("wraith:view", h);
     return () => window.removeEventListener("wraith:view", h);
@@ -128,7 +128,7 @@ export default function Home() {
             <WinsBoard onSelectMeme={handleSelectMeme} />
           </div>
         )}
-        {view === "callouts" && <HotCalloutsFeed onSelectMeme={handleSelectMeme} />}
+        {view === "intel" && <HotCalloutsFeed onSelectMeme={handleSelectMeme} />}
       </main>
       <StatusBar />
     </div>

@@ -129,7 +129,7 @@ export default function NotificationBell() {
           const ts = typeof c.createdAt === "number" ? c.createdAt : c.createdAt ? Date.parse(c.createdAt) || Date.now() : Date.now();
           add({
             id: `c:${id}`, kind: "callout", ts, img: c.avatarDataUrl || c.avatarUrl,
-            title: `${c.displayName || "Someone you follow"} posted a callout`,
+            title: `${c.displayName || "Someone you follow"} posted intel`,
             body: (c.text || "").slice(0, 110),
             href: c.mint ? `/app/token/${c.mint}` : `/app/u/${encodeURIComponent(c.userId)}`,
           });
@@ -235,7 +235,7 @@ export default function NotificationBell() {
             <PushToggle prefs={DEFAULT_PREFS} />
             <div className="wx-notif-list">
               {items.length === 0 ? (
-                <p className="wx-notif-empty">Nothing yet. You will see buys from traders you follow, their callouts, big moves on tokens you saved, and fresh scanner calls here.</p>
+                <p className="wx-notif-empty">Nothing yet. You will see buys from traders you follow, their intel, big moves on tokens you saved, and fresh scanner calls here.</p>
               ) : items.map((n) => (
                 <button key={n.id} type="button" className={`wx-notif-row${n.ts > seen - 1 && n.ts > (read<number>(SEEN, 0) - 1) ? "" : ""}`} onClick={() => go(n)}>
                   <span className={`wx-notif-ico ${n.kind}`}>

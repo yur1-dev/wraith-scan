@@ -8,8 +8,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import NotificationBell from "@/components/NotificationBell";
-import AppLockMenuItem from "@/components/AppLockMenuItem";
-import { biometricReady, biometricVerify } from "@/components/AppLock";
+import { appLockEnabled, appLockSupported, biometricReady, biometricVerify, disableAppLock, enableAppLock } from "@/components/AppLock";
+import { PIN_HASH_KEY, PIN_ENABLED_KEY, PIN_TIMEOUT_KEY, clearLocalPin, clearServerPin, hashPin, newSalt, pushLockPin, pushLockTimeout, saveLocalPin, storedSalt, syncLockFromAccount } from "@/lib/pinLockSync";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cacheTokenNav } from "@/lib/tokenNav";
@@ -2078,19 +2078,7 @@ function PresetsPanel() {
 }
 
 // ── PIN lock helpers ─────────────────────────────────────────────────────────
-const PIN_HASH_KEY = "wraith_pin_hash";
-const PIN_ENABLED_KEY = "wraith_pin_enabled";
-const PIN_TIMEOUT_KEY = "wraith_pin_timeout_ms";
 const LAST_ACTIVE_KEY = "wraith_last_active";
-
-async function hashPin(pin: string): Promise<string> {
-  const enc = new TextEncoder();
-  const data = enc.encode("wraith-pin-v1:" + pin);
-  const buf = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 function readPinEnabled(): boolean {
   try {
@@ -2172,7 +2160,7 @@ function PinLockOverlay({ onUnlock, onLogout }: { onUnlock: () => void; onLogout
   useEffect(() => {
     if (!pinSet || pin.length !== 6 || checking || unlocked) return;
     setChecking(true);
-    void hashPin(pin).then((h) => {
+    void hashPin(pin, storedSalt()).then((h) => {
       const stored = localStorage.getItem(PIN_HASH_KEY);
       if (h === stored) {
         setUnlocked(true);
@@ -2357,6 +2345,32 @@ function SecurityPanel() {
   const [pinError, setPinError] = useState("");
   const [pinBusy, setPinBusy] = useState(false);
 
+  // Fingerprint / face unlock for the app lock (per device: it lives in this phone's secure hardware)
+  const [bioOn, setBioOn] = useState(false);
+  const [bioOk, setBioOk] = useState(false);
+  const [bioBusy, setBioBusy] = useState(false);
+  const [bioError, setBioError] = useState("");
+  useEffect(() => {
+    setBioOk(appLockSupported());
+    const sync = () => setBioOn(appLockEnabled());
+    sync();
+    window.addEventListener("wraith:applock-changed", sync);
+    return () => window.removeEventListener("wraith:applock-changed", sync);
+  }, []);
+  const enableBio = async () => {
+    if (bioBusy) return;
+    setBioError("");
+    setBioBusy(true);
+    try {
+      if (!(await enableAppLock())) setBioError("Not enabled");
+      else touchLastActive();
+    } catch (e) {
+      setBioError((e as { name?: string })?.name === "NotAllowedError" ? "Cancelled" : "Set a screen lock on your phone first");
+    } finally {
+      setBioBusy(false);
+    }
+  };
+
   const totpEnrolled = mfaMethods.includes("totp");
   const passkeyEnrolled = mfaMethods.includes("passkey");
 
@@ -2472,6 +2486,7 @@ function SecurityPanel() {
     try {
       localStorage.setItem(PIN_TIMEOUT_KEY, String(ms));
     } catch {}
+    if (pinEnabled) void pushLockTimeout(ms);
   };
 
   const beginSetPin = () => {
@@ -2509,10 +2524,12 @@ function SecurityPanel() {
       }
       setPinBusy(true);
       try {
-        const h = await hashPin(pinInput);
-        localStorage.setItem(PIN_HASH_KEY, h);
-        localStorage.setItem(PIN_ENABLED_KEY, "true");
-        if (!pinTimeout) savePinTimeout(300_000);
+        const salt = newSalt();
+        const h = await hashPin(pinInput, salt);
+        const timeoutMs = pinTimeout || 300_000;
+        saveLocalPin(h, salt, timeoutMs);
+        setPinTimeout(timeoutMs);
+        void pushLockPin(h, salt, timeoutMs); // the same PIN now works on every device signed in to this account
         touchLastActive();
         setPinEnabled(true);
         setPinStep("idle");
@@ -2532,7 +2549,7 @@ function SecurityPanel() {
     }
     setPinBusy(true);
     try {
-      const h = await hashPin(pinInput);
+      const h = await hashPin(pinInput, storedSalt());
       const stored = localStorage.getItem(PIN_HASH_KEY);
       if (h !== stored) {
         setPinError("Incorrect PIN");
@@ -2540,8 +2557,8 @@ function SecurityPanel() {
         setPinBusy(false);
         return;
       }
-      localStorage.removeItem(PIN_HASH_KEY);
-      localStorage.setItem(PIN_ENABLED_KEY, "false");
+      clearLocalPin();
+      void clearServerPin();
       setPinEnabled(false);
       setPinStep("idle");
       setPinInput("");
@@ -2854,7 +2871,7 @@ function SecurityPanel() {
 
         <Row
           icon={KeyRound}
-          label="6-digit PIN lock"
+          label="6-digit PIN lock (all your devices)"
           enrolled={pinEnabled}
           busy={pinBusy && pinStep === "idle"}
           error={pinStep === "idle" ? pinError : ""}
@@ -2863,6 +2880,20 @@ function SecurityPanel() {
           enableLabel="Set up"
           disableLabel="Remove"
         />
+
+        {bioOk && (
+          <Row
+            icon={Fingerprint}
+            label="Fingerprint / face unlock (this device)"
+            enrolled={bioOn}
+            busy={bioBusy}
+            error={bioError}
+            onEnable={() => void enableBio()}
+            onDisable={disableAppLock}
+            enableLabel="Turn on"
+            disableLabel="Turn off"
+          />
+        )}
 
         {pinEnabled && pinStep === "idle" && (
           <div
@@ -3308,6 +3339,12 @@ export default function Header({ onSelectMeme }: HeaderProps) {
       setTermsSaving(false);
     }
   };
+
+  // Same PIN on phone and desktop: pull the account's PIN once signed in.
+  useEffect(() => {
+    if (sessionStatus !== "authenticated") return;
+    void syncLockFromAccount().then((changed) => { if (changed) touchLastActive(); });
+  }, [sessionStatus]);
 
   useEffect(() => {
     setMounted(true);
@@ -3938,7 +3975,6 @@ export default function Header({ onSelectMeme }: HeaderProps) {
               )}
             </button>
             )}
-            <AppLockMenuItem />
             <button
               onClick={() => {
                 void logout().then(() => window.location.assign("/login"));

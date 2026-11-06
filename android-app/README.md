@@ -30,11 +30,12 @@ to update the download button on the website.
 
 ## Push notifications
 
-1. Firebase console, your project, Project settings, Your apps: add an Android app with package name `farm.wraith.app`.
-2. Download `google-services.json` and put it in `android/app/`.
-3. Rebuild. The app registers for notifications and links its token through the existing `/api/push/fcm` route.
+`android/app/google-services.json` (git-ignored) holds the Firebase settings for project `wraith-app-a0d57`. With that file
+present the build turns push on (`prepare-config.mjs` adds `WraithPush` to the user agent) and the app asks for notification
+permission once you are signed in. Without the file push stays off, because the push plugin crashes the app when Firebase is missing.
 
 ## Sign-in
 
-Google blocks its sign-in page inside an app window, so the app uses email sign-in (a one-time code). In the Privy
-dashboard, Login methods, turn on **Email**.
+Google only. Google refuses to show its sign-in page inside an app window, so the app opens it in an in-app Chrome sheet
+(Custom Tab). When Google finishes, the page sends you back to the app with an Android intent (`OpenInApp`), or through the
+verified link when Android has verified it.

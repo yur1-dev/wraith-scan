@@ -8,9 +8,7 @@ import ChainLogo from "@/components/ChainLogo";
 import { CallsTable, ChartReal, Coin, LiveBoard, fmtUsd, useLandingData, xf } from "@/components/landing/Mocks";
 import "@/components/landing/landing.css";
 import { useWraithSession } from "@/components/SessionProvider";
-import EmailLogin from "@/components/EmailLogin";
 import OpenInApp from "@/components/OpenInApp";
-import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
 
 const CHAINS = [
   ["solana", "Solana"], ["base", "Base"], ["ethereum", "Ethereum"], ["bsc", "BNB"], ["monad", "Monad"], ["arc", "Arc"], ["robinhood", "Robinhood"],
@@ -133,8 +131,9 @@ function LoginInner() {
         {data?.wins[1] && (<div className="wl2-float r"><Coin c={data.wins[1]} /><div><b>${data.wins[1].symbol.toUpperCase()} reached {xf(data.wins[1].x)}</b><span>called at {fmtUsd(data.wins[1].spottedMcap)} · peak {fmtUsd(data.wins[1].peakMcap)}</span></div></div>)}
         <div className="wl2-card">
           <div className="logo"><i className="ring" /><i className="ring r2" /><img src="/logo.svg" alt="Wraith" /></div>
-          <h1>Sign in to Wraith</h1>
-          <p className="lead">One tap with Google. Wallets are created for you on every chain, and your OMEN balance sets your tier.</p>
+          <span className="wl2-eyebrow">WRAITH</span>
+          <h1>Trade every chain.<br />One balance.</h1>
+          <p className="lead">Scan new tokens, follow the best traders and trade across seven chains. Your wallets are created for you.</p>
 
           {syncError && <div className="wl-err">{syncError}</div>}
 
@@ -159,8 +158,6 @@ function LoginInner() {
             {syncing ? "Signing you in…" : (<><GoogleIcon />Continue with Google</>)}
           </button>
 
-          {PRIVY_WALLETS_ENABLED && status !== "authenticated" && <EmailLogin disabled={syncing} />}
-
           {data && data.stats.calls > 0 && (
             <div className="wl2-stats">
               <div><b>{data.stats.calls.toLocaleString()}</b><small>calls tracked</small></div>
@@ -171,7 +168,7 @@ function LoginInner() {
           <div className="wl2-chains">
             {CHAINS.map(([k, n]) => (<span key={k} title={n}><ChainLogo chain={k} size={20} /></span>))}
           </div>
-          <p className="wl-legal">Wallets are secured by Privy and locked behind your PIN. Not financial advice, tokens are high risk.</p>
+          <p className="wl-legal">By continuing you agree to the <Link href="/terms">Terms</Link> and <Link href="/privacy">Privacy Policy</Link>. Wallets are secured by Privy and locked behind your PIN. Not financial advice, tokens are high risk.</p>
         </div>
       </main>
     </div>

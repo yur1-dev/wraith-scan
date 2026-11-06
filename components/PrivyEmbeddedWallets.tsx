@@ -140,7 +140,7 @@ export default function PrivyEmbeddedWallets({
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ["google", "email"],
+        loginMethods: ["google"],
         appearance: {
           theme: "#0a0605",
           accentColor: "#ff7b3d",

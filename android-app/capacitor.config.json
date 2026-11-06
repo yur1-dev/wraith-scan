@@ -3,7 +3,7 @@
   "appName": "Wraith",
   "webDir": "www",
   "backgroundColor": "#0c0c0d",
-  "appendUserAgent": "WraithApp",
+  "appendUserAgent": "WraithApp WraithPush",
   "server": {
     "url": "https://www.wraith.farm/app",
     "androidScheme": "https",

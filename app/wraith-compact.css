@@ -316,16 +316,6 @@ button.hc-act:hover { background: rgba(255, 255, 255, .06); color: var(--text); 
   input, textarea, [contenteditable="true"], .selectable, .selectable * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 }
 
-/* Email sign-in */
-.wl-email-toggle { margin-top: 12px; width: 100%; height: 50px; border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 14px; background: rgba(255,255,255,.04); color: var(--text, #ededee); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
-.wl-email-toggle:hover { background: rgba(255,255,255,.08); }
-.wl-email { margin-top: 12px; display: grid; gap: 10px; text-align: left; }
-.wl-email p { margin: 0; font-size: 13px; color: var(--text-muted, #a1a1a6); }
-.wl-email input { width: 100%; height: 50px; padding: 0 14px; border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 14px; background: rgba(255,255,255,.04); color: var(--text, #ededee); font: inherit; font-size: 16px; outline: none; -webkit-user-select: text; user-select: text; }
-.wl-email input:focus { border-color: rgba(255,123,61,.6); }
-.wl-email-go { height: 50px; border: 0; border-radius: 14px; background: rgba(255,123,61,.16); color: #ffb08a; font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; }
-.wl-email-go:disabled { opacity: .6; }
-.wl2-card .wl-email, .wl2-card .wl-email-toggle { width: 100%; }
 
 /* Safe areas. Normal browsers use the browser's own values. The Android app (edge-to-edge, content drawn behind transparent
    system bars) injects the exact status-bar / navigation-bar sizes as --wx-* and every inset below follows them. */
@@ -343,3 +333,33 @@ html.wx-native {
 }
 .wraith-app-header { box-sizing: border-box; height: calc(52px + var(--sai-top)); padding-top: var(--sai-top); }
 @media (max-height: 480px) and (orientation: landscape) { .wraith-app-header { height: calc(44px + var(--sai-top)); } }
+
+/* Sign-in redesign (phones): one clear action */
+.wl2-eyebrow { display: none; }
+.wl-legal a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 640px) {
+  .wl2 { background: radial-gradient(75% 38% at 50% 14%, rgba(255,123,61,.30), transparent 70%), radial-gradient(60% 30% at 50% 100%, rgba(255,123,61,.10), transparent 70%), #0a0a0b; }
+  .wl2 .wl2-main { padding: calc(var(--sai-top) + 24px) 26px calc(var(--sai-bottom) + 20px); }
+  .wl2 .wl2-card .logo { width: 168px; height: 168px; margin: auto 0 18px !important; }
+  .wl2 .wl2-card .logo .ring { display: none; }
+  .wl2 .wl2-card .logo::before { content: ""; position: absolute; inset: -30%; background: radial-gradient(closest-side, rgba(255,123,61,.35), transparent 70%); filter: blur(8px); }
+  .wl2 .wl2-card .logo img { width: 74%; height: 74%; filter: drop-shadow(0 8px 30px rgba(255,123,61,.55)); }
+  .wl2 .wl2-eyebrow { display: block; margin-bottom: 10px; color: #ff9a62; font-size: 12px; font-weight: 800; letter-spacing: .34em; }
+  .wl2 .wl2-card h1 { font-size: 34px; line-height: 1.08; font-weight: 800; letter-spacing: -.035em; }
+  .wl2 .wl2-card .lead { max-width: 310px; margin-top: 14px; font-size: 15px; line-height: 1.55; color: #9b9ba3; }
+  .wl2 .wl2-card .wl-g { margin-top: 36px; height: 58px; border-radius: 18px; background: #fff !important; color: #111 !important; font-size: 16px; font-weight: 700; box-shadow: 0 14px 40px -12px rgba(255,123,61,.55) !important; }
+  .wl2 .wl2-card .wl-g::after { display: none; }
+  .wl2 .wl2-card .wl-g svg { width: 20px; height: 20px; margin-right: 6px; }
+  .wl2 .wl2-stats { margin-top: 26px; display: flex; justify-content: center; gap: 0; }
+  .wl2 .wl2-stats div { flex: 1; padding: 2px 6px; background: none; border: 0; border-radius: 0; border-left: 1px solid rgba(255,255,255,.10); }
+  .wl2 .wl2-stats div:first-child { border-left: 0; }
+  .wl2 .wl2-stats b { font-size: 16px; }
+  .wl2 .wl2-stats small { display: block; margin-top: 3px; font-size: 9.5px; letter-spacing: .08em; }
+  .wl2 .wl2-chains { margin: 22px 0 auto; gap: 10px; opacity: .8; }
+  .wl2 .wl2-card .wl-legal { margin-top: auto; padding-top: 26px; max-width: 300px; font-size: 11px; line-height: 1.55; color: #6e6e74; }
+}
+@media (max-width: 640px) {
+  .wl2 .wl2-card h1 { font-size: 31px; }
+  .wl2 .wl2-chains { flex-wrap: nowrap; gap: 8px; }
+  .wl2 .wl2-chains span { width: 38px; height: 38px; flex: none; }
+}

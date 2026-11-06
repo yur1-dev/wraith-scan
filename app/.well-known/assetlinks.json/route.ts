@@ -4,8 +4,15 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-static"; // served as a static file from the CDN: Chrome checks this on every app launch, so it must be fast
 
+// Public signing fingerprints of the Wraith Android app (not secrets). The first is the older Chrome-wrapper build,
+// the second is the current native app. ANDROID_SHA256 can still add more.
+const BUILT_IN = [
+  "58:3D:9E:D7:71:43:00:01:A0:7C:E5:63:4E:15:7A:09:11:EA:B9:A1:59:FB:BC:0B:3A:21:27:EF:6A:F6:38:73",
+  "45:31:DD:20:AE:CF:73:BD:7F:80:21:BC:51:98:58:55:C3:20:AB:36:E4:72:AA:41:C5:66:4D:39:9E:F5:A4:19",
+];
+
 export function GET() {
-  const prints = (process.env.ANDROID_SHA256 ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const prints = [...new Set([...BUILT_IN, ...(process.env.ANDROID_SHA256 ?? "").split(",").map((s) => s.trim()).filter(Boolean)])];
   const body = prints.length
     ? [{ relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "android_app", package_name: process.env.ANDROID_PACKAGE ?? "farm.wraith.app", sha256_cert_fingerprints: prints } }]
     : [];

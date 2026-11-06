@@ -69,9 +69,6 @@ function LoginInner() {
   const redirected = useRef(false);
   const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
   const data = useLandingData();
-  // Google refuses to show its sign-in page inside an app window, so the Android app signs in with an email code instead
-  const [inApp, setInApp] = useState(false);
-  useEffect(() => { setInApp(/WraithApp/.test(navigator.userAgent)); }, []);
 
   // Once Privy says authenticated, create the app session cookie, then go.
   useEffect(() => {
@@ -135,11 +132,11 @@ function LoginInner() {
         <div className="wl2-card">
           <div className="logo"><i className="ring" /><i className="ring r2" /><img src="/logo.svg" alt="Wraith" /></div>
           <h1>Sign in to Wraith</h1>
-          <p className="lead">{inApp ? "Sign in with your email. Wallets are created for you on every chain, and your OMEN balance sets your tier." : "One tap with Google. Wallets are created for you on every chain, and your OMEN balance sets your tier."}</p>
+          <p className="lead">One tap with Google. Wallets are created for you on every chain, and your OMEN balance sets your tier.</p>
 
           {syncError && <div className="wl-err">{syncError}</div>}
 
-          {!inApp && <button
+          <button
             className="ws-btn primary wl-g"
             disabled={syncing}
             onClick={() => {
@@ -152,9 +149,9 @@ function LoginInner() {
             }}
           >
             {syncing ? "Signing you in…" : (<><GoogleIcon />Continue with Google</>)}
-          </button>}
+          </button>
 
-          {PRIVY_WALLETS_ENABLED && status !== "authenticated" && <EmailLogin disabled={syncing} startOpen={inApp} key={inApp ? "app" : "web"} />}
+          {PRIVY_WALLETS_ENABLED && status !== "authenticated" && <EmailLogin disabled={syncing} />}
 
           {data && data.stats.calls > 0 && (
             <div className="wl2-stats">

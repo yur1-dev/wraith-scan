@@ -22,6 +22,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Verified App Links: when Google sign-in finishes in Chrome and sends you back to wraith.farm, Android opens this app -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="www.wraith.farm" />
+                <data android:scheme="https" android:host="wraith.farm" />
+            </intent-filter>
+
         </activity>
 
         <provider

@@ -12,6 +12,7 @@ import { broadcast, claim, milestoneFor, signalMessage, winMessage } from "@/lib
 import { tokenKeyboard } from "@/lib/telegramUi";
 import { runPushAlerts, pushBroadcast } from "@/lib/push";
 import { signQuery } from "@/lib/signedUrl";
+import { sweepGroupMembers } from "@/lib/telegramGate";
 
 export const maxDuration = 60;
 
@@ -114,6 +115,9 @@ export async function GET(req: NextRequest) {
 
   const push = await pushRun;
   if (push) console.log("[push]", JSON.stringify(push));
+  // hourly: drop holders-room members who no longer hold the tier (it throttles itself)
+  const sweep = await sweepGroupMembers().catch((e) => { console.error("[holders room sweep]", e); return null; });
+  if (sweep && sweep.removed) console.log("[holders room]", JSON.stringify(sweep));
   if (tgError) return NextResponse.json({ ok: false, error: "telegram step failed", first, ...out, push }, { status: 500 });
   return NextResponse.json({ ok: true, first, ...out, push });
 }

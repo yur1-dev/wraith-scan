@@ -12,8 +12,14 @@ export async function GET(req: NextRequest) {
   const base = (req.nextUrl.searchParams.get("url") || APP_URL).replace(/\/$/, "");
   const api = (m: string, body: unknown) =>
     fetch(`https://api.telegram.org/bot${token}/${m}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+  // ?invite=1 creates the join-REQUEST link for the private holders room (TELEGRAM_VIP_CHAT_ID). Share only this link.
+  if (req.nextUrl.searchParams.get("invite") === "1") {
+    const vip = process.env.TELEGRAM_VIP_CHAT_ID;
+    if (!vip) return NextResponse.json({ error: "Set TELEGRAM_VIP_CHAT_ID to the private group's id first" }, { status: 400 });
+    return NextResponse.json(await api("createChatInviteLink", { chat_id: vip, name: "Wraith holders gate", creates_join_request: true }));
+  }
   const out = {
-    webhook: await api("setWebhook", { url: `${base}/api/telegram/bot`, allowed_updates: ["message", "callback_query"], secret_token: webhookSecret() }),
+    webhook: await api("setWebhook", { url: `${base}/api/telegram/bot`, allowed_updates: ["message", "callback_query", "chat_join_request"], secret_token: webhookSecret() }),
     commands: await api("setMyCommands", {
       commands: [
         { command: "start", description: "Set up Wraith alerts" },

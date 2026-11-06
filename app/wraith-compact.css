@@ -387,3 +387,13 @@ html.wx-native::after {
   content: ""; position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--sai-bottom) + 8px);
   background: linear-gradient(to top, rgba(10,10,11,.88), rgba(10,10,11,0)); pointer-events: none; z-index: 70;
 }
+
+/* Profile (phones): the avatar column is fixed, so the Following / Followers row can no longer stretch it and push the name away */
+@media (max-width: 767px) {
+  .profile-hero .profile-identity {
+    grid-template-columns: 92px minmax(0, 1fr) auto;
+    grid-template-areas: "avatar name name" "avatar handle handle" "counts counts edit" "bio bio bio" "meta meta meta";
+    column-gap: 14px;
+  }
+  .profile-hero .profile-title-block > h1 { margin-top: 10px; }
+}

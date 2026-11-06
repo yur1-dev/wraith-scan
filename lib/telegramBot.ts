@@ -88,6 +88,14 @@ export async function broadcast(kind: "signal" | "win", text: string, opts: { ch
     if (!res.ok) console.error("[telegram] group post failed", res.description);
   }
 
+  // Private, token-gated holders room (only approved SPECTER / WRAITH members can be in it): gets every signal and win
+  const vip = process.env.TELEGRAM_VIP_CHAT_ID;
+  if (vip) {
+    const vthread = Number(process.env.TELEGRAM_VIP_THREAD_ID);
+    const res = await post(vip, text, opts, Number.isFinite(vthread) && vthread > 0 ? { message_thread_id: vthread } : {});
+    if (!res.ok) console.error("[telegram] holders room post failed", res.description);
+  }
+
   const users = await db
     .collection("users")
     .find({ telegramChatId: { $exists: true, $ne: null }, tier: { $in: ["SPECTER", "WRAITH"] }, tierSource: { $in: ["chain", "whitelist"] } }, { projection: { telegramChatId: 1, tgPrefs: 1 } })

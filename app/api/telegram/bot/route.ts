@@ -11,6 +11,7 @@ import type { SignalCall } from "@/lib/signalCalls";
 import { callGet } from "@/lib/internalCall";
 import { checkLimit, telegramChatLimiter } from "@/lib/ratelimit";
 import { sameSecret, webhookSecret } from "@/lib/telegramSecret";
+import { handleJoinRequest } from "@/lib/telegramGate";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const API = `https://api.telegram.org/bot${TOKEN}`;
@@ -273,6 +274,13 @@ export async function POST(req: NextRequest) {
     update = await req.json();
   } catch {
     return NextResponse.json({ ok: false }, { status: 400 });
+  }
+
+  // Someone asked to join the private holders room: approve only linked SPECTER / WRAITH accounts (see lib/telegramGate.ts)
+  const jr = (update as unknown as { chat_join_request?: Parameters<typeof handleJoinRequest>[0] }).chat_join_request;
+  if (jr) {
+    await handleJoinRequest(jr).catch((e) => console.error("[telegram gate]", e));
+    return NextResponse.json({ ok: true });
   }
 
   // one chat cannot flood the bot (every command reads the database or calls a market API); always answer 200 so Telegram does not retry

@@ -27,6 +27,7 @@ export function isInstalledApp(): boolean {
   try {
     if (document.referrer.startsWith("android-app://")) sessionStorage.setItem("wx_app", "1");
     return (
+      /WraithApp/.test(navigator.userAgent) || // the native Android app (Capacitor) adds this to its user agent
       sessionStorage.getItem("wx_app") === "1" ||
       (navigator as Navigator & { standalone?: boolean }).standalone === true ||
       window.matchMedia("(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)").matches

@@ -12,6 +12,8 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // dev only: lets the Android emulator (which reaches this computer as 10.0.2.2) load the dev server
+  allowedDevOrigins: ["10.0.2.2"],
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
   async headers() {

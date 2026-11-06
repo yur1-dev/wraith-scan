@@ -44,3 +44,13 @@ next-env.d.ts
 /marketing/out/
 /marketing/memes/
 /marketing/*.zip
+
+# Wraith Android: secrets and build output
+android-app/wraith-release.keystore
+android-app/keystore.properties
+android-app/node_modules/
+android-app/android/.gradle/
+android-app/android/build/
+android-app/android/app/build/
+android-app/android/local.properties
+android-app/android/app/google-services.json

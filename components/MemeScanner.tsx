@@ -1133,63 +1133,33 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="wx-board-bar">
+      <div className="wx-board-bar ms-bar">
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span className="wx-kicker" style={{ color: "var(--accent-text)", letterSpacing: "0.16em" }}>DISCOVER</span>
-            <span className="wx-live">
-              <i className={loading || enriching ? "stale" : error ? "stale" : ""} style={error ? { background: "var(--loss)", animation: "none" } : undefined} />
+          <div className="ms-stats">
+            <span className="ms-state" data-state={loading || enriching ? "busy" : error ? "err" : "ok"}>
+              <i />{loading ? "Scanning" : enriching ? "Enriching" : error ? "Retry" : "Live"}
             </span>
-            <span style={{ fontSize: 10, fontFamily: "var(--font-mono), monospace", color: loading || enriching ? "#ffaa00" : error ? "var(--loss)" : "var(--win)" }}>
-              {loading ? "SCANNING" : enriching ? "ENRICHING" : error ? "RETRY" : "LIVE"}
-            </span>
-            {!loading && ultraCount > 0 && (
-              <span className="wx-badge" style={{ fontSize: 8, color: "#ffd700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.22)" }}>
-                <Flame size={8} color="#ffd700" /> {ultraCount} HOT
-              </span>
-            )}
-            {!loading && celebCount > 0 && (
-              <span className="wx-badge" style={{ fontSize: 8, color: "#ffd700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.22)" }}>
-                <Star size={8} color="#ffd700" /> {celebCount}
-              </span>
-            )}
-            {!loading && freshCount > 0 && (
-              <span className="wx-badge" style={{ fontSize: 8, color: "var(--win)", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.22)" }}>
-                <Zap size={8} color="#22c55e" /> {freshCount}
-              </span>
-            )}
-            {!loading && viralCount > 0 && (
-              <span className="wx-badge" style={{ fontSize: 8, color: "#ff6600", background: "rgba(255,102,0,0.1)", border: "1px solid rgba(255,102,0,0.22)" }}>
-                <Flame size={8} color="#ff6600" /> {viralCount}
-              </span>
-            )}
+            {!loading && ultraCount > 0 && <span className="ms-chip hot"><Flame size={10} /> {ultraCount} hot</span>}
+            {!loading && celebCount > 0 && <span className="ms-chip"><Star size={10} /> {celebCount} celeb</span>}
+            {!loading && freshCount > 0 && <span className="ms-chip"><Zap size={10} /> {freshCount} fresh</span>}
+            {!loading && viralCount > 0 && <span className="ms-chip"><Flame size={10} /> {viralCount} viral</span>}
           </div>
-          <div style={{ color: "var(--text-dim)", fontSize: 10, marginTop: 2, fontFamily: "var(--font-mono), monospace" }}>
+          <div className="ms-sub">
             {loading
               ? scanLog[scanLog.length - 1] || "Initializing..."
               : enriching
                 ? "Fetching token names + images..."
                 : lastScan
-                  ? `${lastScan} · ${trends.length} signals · ${countdownDisplay}`
-                  : "Elon · Trump · TikTok · YouTube · Reddit · Pump.fun"}
+                  ? `${lastScan} · ${trends.length} signals · next in ${countdownDisplay}`
+                  : "Social + celebrity + Pump.fun signals"}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-          <button
-            type="button"
-            className="wx-btn"
-            onClick={() => setAutoScan((v) => !v)}
-            style={{ fontSize: 10, color: autoScan ? "var(--win)" : "var(--text-muted)" }}
-          >
-            AUTO {autoScan ? "ON" : "OFF"}
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button type="button" className={`sg-btn${autoScan ? " on" : ""}`} onClick={() => setAutoScan((v) => !v)}>
+            Auto {autoScan ? "on" : "off"}
           </button>
-          <button
-            type="button"
-            className="wx-btn primary"
-            onClick={() => fetchTrends()}
-            disabled={loading}
-          >
-            {loading ? "SCANNING…" : "SCAN NOW"}
+          <button type="button" className="sg-btn primary" onClick={() => fetchTrends()} disabled={loading}>
+            {loading ? "Scanning…" : "Scan now"}
           </button>
         </div>
       </div>
@@ -1264,7 +1234,9 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
                       ? "No fresh tokens yet"
                       : filter === "ultra"
                         ? "No top setups yet"
-                        : "Hunting…"}
+                        : filter === "ideas"
+                          ? "No keyword ideas"
+                          : "No verified tokens yet"}
           </strong>
           {error ? (
             <>
@@ -1278,7 +1250,12 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
             </>
           ) : filter !== "all" ? (
             <button type="button" className="wx-btn" onClick={() => setFilter("all")}>Show all tokens</button>
-          ) : null}
+          ) : (
+            <>
+              <span>Nothing on-chain matched this scan. {trends.length} keyword ideas have no token yet.</span>
+              <button type="button" className="sg-btn" onClick={() => setFilter("ideas")}>View ideas</button>
+            </>
+          )}
         </div>
       )}
 
@@ -1432,11 +1409,11 @@ export default function MemeScanner({ onSelectMeme, selectedMeme }: Props) {
       {trends.length > 0 && (
         <div className="wx-scan-footer">
           <div style={{ display: "flex", gap: 8 }}>
-            <span style={{ color: "rgba(255,215,0,0.45)" }}>hot {ultraCount}</span>
-            <span style={{ color: "rgba(255,215,0,0.45)" }}>celeb {celebCount}</span>
-            <span style={{ color: "rgba(34,197,94,0.45)" }}>fresh {freshCount}</span>
-            <span style={{ color: "rgba(255,102,0,0.45)" }}>viral {viralCount}</span>
-            <span style={{ color: "rgba(34,197,94,0.4)" }}>safe {trends.filter((t) => t.rugRisk === "low").length}</span>
+            <span style={{ color: "var(--text-dim)" }}>hot {ultraCount}</span>
+            <span style={{ color: "var(--text-dim)" }}>celeb {celebCount}</span>
+            <span style={{ color: "var(--text-dim)" }}>fresh {freshCount}</span>
+            <span style={{ color: "var(--text-dim)" }}>viral {viralCount}</span>
+            <span style={{ color: "var(--text-dim)" }}>safe {trends.filter((t) => t.rugRisk === "low").length}</span>
           </div>
           <span style={{ color: autoScan ? "rgba(34,197,94,0.5)" : "var(--text-dim)" }}>
             {autoScan ? `AUTO ${countdownDisplay}` : "AUTO OFF"}

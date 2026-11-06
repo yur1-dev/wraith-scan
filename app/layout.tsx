@@ -7,6 +7,7 @@ import "./wraith-ui.css";
 import "./wraith-polish.css";
 import "./wraith-responsive.css";
 import "./wraith-mobile.css";
+import "./wraith-compact.css";
 import WalletProvider from "@/components/WalletProvider";
 import BootSplash from "@/components/BootSplash";
 import FcmLink from "@/components/FcmLink";

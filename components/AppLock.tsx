@@ -45,8 +45,31 @@ function save(v: Stored | null) {
 }
 const rand = (n: number) => crypto.getRandomValues(new Uint8Array(n));
 
+// Inside the Android app the phone's own fingerprint / face prompt is used (Capacitor biometric plugin). A WebAuthn
+// prompt does not exist inside an app window, which is why this was dead there before.
+type BioPlugin = {
+  checkBiometry: () => Promise<{ isAvailable: boolean }>;
+  authenticate: (o?: Record<string, unknown>) => Promise<void>;
+};
+function nativeBio(): BioPlugin | null {
+  try {
+    const c = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean; Plugins?: { BiometricAuth?: BioPlugin } } }).Capacitor;
+    return c?.isNativePlatform?.() && c.Plugins?.BiometricAuth ? c.Plugins.BiometricAuth : null;
+  } catch { return null; }
+}
+async function nativeVerify(reason: string): Promise<boolean> {
+  const p = nativeBio();
+  if (!p) return false;
+  try {
+    await p.authenticate({ reason, cancelTitle: "Use PIN", allowDeviceCredential: true, androidTitle: "Unlock Wraith", androidSubtitle: reason });
+    return true;
+  } catch { return false; }
+}
+
 export function appLockSupported() {
-  return typeof window !== "undefined" && !!window.PublicKeyCredential && !!navigator.credentials;
+  if (typeof window === "undefined") return false;
+  if (nativeBio()) return true;
+  return !!window.PublicKeyCredential && !!navigator.credentials;
 }
 
 async function verify(id: string) {
@@ -64,6 +87,14 @@ async function verify(id: string) {
 
 export async function enableAppLock(): Promise<boolean> {
   if (!appLockSupported()) throw new Error("This device does not support biometric lock.");
+  const native = nativeBio();
+  if (native) {
+    const info = await native.checkBiometry().catch(() => ({ isAvailable: false }));
+    if (!info.isAvailable) throw new Error("Set up a fingerprint, face or screen lock in your phone's settings first.");
+    if (!(await nativeVerify("Confirm it is you to turn on unlock"))) return false; // prove it works before turning it on
+    save({ id: "native", on: true });
+    return true;
+  }
   const cred = (await navigator.credentials.create({
     publicKey: {
       rp: { name: "Wraith", id: location.hostname },
@@ -93,6 +124,7 @@ export function biometricReady(): boolean {
 export async function biometricVerify(): Promise<boolean> {
   const s = load();
   if (!s?.on) return false;
+  if (s.id === "native") return nativeVerify("Unlock Wraith");
   // The page asks the phone for the fingerprint before React loads (see layout), so the prompt is already up.
   const w = window as unknown as { __wxBio?: Promise<Credential | null> };
   const early = w.__wxBio;

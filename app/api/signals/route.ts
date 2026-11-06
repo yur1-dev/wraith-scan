@@ -13,7 +13,7 @@ import { getSolUsd, IGNORED_MINTS, IGNORED_SYMBOLS } from "@/lib/marketProviders
 import { evmCandidates } from "@/lib/evmScan";
 import { dexCandidates, jupiterCandidates, jupiterEnrich, pumpCandidates, type Candidate, type ScanMeta } from "@/lib/scannerSources";
 import { callGet } from "@/lib/internalCall";
-import { annotateFeatures, patternLabel, retrainIfDue, type Annotated } from "@/lib/signalLearning";
+import { annotateFeatures, patternLabel, type Annotated } from "@/lib/signalLearning";
 import { edge } from "@/lib/edge";
 
 export type SignalTier = "HOT" | "WATCH";
@@ -45,7 +45,6 @@ async function persistOnce(built: Built): Promise<void> {
   persisted = built;
   await recordSignals(built.records).catch(() => undefined);
   await refreshCalls().catch(() => undefined);
-  void retrainIfDue().catch(() => undefined); // learns from matured calls, at most every 6h
 }
 const HOT_MIN = Number(process.env.SIGNAL_HOT_MIN) || 72;
 

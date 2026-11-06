@@ -11,7 +11,7 @@ interface PatternStat { id: string; label: string; hint: string; trap: boolean; 
 interface Learning {
   model: null | {
     n: number; wins: number; base: number; trainedAt: number; active: boolean;
-    holdout: { n: number; auc: number; baseRate: number; topQuartileRate: number; bottomQuartileRate: number };
+    holdout: { n: number; auc: number; baseRate: number; topQuartileRate: number; bottomQuartileRate: number; folds?: number[] };
     top: { name: string; w: number }[];
   };
   patterns: PatternStat[];
@@ -55,14 +55,14 @@ export default function PatternsPanel({ signals, onOpen }: { signals: Sig[]; onO
               <span>{m ? `${m.wins.toLocaleString()} reached 2x (${pct(m.base)}) · retrained ${ago(m.trainedAt)}` : "Not enough finished calls yet"}</span>
             </div>
             <div className="pt-card">
-              <FlaskConical size={15} /><small>Test on unseen calls</small>
+              <FlaskConical size={15} /><small>Score on unseen calls</small>
               <b>{m ? `${m.holdout.auc.toFixed(2)} AUC` : "n/a"}</b>
-              <span>{m ? `0.50 is a coin flip. Top quarter of picks hit ${pct(m.holdout.topQuartileRate, 0)} vs ${pct(m.holdout.bottomQuartileRate, 0)} for the bottom (${m.holdout.n} newest calls).` : "Needs 150+ finished calls"}</span>
+              <span>{m ? `0.50 is a coin flip. Tested on later calls it never trained on: the top quarter of picks hit ${pct(m.holdout.topQuartileRate, 0)} vs ${pct(m.holdout.bottomQuartileRate, 0)} for the bottom (${m.holdout.n} calls, ${m.holdout.folds?.length ?? 1} rounds).` : "Needs 300+ finished calls"}</span>
             </div>
             <div className="pt-card">
               <Target size={15} /><small>Model status</small>
               <b className={m?.active ? "ok" : "off"}>{m?.active ? "Active" : "Learning"}</b>
-              <span>{m?.active ? "Beats chance on unseen calls, so it nudges scores by up to ±6 and shows win odds." : "Not better than chance yet, so it is NOT changing any scores. It retrains every 6 hours as calls finish."}</span>
+              <span>{m?.active ? "Beats chance on later calls it never saw, so it nudges scores by up to ±6 and shows win odds. The edge is modest: treat it as a tilt, not a guarantee." : "Not better than chance yet, so it is NOT changing any scores. It retrains daily as calls finish."}</span>
             </div>
           </div>
 
@@ -74,7 +74,7 @@ export default function PatternsPanel({ signals, onOpen }: { signals: Sig[]; onO
 
           <div className="pt-table" role="table" aria-label="Pattern track record">
             <div className="pt-row head" role="row">
-              <span>Pattern</span><span>Past calls</span><span>Reached 2x</span><span>vs average</span><span>Now</span>
+              <span>Pattern</span><span>Calls</span><span>Hit 2x</span><span>vs avg</span><span>Now</span>
             </div>
             {data.patterns.map((p) => {
               const n = nowCount(p.id);
@@ -85,7 +85,7 @@ export default function PatternsPanel({ signals, onOpen }: { signals: Sig[]; onO
                   <button type="button" className="pt-row" role="row" onClick={() => setOpen(open === p.id ? null : p.id)} aria-expanded={open === p.id}>
                     <span className="pt-name">{p.trap ? <ShieldAlert size={13} /> : null}{p.label}<em>{p.hint}</em></span>
                     <span>{p.calls.toLocaleString()}</span>
-                    <span>{p.rate === null ? <i className="mut">needs 15+ calls</i> : pct(p.rate)}</span>
+                    <span>{p.rate === null ? <i className="mut" title="Needs 15 or more finished calls before a hit rate means anything">too few</i> : pct(p.rate)}</span>
                     <span className={good ? "up" : bad ? "down" : ""}>{p.lift === null ? "n/a" : `${p.lift.toFixed(2)}×`}</span>
                     <span className={n ? "now" : "mut"}>{n || "–"}</span>
                   </button>

@@ -13,7 +13,7 @@ const MEMORY_MS = 10 * 60_000;
 export const MAX_ADJ = 6;
 
 export interface LearningSnapshot {
-  model: Omit<SignalModel, "mean" | "std" | "w" | "names"> | null;
+  model: Omit<SignalModel, "mean" | "std" | "w" | "names" | "trees"> | null;
   patterns: PatternStat[];
   coverage: { calls: number; withIntel: number; withIntelPct: number };
   at: number;
@@ -54,7 +54,7 @@ export async function retrainIfDue(force = false): Promise<void> {
         .collection("signal_calls")
         .find({ engine: 2, spottedMcap: { $gt: 0 }, spottedAt: { $lt: Date.now() - MATURE_MS } }, { projection: { features: 1, spottedAt: 1, spottedMcap: 1, peakMcap: 1, lastMcap: 1 } })
         .sort({ spottedAt: -1 })
-        .limit(12_000)
+        .limit(6_000)
         .toArray();
       const rows: TrainRow[] = docs.map((d) => ({
         features: (d.features as Features) ?? {},
@@ -92,7 +92,7 @@ export async function annotateFeatures(list: Features[]): Promise<Annotated[]> {
 
 export async function learningSnapshot(): Promise<LearningSnapshot> {
   const m = await load();
-  const model = m.model ? (({ mean: _mean, std: _std, w: _w, names: _names, ...rest }) => rest)(m.model) : null;
+  const model = m.model ? (({ mean: _mean, std: _std, w: _w, names: _names, trees: _trees, ...rest }) => rest)(m.model) : null;
   // pattern labels exist even before the first training run
   const patterns = m.patterns.length ? m.patterns : PATTERNS.map((p) => ({ id: p.id, label: p.label, hint: p.hint, trap: p.id.startsWith("trap-"), calls: 0, wins: 0, rate: null, lift: null }));
   return { model, patterns, coverage: m.coverage, at: Date.now() };

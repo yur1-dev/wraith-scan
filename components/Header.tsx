@@ -2366,7 +2366,7 @@ function SecurityPanel() {
       if (!(await enableAppLock())) setBioError("Not enabled");
       else touchLastActive();
     } catch (e) {
-      setBioError((e as { name?: string })?.name === "NotAllowedError" ? "Cancelled" : "Set a screen lock on your phone first");
+      setBioError((e as { name?: string })?.name === "NotAllowedError" ? "Cancelled" : (e instanceof Error && e.message ? e.message : "Set a screen lock on your phone first"));
     } finally {
       setBioBusy(false);
     }
@@ -3125,8 +3125,7 @@ function SecurityPanel() {
               lineHeight: 1.5,
             }}
           >
-            PIN is hashed with SHA-256 and stored locally. It only locks this
-            browser.
+            Same PIN on all your devices. It is stored only as a salted hash and locks Wraith when you leave it for a while.
           </p>
         </div>
       </div>

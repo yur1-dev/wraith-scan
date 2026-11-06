@@ -88,7 +88,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         style={{
           position: "fixed",
           left: "50%",
-          bottom: "calc(20px + env(safe-area-inset-bottom, 0px) + var(--wx-tabbar-h, 0px))",
+          bottom: "calc(20px + var(--sai-bottom) + var(--wx-tabbar-h, 0px))",
           transform: "translateX(-50%)",
           zIndex: 9999,
           display: "flex",

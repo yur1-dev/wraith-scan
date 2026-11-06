@@ -256,7 +256,7 @@
 
 /* ── mobile ─────────────────────────────────────────────────────────── */
 .wx-mobile-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.wx-mobile-nav { flex: 0 0 auto; display: flex; border-top: 1px solid var(--border); background: var(--surface); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.wx-mobile-nav { flex: 0 0 auto; display: flex; border-top: 1px solid var(--border); background: var(--surface); padding-bottom: var(--sai-bottom); }
 .wx-mobile-nav button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 4px 8px; border: 0; border-top: 2px solid transparent; background: transparent; color: var(--text-dim); font-size: 10px; font-weight: 700; cursor: pointer; }
 .wx-mobile-nav button.on { color: var(--accent-text); border-top-color: var(--accent); background: rgba(var(--accent-rgb), 0.06); }
 

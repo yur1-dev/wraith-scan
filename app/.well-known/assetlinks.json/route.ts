@@ -13,8 +13,13 @@ const BUILT_IN = [
 
 export function GET() {
   const prints = [...new Set([...BUILT_IN, ...(process.env.ANDROID_SHA256 ?? "").split(",").map((s) => s.trim()).filter(Boolean)])];
+  // handle_all_urls: open wraith.farm links in the app. get_login_creds: let the app use passkeys / saved sign-ins for this domain.
+  const pkg = process.env.ANDROID_PACKAGE ?? "farm.wraith.app";
   const body = prints.length
-    ? [{ relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "android_app", package_name: process.env.ANDROID_PACKAGE ?? "farm.wraith.app", sha256_cert_fingerprints: prints } }]
+    ? ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"].map((relation) => ({
+        relation: [relation],
+        target: { namespace: "android_app", package_name: pkg, sha256_cert_fingerprints: prints },
+      }))
     : [];
   return NextResponse.json(body, { headers: { "Cache-Control": "public, max-age=3600, s-maxage=3600" } });
 }

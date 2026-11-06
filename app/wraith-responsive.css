@@ -14,7 +14,7 @@ pre, code { overflow-wrap: anywhere; }
 .wraith-dashboard > *, .profile-shell > *, .profile-body-main > * { min-width: 0; }
 
 /* notches / cutouts */
-.wraith-app-header { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+.wraith-app-header { padding-left: max(12px, var(--sai-left)); padding-right: max(12px, var(--sai-right)); }
 
 /* ── Header search (all widths) ─────────────────────────────────────── */
 .wx-cs-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -30,7 +30,7 @@ pre, code { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .profile-shell { width: calc(100% - 24px) !important; } }
 @media (max-width: 360px) { .profile-shell { width: calc(100% - 16px) !important; } }
 @media (max-width: 767px) {
-  .profile-page { padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
+  .profile-page { padding-bottom: calc(86px + var(--sai-bottom)); }
   .profile-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .profile-main-grid { grid-template-columns: minmax(0, 1fr) !important; }
 }
@@ -67,7 +67,7 @@ pre, code { overflow-wrap: anywhere; }
 .trader-card-open.is-empty { gap: 6px; }
 .trader-card-skeleton { min-height: 190px; animation: wx-shimmer 1.4s ease-in-out infinite; }
 @media (max-width: 640px) { .traders-shell { width: calc(100% - 24px); } }
-@media (max-width: 767px) { .traders-shell { padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)); } }
+@media (max-width: 767px) { .traders-shell { padding-bottom: calc(90px + var(--sai-bottom)); } }
 
 /* ── Market: side rail never squeezes the board on small/mid screens ── */
 @media (max-width: 1099px) {
@@ -94,9 +94,9 @@ pre, code { overflow-wrap: anywhere; }
     width: auto !important; max-width: none !important; max-height: none !important; height: 100dvh !important;
     border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: var(--bg, #0c0c0d) !important;
     display: flex !important; flex-direction: column; overflow-y: auto !important; z-index: 100000 !important;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: var(--sai-bottom);
   }
-  .wx-cs-tabs { padding-top: max(12px, env(safe-area-inset-top, 0px)) !important; }
+  .wx-cs-tabs { padding-top: max(12px, var(--sai-top)) !important; }
   .wx-cs-inputrow {
     order: 99; position: sticky; bottom: 0; margin: auto 12px 12px !important; margin-top: auto !important;
     border: 1px solid var(--border-strong, var(--border)) !important; border-radius: 999px; background: var(--surface-2) !important; padding: 8px 10px 8px 16px !important;

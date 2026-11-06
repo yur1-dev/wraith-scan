@@ -12,7 +12,7 @@
 /* ── Token page: sticky Buy / Sell bar + trade sheet ─────────────────── */
 .wx-mbar {
   flex: 0 0 auto; display: flex; align-items: stretch; gap: 8px;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  padding: 8px 10px calc(8px + var(--sai-bottom));
   background: var(--bg, #0c0c0d); border-top: 1px solid var(--border);
 }
 .wx-mbar button { font-family: inherit; cursor: pointer; border: 0; -webkit-tap-highlight-color: transparent; }
@@ -34,7 +34,7 @@
 .wx-sheet {
   position: relative; width: 100%; max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain;
   border-radius: 20px 20px 0 0; border-top: 1px solid var(--border); background: var(--bg, #0c0c0d);
-  padding: 50px 0 env(safe-area-inset-bottom, 0px); animation: wx-sheet-up .24s cubic-bezier(.2, .8, .2, 1);
+  padding: 50px 0 var(--sai-bottom); animation: wx-sheet-up .24s cubic-bezier(.2, .8, .2, 1);
 }
 .wx-sheet aside { border-left: 0 !important; height: auto !important; overflow: visible !important; }
 .wx-sheet-body { display: block; min-height: 280px; }
@@ -51,7 +51,7 @@
 }
 .wx-spot-sheet {
   position: relative; width: 100%; max-height: 80dvh; overflow-y: auto; overscroll-behavior: contain;
-  padding: 22px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  padding: 22px 16px calc(18px + var(--sai-bottom));
   border-radius: 20px 20px 0 0; border-top: 1px solid rgba(255, 123, 61, .5); background: #0e0e12;
   box-shadow: 0 -18px 50px rgba(0, 0, 0, .6); animation: wx-sheet-up .22s cubic-bezier(.2, .8, .2, 1);
 }
@@ -308,7 +308,7 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   .wx-notif-back { background: rgba(0, 0, 0, .6); display: flex; align-items: flex-end; }
   .wx-notif {
     position: relative; top: auto; right: auto; width: 100%; max-height: 82dvh; border-radius: 20px 20px 0 0;
-    border-width: 1px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); animation: wx-sheet-up .24s cubic-bezier(.2, .8, .2, 1);
+    border-width: 1px 0 0; padding-bottom: var(--sai-bottom); animation: wx-sheet-up .24s cubic-bezier(.2, .8, .2, 1);
   }
   .wx-notif-grab { display: block; width: 40px; height: 4px; margin: 8px auto 0; border-radius: 4px; background: rgba(255, 255, 255, .22); }
   .wx-notif header { padding-top: 10px; }
@@ -438,7 +438,7 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   /* nav: content scrolls under a soft blur + fade instead of being cut off by a hard edge */
   .wx-tabbar::before {
     content: ""; position: fixed; left: 0; right: 0; bottom: 0; z-index: -1; pointer-events: none;
-    height: calc(104px + env(safe-area-inset-bottom, 0px));
+    height: calc(104px + var(--sai-bottom));
     background: linear-gradient(to top, rgba(9,9,10,.94) 0%, rgba(9,9,10,.62) 48%, rgba(9,9,10,0) 100%);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
     -webkit-mask-image: linear-gradient(to top, #000 52%, transparent 100%); mask-image: linear-gradient(to top, #000 52%, transparent 100%);
@@ -461,7 +461,7 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
   box-shadow: 0 24px 80px rgba(0,0,0,.6); transition: transform .12s ease-out; user-select: none; -webkit-user-drag: none;
 }
 .wx-photo-close {
-  position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px; width: 40px; height: 40px; border-radius: 50%;
+  position: absolute; top: calc(14px + var(--sai-top)); right: 14px; width: 40px; height: 40px; border-radius: 50%;
   display: grid; place-items: center; color: #fff; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14); cursor: pointer;
 }
 @keyframes wx-photo-in { from { opacity: 0; } to { opacity: 1; } }
@@ -542,7 +542,7 @@ html.wx-prelock #wx-boot { display: grid !important; opacity: 1 !important; }
    the end of each list gets its own bottom padding instead of an empty slab above the nav */
 @media (max-width: 767px) {
   .wx-page:not(.wraith-token-page) { padding-bottom: 0 !important; }
-  .wx-board-body, .wx-scan-list, .wx-wins, .wx-wins-wrap, .wx-center { padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px)) !important; }
+  .wx-board-body, .wx-scan-list, .wx-wins, .wx-wins-wrap, .wx-center { padding-bottom: calc(104px + var(--sai-bottom)) !important; }
   .wx-scanner-layout { margin-bottom: 0 !important; border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important; border-bottom: 0 !important; }
   .wx-scanner-main { border-radius: 0 !important; }
 }

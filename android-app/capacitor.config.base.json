@@ -22,7 +22,7 @@
     "allowMixedContent": false,
     "backgroundColor": "#0c0c0d",
     "webContentsDebuggingEnabled": false,
-    "adjustMarginsForEdgeToEdge": "force"
+    "adjustMarginsForEdgeToEdge": "disable"
   },
   "plugins": {
     "SplashScreen": {
@@ -38,8 +38,8 @@
     },
     "StatusBar": {
       "style": "DARK",
-      "backgroundColor": "#0c0c0d",
-      "overlaysWebView": false
+      "overlaysWebView": true,
+      "backgroundColor": "#00000000"
     }
   }
 }

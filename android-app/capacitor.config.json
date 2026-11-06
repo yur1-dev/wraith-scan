@@ -21,7 +21,8 @@
   "android": {
     "allowMixedContent": false,
     "backgroundColor": "#0c0c0d",
-    "webContentsDebuggingEnabled": false
+    "webContentsDebuggingEnabled": false,
+    "adjustMarginsForEdgeToEdge": "force"
   },
   "plugins": {
     "SplashScreen": {

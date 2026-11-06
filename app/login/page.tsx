@@ -9,6 +9,7 @@ import { CallsTable, ChartReal, Coin, LiveBoard, fmtUsd, useLandingData, xf } fr
 import "@/components/landing/landing.css";
 import { useWraithSession } from "@/components/SessionProvider";
 import EmailLogin from "@/components/EmailLogin";
+import OpenInApp from "@/components/OpenInApp";
 import { PRIVY_WALLETS_ENABLED } from "@/lib/privyConfig";
 
 const CHAINS = [
@@ -108,6 +109,7 @@ function LoginInner() {
 
   return (
     <div className="wl2">
+      <OpenInApp />
       {/* The app, blurred behind the card. Real, public call data only. */}
       <div className="wl2-bg" aria-hidden="true">
         <div className="wl2-top">
@@ -144,6 +146,12 @@ function LoginInner() {
               if (status === "authenticated") {
                 window.location.reload();
                 return;
+              }
+              // In the Android app, Google opens in Chrome. Mark the address so Chrome knows to send you back to the app.
+              if (/WraithApp/.test(navigator.userAgent)) {
+                const u = new URL(window.location.href);
+                u.searchParams.set("app", "1");
+                window.history.replaceState(null, "", `${u.pathname}${u.search}`);
               }
               login();
             }}

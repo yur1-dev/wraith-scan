@@ -12,6 +12,7 @@ import WalletProvider from "@/components/WalletProvider";
 import BootSplash from "@/components/BootSplash";
 import NativePush from "@/components/NativePush";
 import NativeLinks from "@/components/NativeLinks";
+import OpenInApp from "@/components/OpenInApp";
 import FcmLink from "@/components/FcmLink";
 import SwRegister from "@/components/SwRegister";
 import { WraithTierProvider } from "@/hooks/useWraithTier";
@@ -92,6 +93,7 @@ export default function RootLayout({
         <FcmLink />
         <NativePush />
         <NativeLinks />
+        <OpenInApp />
         <SwRegister />
         <PullToRefresh />
         <MobileWebGate />

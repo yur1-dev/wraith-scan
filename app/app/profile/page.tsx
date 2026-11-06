@@ -857,6 +857,12 @@ export default function ProfilePage() {
     }
     setNotice("");
     setXBusy(true);
+    // In the Android app, X opens in Chrome. Mark the address so Chrome knows to send you back to the app afterwards.
+    if (/WraithApp/.test(navigator.userAgent)) {
+      const u = new URL(window.location.href);
+      u.searchParams.set("app", "1");
+      window.history.replaceState(null, "", `${u.pathname}${u.search}`);
+    }
     api.link(); // sends you to X to approve, then back here
     window.setTimeout(() => setXBusy(false), 15_000); // never leave the button stuck if the redirect did not start
   };

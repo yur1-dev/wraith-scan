@@ -8,7 +8,6 @@ import ChainLogo from "@/components/ChainLogo";
 import { CallsTable, ChartReal, Coin, LiveBoard, fmtUsd, useLandingData, xf } from "@/components/landing/Mocks";
 import "@/components/landing/landing.css";
 import { useWraithSession } from "@/components/SessionProvider";
-import OpenInApp from "@/components/OpenInApp";
 
 const CHAINS = [
   ["solana", "Solana"], ["base", "Base"], ["ethereum", "Ethereum"], ["bsc", "BNB"], ["monad", "Monad"], ["arc", "Arc"], ["robinhood", "Robinhood"],
@@ -107,7 +106,6 @@ function LoginInner() {
 
   return (
     <div className="wl2">
-      <OpenInApp />
       {/* The app, blurred behind the card. Real, public call data only. */}
       <div className="wl2-bg" aria-hidden="true">
         <div className="wl2-top">

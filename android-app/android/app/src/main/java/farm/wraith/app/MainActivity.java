@@ -64,7 +64,8 @@ public class MainActivity extends BridgeActivity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri url = request.getUrl();
                 String host = url.getHost() == null ? "" : url.getHost();
-                if (host.equals("accounts.google.com") || host.endsWith(".accounts.google.com")) {
+                if (host.equals("accounts.google.com") || host.endsWith(".accounts.google.com")
+                    || host.equals("x.com") || host.endsWith(".x.com") || host.equals("twitter.com") || host.endsWith(".twitter.com")) {
                     CustomTabsIntent tab = new CustomTabsIntent.Builder()
                         .setDefaultColorSchemeParams(new CustomTabColorSchemeParams.Builder()
                             .setToolbarColor(Color.parseColor("#0C0C0D")).build())

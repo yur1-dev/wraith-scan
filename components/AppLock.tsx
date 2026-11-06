@@ -53,8 +53,10 @@ type BioPlugin = {
 };
 function nativeBio(): BioPlugin | null {
   try {
-    const c = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean; Plugins?: { BiometricAuth?: BioPlugin } } }).Capacitor;
-    return c?.isNativePlatform?.() && c.Plugins?.BiometricAuth ? c.Plugins.BiometricAuth : null;
+    const c = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean; Plugins?: Record<string, { checkBiometry: () => Promise<{ isAvailable: boolean }>; internalAuthenticate: (o?: Record<string, unknown>) => Promise<void> } | undefined> } }).Capacitor;
+    const n = c?.isNativePlatform?.() ? c.Plugins?.BiometricAuthNative : undefined;
+    if (!n) return null;
+    return { checkBiometry: () => n.checkBiometry(), authenticate: (o) => n.internalAuthenticate(o) };
   } catch { return null; }
 }
 async function nativeVerify(reason: string): Promise<boolean> {

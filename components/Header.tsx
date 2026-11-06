@@ -2843,7 +2843,8 @@ function SecurityPanel() {
           </div>
         )}
 
-        <Row
+        {typeof navigator !== "undefined" && !/WraithApp/.test(navigator.userAgent) && (
+          <Row
           icon={Fingerprint}
           label="Passkey"
           enrolled={passkeyEnrolled}
@@ -2853,6 +2854,7 @@ function SecurityPanel() {
           onDisable={removePasskey}
           enableLabel="Add"
         />
+        )}
       </div>
 
       <div style={{ borderTop: "1px solid #1a1a1a" }} />

@@ -99,6 +99,7 @@ export default function Home() {
               {v.label}
             </button>
           ))}
+          <button type="button" data-view="traders" onClick={() => router.push("/app/traders")} title="Rankings and the traders you follow">Traders</button>
           <span className="wx-subnav-hint">{VIEWS.find((v) => v.key === view)?.hint}</span>
         </div>
       </nav>

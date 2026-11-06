@@ -27,6 +27,22 @@ const HOVER_DELAY_MS = 100;
 const TIMEFRAMES = ["1m", "5m", "1h"] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
 
+/** Readable price for any size: 0.0000612, 0.0₅1234 style for micro-caps, plain for normal ones. */
+function fmtPrice(p: number): string {
+  if (!Number.isFinite(p) || p === 0) return "0";
+  const a = Math.abs(p);
+  if (a >= 1000) return p.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (a >= 1) return p.toFixed(2);
+  if (a >= 0.01) return p.toFixed(4);
+  const zeros = Math.floor(-Math.log10(a)) - 1;
+  if (zeros >= 4) {
+    const sub = String(zeros).split("").map((d) => "₀₁₂₃₄₅₆₇₈₉"[Number(d)]).join("");
+    const digits = a.toFixed(zeros + 4).replace(/^0\.0*/, "").slice(0, 4);
+    return `0.0${sub}${digits}`;
+  }
+  return p.toFixed(zeros + 4);
+}
+
 function sanitize(raw: Candle[]): Candle[] {
   if (!raw.length) return [];
   const sorted = [...raw].sort((a, b) => a.t - b.t);
@@ -73,13 +89,14 @@ function ChartSurface({
     const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#6b6b6b",
-        fontSize: 10,
+        textColor: "#8a8a8a",
+        fontSize: 11,
+        attributionLogo: false,
         fontFamily: MONO.fontFamily,
       },
       grid: {
         vertLines: { visible: false },
-        horzLines: { color: "#141414" },
+        horzLines: { color: "#161616" },
       },
       crosshair: {
         mode: CrosshairMode.Magnet,
@@ -88,13 +105,15 @@ function ChartSurface({
       },
       rightPriceScale: {
         borderVisible: false,
-        scaleMargins: { top: 0.12, bottom: 0.08 },
+        scaleMargins: { top: 0.1, bottom: 0.06 },
+        minimumWidth: 64,
       },
       timeScale: {
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 3,
+        rightOffset: 4,
+        barSpacing: 6,
       },
       handleScroll: false,
       handleScale: false,
@@ -107,6 +126,11 @@ function ChartSurface({
       borderVisible: false,
       wickUpColor: C.green,
       wickDownColor: C.red,
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineStyle: 2,
+      priceLineColor: "#444",
+      priceFormat: { type: "custom", minMove: 1e-12, formatter: fmtPrice },
     });
 
     const ro = new ResizeObserver((entries) => {
@@ -137,7 +161,9 @@ function ChartSurface({
         close: c.c,
       }));
       seriesRef.current.setData(data);
-      chartRef.current?.timeScale().fitContent();
+      // With only a few candles, fitContent would stretch them into fat bars; keep them slim and pinned to the right.
+      if (data.length >= 40) chartRef.current?.timeScale().fitContent();
+      else chartRef.current?.timeScale().setVisibleLogicalRange({ from: data.length - 48, to: data.length + 3 });
       const last = candles[candles.length - 1];
       const first = candles[0];
       setLastPrice(last.c);
@@ -188,13 +214,13 @@ function ChartSurface({
                 onTfChange(f);
               }}
               style={{
-                background: tf === f ? "#1a1a1a" : "transparent",
+                background: tf === f ? "#222" : "transparent",
                 border: "none",
-                color: tf === f ? "#ddd" : "#555",
-                fontSize: 10,
-                fontWeight: tf === f ? 700 : 400,
-                padding: "3px 8px",
-                borderRadius: 3,
+                color: tf === f ? "#fff" : "#6a6a6a",
+                fontSize: 11.5,
+                fontWeight: tf === f ? 700 : 500,
+                padding: "4px 10px",
+                borderRadius: 6,
                 cursor: "pointer",
                 ...MONO,
               }}
@@ -206,18 +232,18 @@ function ChartSurface({
         {lastPrice !== null && (
           <span
             style={{
-              fontSize: 11,
+              fontSize: 13,
               fontWeight: 700,
               color: up ? C.green : C.red,
               ...MONO,
             }}
           >
-            ${lastPrice < 0.01 ? lastPrice.toFixed(9) : lastPrice.toFixed(4)}
+            ${fmtPrice(lastPrice)}
           </span>
         )}
       </div>
 
-      <div style={{ width: "100%", height: 210, position: "relative" }}>
+      <div style={{ width: "100%", height: 240, position: "relative" }}>
         <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
 
         {!hasData && (
@@ -244,27 +270,6 @@ function ChartSurface({
           </div>
         )}
 
-        {/* TradingView attribution badge, bottom-left, like Telemetry's */}
-        <div
-          style={{
-            position: "absolute",
-            left: 4,
-            bottom: 2,
-            width: 20,
-            height: 20,
-            borderRadius: "50%",
-            background: "#111",
-            border: "1px solid #222",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 9,
-            color: "#555",
-            ...MONO,
-          }}
-        >
-          TV
-        </div>
       </div>
     </div>
   );
@@ -598,11 +603,11 @@ export function TokenHoverPreview({
     <div
       onClick={(e) => e.stopPropagation()}
       style={{
-        width: 340,
-        padding: 12,
-        background: "#0a0a0a",
-        border: "1px solid #1c1c1c",
-        borderRadius: 8,
+        width: 380,
+        padding: 14,
+        background: "linear-gradient(180deg, #0f0f0f, #0a0a0a)",
+        border: "1px solid #232323",
+        borderRadius: 12,
         boxShadow: "0 20px 48px -16px rgba(0,0,0,0.85)",
       }}
     >
@@ -624,15 +629,15 @@ export function TokenHoverPreview({
           }}
         >
           <span
-            style={{ color: "#f0f0f0", fontSize: 13, fontWeight: 700, ...MONO }}
+            style={{ color: "#f5f5f5", fontSize: 15, fontWeight: 700, ...MONO }}
           >
             {symbol}
           </span>
           {name && (
             <span
               style={{
-                color: "#555",
-                fontSize: 10,
+                color: "#777",
+                fontSize: 11,
                 ...MONO,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -701,9 +706,9 @@ export function TokenHoverPreview({
           ["24H VOL", volume24h === undefined ? "?" : compactStat(volume24h)],
           ["24H", priceChange24h === undefined ? "?" : `${priceChange24h >= 0 ? "+" : ""}${priceChange24h.toFixed(1)}%`],
         ].map(([label, value]) => (
-          <div key={String(label)} style={{ minWidth: 0, padding: "7px 6px", borderRadius: 5, background: "#111", textAlign: "center" }}>
-            <div style={{ color: "#666", fontSize: 7, ...MONO }}>{label}</div>
-            <strong style={{ display: "block", overflow: "hidden", marginTop: 4, color: label === "24H" && typeof priceChange24h === "number" ? (priceChange24h >= 0 ? C.green : C.red) : "#ddd", fontSize: 9, textOverflow: "ellipsis", whiteSpace: "nowrap", ...MONO }}>{value}</strong>
+          <div key={String(label)} style={{ minWidth: 0, padding: "8px 6px", borderRadius: 8, background: "#131313", border: "1px solid #1c1c1c", textAlign: "center" }}>
+            <div style={{ color: "#777", fontSize: 8.5, letterSpacing: ".06em", ...MONO }}>{label}</div>
+            <strong style={{ display: "block", overflow: "hidden", marginTop: 5, color: label === "24H" && typeof priceChange24h === "number" ? (priceChange24h >= 0 ? C.green : C.red) : "#ddd", fontSize: 11.5, textOverflow: "ellipsis", whiteSpace: "nowrap", ...MONO }}>{value}</strong>
           </div>
         ))}
       </div>

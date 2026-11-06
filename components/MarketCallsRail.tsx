@@ -56,6 +56,7 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
   const [callouts, setCallouts] = useState<Callout[]>(warmCallouts ?? []);
   const [state, setState] = useState<"loading" | "ready" | "error">(warmCallouts ? "ready" : "loading");
   const [signedOut, setSignedOut] = useState(false);
+  const [fallback, setFallback] = useState(false);
   const [signals, setSignals] = useState<SigLite[]>(() => swrRead<SigLite[]>("rail:signals") ?? []);
   const { canUse: can } = useWraithTier();
   const canSignals = can("live_signals_view");
@@ -67,7 +68,14 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
       const res = await fetch("/api/callouts?following=1&limit=10", { cache: "no-store" });
       if (!res.ok) { setState((s) => (s === "ready" ? s : "error")); return; }
       const data: { callouts?: Callout[] } = await res.json();
-      const list = Array.isArray(data.callouts) ? data.callouts : [];
+      let list = Array.isArray(data.callouts) ? data.callouts : [];
+      let fb = false;
+      if (!list.length) {
+        // Nobody you follow has posted yet: show the latest community intel instead of an empty box.
+        const all = await fetch("/api/callouts?limit=8", { cache: "no-store" });
+        if (all.ok) { const d: { callouts?: Callout[] } = await all.json(); list = Array.isArray(d.callouts) ? d.callouts : []; fb = list.length > 0; }
+      }
+      setFallback(fb);
       setCallouts(list);
       swrWrite("rail:callouts", list);
       setState("ready");
@@ -115,7 +123,9 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
         ) : callouts.length === 0 ? (
           <p className="mc-empty">Nothing yet. Follow traders and their intel shows up here. <Link href="/app/traders">Find traders →</Link></p>
         ) : (
-          callouts.map((c) => {
+          <>
+          {fallback && <p className="mc-empty" style={{ paddingBottom: 4 }}>Nobody you follow has posted yet. Latest from the community:</p>}
+          {callouts.map((c) => {
             const m = c.mint ? meta[c.mint] : undefined;
             return (
               <button
@@ -141,7 +151,8 @@ export default function MarketCallsRail({ onSelectMeme, onOpenScanner }: { onSel
                 )}
               </button>
             );
-          })
+          })}
+          </>
         )}
       </section>
 

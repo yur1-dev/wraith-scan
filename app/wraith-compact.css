@@ -202,3 +202,35 @@ button.hc-act:hover { background: rgba(255, 255, 255, .06); color: var(--text); 
 .fi-replychip { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2, transparent); color: var(--text-muted); font-size: 12px; }
 .fi-replychip b { color: var(--text); }
 .fi-replychip button { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; }
+
+/* Community page: tighter cards and heading */
+.traders-shell { max-width: 1280px; }
+.traders-heading h1 { font-size: clamp(26px, 3vw, 34px); margin: 2px 0 4px; }
+.traders-heading p { margin: 0; font-size: 13px; }
+.tc-periods { margin-top: 10px; padding: 2px; border-radius: 10px; }
+.tc-periods button { padding: 6px 0; border-radius: 8px; font-size: 12px; }
+.trader-tabs { margin-top: 8px; }
+.trader-tabs button { padding: 5px 12px; font-size: 12px; }
+.tc { gap: 10px; padding: 12px; border-radius: 12px; }
+.tc-main { gap: 9px; }
+.tc-avatar { width: 34px; height: 34px; flex-basis: 34px; }
+.tc-id { gap: 3px; }
+.tc-id strong { font-size: 13.5px; }
+.tc-tags i { font-size: 9.5px; padding: 1px 6px; }
+.tc .trader-follow button, .tc .trader-follow a { padding: 6px 10px; font-size: 12px; min-height: 0; }
+.tc-pnl { gap: 3px; }
+.tc-pnl strong { font-size: 22px; }
+.tc-pnl small, .tc-gains small, .tc-foot small { font-size: 9.5px; }
+.tc-spark { height: 18px; }
+.tc .wr-radar { width: 64px !important; height: 64px !important; }
+.tc-gains { gap: 4px; }
+.tc-gains span { padding: 5px 8px; border-radius: 8px; gap: 1px; }
+.tc-gains b { font-size: 12px; }
+.tc-foot { padding-top: 8px; }
+.tc-foot b { font-size: 12.5px; }
+@media (min-width: 901px) {
+  .traders-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 10px !important; }
+}
+@media (min-width: 601px) and (max-width: 900px) {
+  .traders-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
+}

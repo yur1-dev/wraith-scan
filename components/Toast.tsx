@@ -88,7 +88,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         style={{
           position: "fixed",
           left: "50%",
-          bottom: 20,
+          bottom: "calc(20px + env(safe-area-inset-bottom, 0px) + var(--wx-tabbar-h, 0px))",
           transform: "translateX(-50%)",
           zIndex: 9999,
           display: "flex",
@@ -108,25 +108,25 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
-                background: "#0d0d0d",
-                border: `1px solid ${s.color}33`,
-                borderLeft: `3px solid ${s.color}`,
-                borderRadius: 8,
-                padding: "10px 14px",
-                boxShadow: "0 8px 24px -8px rgba(0,0,0,0.6)",
-                minWidth: 280,
-                maxWidth: 420,
+                background: `linear-gradient(90deg, ${s.color}1f, transparent 55%), rgba(20,20,22,.96)`,
+                backdropFilter: "blur(10px)",
+                border: "1px solid rgba(255,255,255,.09)",
+                borderRadius: 14,
+                padding: "11px 12px 11px 11px",
+                boxShadow: "0 14px 40px -12px rgba(0,0,0,.8)",
+                minWidth: 260,
+                maxWidth: "min(440px, calc(100vw - 32px))",
                 animation: "wraithToastIn 0.2s ease",
               }}
             >
-              <span style={{ color: s.color, fontSize: 13, flexShrink: 0 }}>
+              <span style={{ display: "grid", placeItems: "center", width: 26, height: 26, borderRadius: "50%", background: `${s.color}26`, color: s.color, fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
                 {s.icon}
               </span>
               <span
                 style={{
-                  color: "#ddd",
-                  fontSize: 11,
-                  ...MONO,
+                  color: "#ececec",
+                  fontSize: 13,
+                  fontWeight: 500,
                   flex: 1,
                   lineHeight: 1.4,
                 }}
@@ -145,8 +145,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                     color: s.color,
                     fontSize: 9,
                     ...MONO,
-                    padding: "4px 9px",
-                    borderRadius: 4,
+                    padding: "5px 11px",
+                    borderRadius: 8,
                     cursor: "pointer",
                     flexShrink: 0,
                   }}
@@ -159,8 +159,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 style={{
                   background: "transparent",
                   border: "none",
-                  color: "#555",
-                  fontSize: 12,
+                  color: "#777",
+                  fontSize: 18,
                   cursor: "pointer",
                   flexShrink: 0,
                   padding: 0,

@@ -229,9 +229,13 @@ export default function TokenBoard({ onSelectMeme }: { onSelectMeme: (meme: Meme
     if (closeTimer.current) clearTimeout(closeTimer.current);
     if (openTimer.current) clearTimeout(openTimer.current);
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const mx = e.clientX;
     openTimer.current = setTimeout(() => {
-      const left = rect.right + 14 + 340 < window.innerWidth ? rect.right + 14 : Math.max(8, rect.left - 354);
-      setHoverPreview({ token, top: Math.max(8, Math.min(rect.top - 20, window.innerHeight - 400)), left });
+      // sit right next to the pointer (the row itself spans the whole table, so anchoring to it put the card far away)
+      const W = 380;
+      const left = mx + 22 + W < window.innerWidth ? mx + 22 : Math.max(8, mx - W - 22);
+      const top = Math.max(8, Math.min(rect.top + rect.height / 2 - 150, window.innerHeight - 440));
+      setHoverPreview({ token, top, left });
     }, HOVER_DELAY_MS);
   }, []);
   const hoverLeave = useCallback(() => {

@@ -804,7 +804,8 @@ function CoinSearch({
   useEffect(() => {
     const h = () => {
       setOpen(true);
-      setTimeout(() => inputRef.current?.focus(), 60);
+      // on phones show the recents first; the keyboard opens when the box is tapped
+      if (!window.matchMedia("(hover: none) and (pointer: coarse)").matches) setTimeout(() => inputRef.current?.focus(), 60);
     };
     window.addEventListener("wraith:open-search", h);
     return () => window.removeEventListener("wraith:open-search", h);
@@ -1103,7 +1104,7 @@ function CoinSearch({
                     ? "Search saved traders..."
                     : "Search traders by name or @username..."
               }
-              autoFocus
+              autoFocus={typeof window !== "undefined" && !window.matchMedia("(hover: none) and (pointer: coarse)").matches}
               type="search"
               name="q"
               inputMode="search"
@@ -4068,11 +4069,8 @@ export default function Header({ onSelectMeme }: HeaderProps) {
       <MobileTabBar />
       <header className="wraith-app-header">
         {/* ── LEFT: branding ── */}
-        <Link
-          href="/app"
-          aria-label="WRAITH dashboard"
-          className="wraith-header-brand"
-        >
+        {isMobile ? (
+        <Link href="/app" aria-label="WRAITH dashboard" className="wraith-header-brand">
           <span
             style={{
               width: 28,
@@ -4108,6 +4106,47 @@ export default function Header({ onSelectMeme }: HeaderProps) {
             </span>
           )}
         </Link>
+        ) : (
+        <>
+        <span className="wraith-header-brand" aria-label="WRAITH" style={{ cursor: "default" }}>
+          <span
+            style={{
+              width: 28,
+              height: 28,
+              position: "relative",
+              flexShrink: 0,
+            }}
+          >
+            <Image
+              src="/logo.svg"
+              alt=""
+              fill
+              sizes="28px"
+              style={{
+                objectFit: "contain",
+                mixBlendMode: "screen",
+                filter: "drop-shadow(0 0 5px rgba(var(--accent-rgb),0.35))",
+              }}
+              priority
+            />
+          </span>
+          {!isMobile && (
+            <span
+              style={{
+                color: "#f5ede8",
+                fontSize: 16,
+                fontWeight: 900,
+                letterSpacing: ".22em",
+                lineHeight: 1,
+              }}
+            >
+              WRAITH
+            </span>
+          )}
+        </span>
+        <Link href="/app" className="wraith-discover" aria-label="Discover: back to the market">Discover</Link>
+        </>
+        )}
 
         <div
           style={{

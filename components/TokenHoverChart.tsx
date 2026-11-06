@@ -13,7 +13,7 @@ import {
 } from "lightweight-charts";
 import { Pencil, X, Check } from "lucide-react";
 import { C } from "@/lib/theme";
-import { getCandles, peekCandles, type Candle } from "@/lib/candleCache";
+import { getCandles, peekCandles, prefetchCandles, type Candle } from "@/lib/candleCache";
 import { quickPaperBuy, getPaperBalance } from "@/lib/paperTrading";
 import {
   getActivePreset,
@@ -177,20 +177,32 @@ function ChartSurface({
       applyData(cached);
     }
 
-    getCandles(contractAddress, tf).then((raw) => {
-      if (!alive) return;
-      const valid = sanitize(raw);
-      setLoading(false);
-      if (valid.length) {
-        setHasData(true);
-        applyData(valid);
-      } else if (!cached.length) {
-        setHasData(false);
-      }
-    });
+    if (!cached.length) { seriesRef.current?.setData([]); setHasData(false); }
+
+    const pull = (retry: boolean) =>
+      getCandles(contractAddress, tf).then((raw) => {
+        if (!alive) return;
+        const valid = sanitize(raw);
+        setLoading(false);
+        if (valid.length) {
+          setHasData(true);
+          applyData(valid);
+          // warm the other timeframes so switching is instant
+          TIMEFRAMES.forEach((f) => { if (f !== tf) prefetchCandles(contractAddress, f); });
+        } else if (retry) {
+          setLoading(true);
+          setTimeout(() => { if (alive) void pull(false); }, 1800);
+        } else if (!cached.length) {
+          setHasData(false);
+        }
+      });
+    void pull(true);
+    // keep the chart live while the card is open
+    const live = setInterval(() => { if (alive && !document.hidden) void pull(false); }, 15_000);
 
     return () => {
       alive = false;
+      clearInterval(live);
     };
   }, [contractAddress, tf]);
 

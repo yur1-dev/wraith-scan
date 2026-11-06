@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongoClient";
+import { getPrivySession } from "@/lib/privyAuth";
 
 type Trade = {
   id?: string;
@@ -138,7 +139,9 @@ export async function GET(
           .slice(0, 50)
       : [];
 
+    const viewer = await getPrivySession().catch(() => null);
     return NextResponse.json({
+      isSelf: !!viewer?.user?.id && viewer.user.id === profile.userId,
       trader: {
         userId: profile.userId,
         username: profile.username ?? null,

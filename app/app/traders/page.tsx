@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Users } from "lucide-react";
+import { LayoutGrid, List, Users } from "lucide-react";
 import Header from "@/components/Header";
 import TraderFollowButton from "@/components/TraderFollowButton";
 import PhotoViewer from "@/components/PhotoViewer";
@@ -38,6 +38,16 @@ const PERIODS: { key: Period; label: string; long: string }[] = [
   { key: "all", label: "All", long: "All-time" },
 ];
 
+function Ghost({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 64 80" aria-hidden="true">
+      <path d="M32 4C16 4 6 16 6 34v38l9-7 8 8 9-8 9 8 8-8 9 7V34C58 16 48 4 32 4Z" fill="currentColor" />
+      <ellipse cx="22" cy="34" rx="6" ry="3.2" fill="#000" opacity=".55" />
+      <ellipse cx="42" cy="34" rx="6" ry="3.2" fill="#000" opacity=".55" />
+    </svg>
+  );
+}
+
 function Spark({ curve }: { curve: number[] }) {
   if (curve.length < 2) return <svg className="tc-spark tone-flat" viewBox="0 0 100 28" preserveAspectRatio="none"><line x1="0" x2="100" y1="14" y2="14" /></svg>;
   const min = Math.min(...curve), max = Math.max(...curve);
@@ -59,6 +69,10 @@ export default function TradersPage() {
   const [sort, setSort] = useState<"pnl" | "active" | "open" | "following">("pnl");
   const [period, setPeriod] = useState<Period>("d7");
   const [viewer, setViewer] = useState<string | null>(null);
+  const [layout, setLayout] = useState<"grid" | "list">(() => {
+    try { return localStorage.getItem("wraith:traders-layout") === "list" ? "list" : "grid"; } catch { return "grid"; }
+  });
+  const pickLayout = (v: "grid" | "list") => { setLayout(v); try { localStorage.setItem("wraith:traders-layout", v); } catch { /* optional */ } };
   const { money } = useCash();
 
   const gain = (t: Trader, p: Period) => t.stats?.pnlSol[p] ?? (p === "all" ? t.profitSol : 0);
@@ -122,12 +136,18 @@ export default function TradersPage() {
           <span className="profile-eyebrow">WRAITH COMMUNITY</span>
           <h1>{periodMeta.long} ranking</h1>
           <p>Who is making money, and what they are good at.</p>
+          <div className="tc-bar">
           <div className="tc-periods" role="tablist" aria-label="Ranking period">
             {PERIODS.map((p) => (
               <button key={p.key} type="button" role="tab" aria-selected={period === p.key} className={period === p.key ? "on" : ""} onClick={() => setPeriod(p.key)}>
                 {p.label}
               </button>
             ))}
+          </div>
+          <div className="tc-layout" role="group" aria-label="Layout">
+            <button type="button" aria-label="Grid view" aria-pressed={layout === "grid"} className={layout === "grid" ? "on" : ""} onClick={() => pickLayout("grid")}><LayoutGrid size={15} /></button>
+            <button type="button" aria-label="List view" aria-pressed={layout === "list"} className={layout === "list" ? "on" : ""} onClick={() => pickLayout("list")}><List size={15} /></button>
+          </div>
           </div>
           <div className="trader-tabs" role="tablist">
             {([["pnl", "Top gains"], ["active", "Most active"], ["open", "Live now"], ["following", `Following${traders.some((t) => t.isFollowing === true) ? ` ${traders.filter((t) => t.isFollowing === true).length}` : ""}`]] as const).map(([key, label]) => (
@@ -151,7 +171,7 @@ export default function TradersPage() {
             <p>Tap Follow on a trader to see them here and get alerts when they trade.</p>
           </div>
         ) : traders.length ? (
-          <div className="traders-grid">
+          <div className={`traders-grid${layout === "list" ? " is-list" : ""}`}>
             {sorted.map((trader, index) => {
               const s = trader.stats;
               const pnl = gain(trader, period);
@@ -159,6 +179,7 @@ export default function TradersPage() {
               const podium = index < 3 ? ` podium-${index + 1}` : "";
               return (
                 <article className={`tc${podium}`} key={trader.userId}>
+                  <Ghost className="tc-ghost" />
                   <div className="tc-main">
                     <span className="tc-rank">{index + 1}</span>
                     {trader.avatarDataUrl ? (
@@ -184,18 +205,6 @@ export default function TradersPage() {
                       <Spark curve={s?.curve ?? []} />
                     </div>
                     <Radar values={s?.radar.map((p) => p.value) ?? [0, 0, 0, 0, 0, 0]} size={92} />
-                  </div>
-
-                  <div className="tc-gains">
-                    {PERIODS.filter((p) => p.key !== "all").map((p) => {
-                      const v = gain(trader, p.key);
-                      return (
-                        <span key={p.key} className={p.key === period ? "on" : ""}>
-                          <small>{p.label}</small>
-                          <b className={v > 0 ? "up" : v < 0 ? "down" : ""}>{money(v, true)}</b>
-                        </span>
-                      );
-                    })}
                   </div>
 
                   <div className="tc-foot">

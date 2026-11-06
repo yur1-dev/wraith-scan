@@ -234,3 +234,48 @@ button.hc-act:hover { background: rgba(255, 255, 255, .06); color: var(--text); 
 @media (min-width: 601px) and (max-width: 900px) {
   .traders-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
 }
+
+/* Community: compact period tabs + grid/list switch */
+.tc-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.tc-periods { display: inline-flex; width: auto; margin-top: 0; padding: 3px; gap: 2px; border-radius: 10px; }
+.tc-periods button { flex: none; min-width: 58px; padding: 6px 14px; font-size: 12px; }
+.tc-layout { display: inline-flex; margin-left: auto; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,.03); }
+.tc-layout button { display: grid; place-items: center; width: 32px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.tc-layout button.on { background: rgba(255,255,255,.1); color: #fff; }
+@media (max-width: 600px) { .tc-periods { flex: 1; } .tc-periods button { flex: 1; min-width: 0; padding: 7px 0; } .tc-layout { margin-left: 0; } }
+
+.traders-grid.is-list { grid-template-columns: 1fr !important; gap: 6px !important; }
+.is-list .tc { flex-direction: row; align-items: center; gap: 18px; padding: 10px 14px; }
+.is-list .tc-main { flex: 0 0 300px; }
+.is-list .tc-body { flex: 1; min-width: 120px; }
+.is-list .tc .wr-radar { display: none; }
+.is-list .tc-pnl { flex-direction: row; align-items: center; gap: 14px; }
+.is-list .tc-pnl strong { font-size: 20px; }
+.is-list .tc-spark { width: 110px; flex: none; }
+.is-list .tc-gains { flex: 0 0 250px; }
+.is-list .tc-foot { flex: 0 0 280px; padding-top: 0; border-top: 0; }
+.is-list .tc-live { margin: 0; }
+@media (max-width: 900px) {
+  .is-list .tc { flex-wrap: wrap; gap: 10px; }
+  .is-list .tc-main { flex: 1 1 100%; }
+  .is-list .tc-gains, .is-list .tc-foot { flex: 1 1 100%; }
+}
+
+/* Community cards: ghost watermark, follow at the end, no per-trader period boxes */
+.tc { position: relative; overflow: hidden; }
+.tc > * { position: relative; z-index: 1; }
+.tc > .tc-ghost { position: absolute; z-index: 0; right: -14px; bottom: -18px; width: 120px; height: 150px; color: rgba(255,123,61,.07); transform: rotate(-8deg); pointer-events: none; }
+.tc.podium-1 > .tc-ghost { color: rgba(255,201,74,.09); }
+.is-list .tc > .tc-ghost { right: 40px; bottom: auto; top: -24px; width: 86px; height: 108px; }
+.is-list .tc-main { display: contents; }
+.is-list .tc-main > .tc-rank { order: 0; }
+.is-list .tc-main > .tc-avatar { order: 1; }
+.is-list .tc-main > .tc-id { order: 2; flex: 0 0 210px; width: 210px; }
+.is-list .tc-body { order: 3; }
+.is-list .tc-foot { order: 4; }
+.is-list .tc-live { order: 5; }
+.is-list .tc-main > .trader-follow { order: 9; margin-left: auto; flex: 0 0 auto; }
+.is-list .tc { gap: 14px; }
+.is-list .tc-foot { flex: 0 0 300px; }
+.wraith-discover { margin-left: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.04); color: var(--text); font-size: 12.5px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.wraith-discover:hover { background: rgba(255,255,255,.09); }

@@ -372,3 +372,18 @@ html { scroll-behavior: smooth; }
 .dl-badge b{font-size:16px;font-weight:700;letter-spacing:-.01em}
 .dl-badge em{font-style:normal;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.12)}
 @media (min-width: 1700px) { .lp-nav-pill { width: min(1320px, calc(100% - 64px)); } }
+
+/* Tier cards: even, aligned, calmer */
+.lp-tiers { gap: 16px; align-items: stretch; }
+.lp-tier-wrap.top .ws-tier { transform: none; padding-bottom: 22px; }
+.lp-tiers .ws-tier { padding: 24px 22px; gap: 4px; border-radius: 20px; background: linear-gradient(180deg, color-mix(in srgb, var(--tc) 7%, #151516), #121213 60%); }
+.lp-tiers .ws-tier::after { height: 2px; }
+.lp-tiers .lp-glyph { width: 52px; height: 52px; margin-bottom: 14px; border-radius: 14px; }
+.lp-tiers .ws-tier h3 { font-size: 13px; margin-bottom: 8px; }
+.lp-tiers .ws-tier .need { font-size: 17px; line-height: 1.25; min-height: 22px; }
+.lp-tiers .ws-tier .fee { margin-top: 2px; padding-bottom: 14px; font-size: 13px; }
+.lp-tiers .ws-tier ul { margin-top: 0; padding-top: 16px; gap: 11px; flex: 1; }
+.lp-tiers .ws-tier li { font-size: 13.5px; }
+.lp-tiers .ws-tier li.off { text-decoration: none; opacity: .5; }
+.lp-tiers .ws-tier.top { background: radial-gradient(100% 50% at 50% 0%, rgba(255,123,61,.18), transparent 70%), #151210; }
+.lp-badge { top: 16px; right: 16px; }

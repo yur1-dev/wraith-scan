@@ -3,7 +3,7 @@
 import { defaultAvatar, defaultCover } from "@/lib/defaultArt";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import Header from "@/components/Header";
 import TraderFollowButton from "@/components/TraderFollowButton";
@@ -41,6 +41,7 @@ type PublicTrade = {
 };
 
 type TraderDetails = {
+  isSelf?: boolean;
   trader: {
     userId: string;
     username: string | null;
@@ -84,6 +85,11 @@ export default function PublicTraderPage() {
   const [showFollowModal, setShowFollowModal] = useState(false);
   const [followModalTab, setFollowModalTab] = useState<"followers" | "following">("followers");
   const { money } = useCash();
+  const router = useRouter();
+  // your own public page is just your profile: go there instead of showing yourself as a stranger with a Follow button
+  useEffect(() => {
+    if (data?.isSelf) router.replace("/app/profile");
+  }, [data, router]);
 
   useEffect(() => {
     if (!userId) return;

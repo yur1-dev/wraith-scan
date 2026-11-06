@@ -440,8 +440,8 @@ const CSS = `
 .wchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:2px 8px 2px 3px;border-radius:99px;border:1px solid rgba(255,123,61,.4);background:rgba(255,123,61,.08);color:var(--text);text-decoration:none;font-size:10.5px;font-weight:700}
 .wchip:hover{border-color:var(--orange)}
 .wchip img,.wchip i{width:18px;height:18px;border-radius:50%;object-fit:cover;flex:none;display:grid;place-items:center;font-style:normal;font-size:9px;background:linear-gradient(135deg,#ff7b3d,#7a2d10)}
-.wchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wchip em{font-style:normal;font-size:8px;letter-spacing:.06em;padding:1px 5px;border-radius:5px;background:rgba(255,123,61,.2);color:var(--orange-hot)}
+.wchip span{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wchip em{flex:none;white-space:nowrap;font-style:normal;font-size:8px;letter-spacing:.06em;padding:1px 5px;border-radius:5px;background:rgba(255,123,61,.2);color:var(--orange-hot)}
 .dt-note{margin:0;padding:10px 16px 14px;font-size:9.5px;color:var(--text-dim);line-height:1.5}
 .dt-empty{min-height:200px;display:grid;place-content:center;justify-items:center;gap:7px;padding:24px;text-align:center;color:var(--text-muted);font-size:11px}
 .dt-empty strong{color:var(--text);font-size:13px}

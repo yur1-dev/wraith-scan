@@ -56,7 +56,7 @@ export default function TradersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stale, setStale] = useState(false);
-  const [sort, setSort] = useState<"pnl" | "active" | "open">("pnl");
+  const [sort, setSort] = useState<"pnl" | "active" | "open" | "following">("pnl");
   const [period, setPeriod] = useState<Period>("d7");
   const [viewer, setViewer] = useState<string | null>(null);
   const { money } = useCash();
@@ -64,7 +64,7 @@ export default function TradersPage() {
   const gain = (t: Trader, p: Period) => t.stats?.pnlSol[p] ?? (p === "all" ? t.profitSol : 0);
 
   const sorted = useMemo(() => {
-    const list = [...traders];
+    const list = sort === "following" ? traders.filter((t) => t.isFollowing === true) : [...traders];
     if (sort === "active") list.sort((a, b) => b.closedTradeCount + b.openPositionCount - (a.closedTradeCount + a.openPositionCount));
     else if (sort === "open") list.sort((a, b) => b.openPositionCount - a.openPositionCount || gain(b, period) - gain(a, period));
     else list.sort((a, b) => gain(b, period) - gain(a, period));
@@ -130,7 +130,7 @@ export default function TradersPage() {
             ))}
           </div>
           <div className="trader-tabs" role="tablist">
-            {([["pnl", "Top gains"], ["active", "Most active"], ["open", "Live now"]] as const).map(([key, label]) => (
+            {([["pnl", "Top gains"], ["active", "Most active"], ["open", "Live now"], ["following", `Following${traders.some((t) => t.isFollowing === true) ? ` ${traders.filter((t) => t.isFollowing === true).length}` : ""}`]] as const).map(([key, label]) => (
               <button key={key} type="button" role="tab" aria-selected={sort === key} className={sort === key ? "on" : ""} onClick={() => setSort(key)}>{label}</button>
             ))}
           </div>
@@ -143,6 +143,12 @@ export default function TradersPage() {
             {Array.from({ length: 6 }).map((_, index) => (
               <div className="trader-card trader-card-skeleton" key={index} />
             ))}
+          </div>
+        ) : sort === "following" && sorted.length === 0 ? (
+          <div className="profile-panel traders-empty">
+            <Users size={22} />
+            <h2>You are not following anyone yet</h2>
+            <p>Tap Follow on a trader to see them here and get alerts when they trade.</p>
           </div>
         ) : traders.length ? (
           <div className="traders-grid">

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { Bookmark, Heart, MessageCircle, Repeat2, Rss, Send } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Bookmark, Heart, MessageCircle, Repeat2, Rss, Send, Smile, X } from "lucide-react";
+import StickerSheet from "@/components/StickerSheet";
 import { Face as PostFace, TokenCard, isFresh, mcapLabel, timeAgo as ago } from "@/components/CalloutParts";
 import { useTokenMeta, type TokenMeta } from "@/lib/useTokenMeta";
 import { swrPeek, swrWrite } from "@/lib/swrCache";
@@ -34,6 +35,9 @@ interface Comment {
   username: string | null;
   avatarDataUrl: string;
   text: string;
+  imageUrl?: string | null;
+  replyToId?: string | null;
+  replyToName?: string | null;
   createdAt: number;
 }
 interface Gate {
@@ -62,12 +66,16 @@ function Face({ src, name, small }: { src?: string; name: string; small?: boolea
   return <span className={`${cls} fallback`}>{name.slice(0, 1).toUpperCase()}</span>;
 }
 
-function Thread({ callout, meta, onCount }: { callout: CalloutItem; meta?: TokenMeta; onCount: (n: number) => void }) {
+export function Thread({ callout, meta, onCount }: { callout: CalloutItem; meta?: TokenMeta; onCount: (n: number) => void }) {
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [gate, setGate] = useState<Gate | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [sticker, setSticker] = useState<string | null>(null);
+  const [sheet, setSheet] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const symbol = meta?.symbol ?? "this token";
 
   const load = useCallback(async () => {
@@ -96,18 +104,20 @@ function Thread({ callout, meta, onCount }: { callout: CalloutItem; meta?: Token
   }, [callout.id]);
 
   const send = async () => {
-    if (!text.trim() || busy || !callout.mint) return;
+    if ((!text.trim() && !sticker) || busy || !callout.mint) return;
     setBusy(true);
     setErr("");
     try {
       const r = await fetch("/api/callouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mint: callout.mint, text: text.trim(), parentId: callout.id, mcapAtPost: meta?.mcap ?? null }),
+        body: JSON.stringify({ mint: callout.mint, text: text.trim(), parentId: callout.id, mcapAtPost: meta?.mcap ?? null, imageUrl: sticker, replyTo: replyTo?.id }),
       });
       const d: { error?: string } = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.error || "Could not post comment."); return; }
       setText("");
+      setSticker(null);
+      setReplyTo(null);
       await load();
       window.dispatchEvent(new Event(CALLOUT_POSTED_EVENT));
     } finally {
@@ -128,7 +138,10 @@ function Thread({ callout, meta, onCount }: { callout: CalloutItem; meta?: Token
             <div>
               <Link href={`/app/u/${encodeURIComponent(c.username ?? c.userId)}`} className="fi-name">{c.displayName}</Link>
               <span className="fi-age"> · {timeAgo(c.createdAt)}</span>
-              <p>{c.text}</p>
+              {c.replyToName ? <span className="fi-replying">↪ replying to {c.replyToName}</span> : null}
+              {c.text ? <p>{c.text}</p> : null}
+              {c.imageUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={c.imageUrl} alt="" className="fi-sticker" loading="lazy" />}
+              {gate?.ok ? <button type="button" className="fi-reply" onClick={() => { setReplyTo({ id: c.id, name: c.displayName }); inputRef.current?.focus(); }}>Reply</button> : null}
             </div>
           </div>
         ))
@@ -143,9 +156,26 @@ function Thread({ callout, meta, onCount }: { callout: CalloutItem; meta?: Token
           {callout.mint && <Link href={`/app/token/${callout.mint}`}>Open {symbol} →</Link>}
         </div>
       ) : gate ? (
-        <div className="fi-compose">
-          <input value={text} maxLength={280} placeholder="Add a comment…" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void send(); }} />
-          <button type="button" onClick={() => void send()} disabled={busy || !text.trim()} aria-label="Send comment"><Send size={14} /></button>
+        <div className="fi-compose-wrap">
+          {sticker && (
+            <div className="fi-pending">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={sticker} alt="Selected sticker" />
+              <button type="button" onClick={() => setSticker(null)} aria-label="Remove sticker"><X size={12} /></button>
+            </div>
+          )}
+          {replyTo && (
+            <div className="fi-replychip">
+              <span>Replying to <b>{replyTo.name}</b></span>
+              <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply"><X size={12} /></button>
+            </div>
+          )}
+          <div className="fi-compose">
+            <input ref={inputRef} value={text} maxLength={280} placeholder={replyTo ? `Reply to ${replyTo.name}…` : "Add a comment…"} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void send(); }} />
+            <button type="button" className="fi-react" onClick={() => setSheet((v) => !v)} aria-label="Stickers and GIFs" aria-expanded={sheet}><Smile size={16} /></button>
+            <button type="button" onClick={() => void send()} disabled={busy || (!text.trim() && !sticker)} aria-label="Send comment"><Send size={14} /></button>
+          </div>
+          {sheet && <StickerSheet onClose={() => setSheet(false)} onPick={(d) => { setSticker(d); setSheet(false); }} />}
         </div>
       ) : null}
       {err && <div className="fi-err">{err}</div>}

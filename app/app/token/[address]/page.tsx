@@ -5,14 +5,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import BookmarkBtn from "@/components/BookmarkBtn";
-import { Activity, Bookmark, Flame, Radar, Users, Wallet } from "lucide-react";
+import { Activity, Bookmark, Flame, Radar, Wallet } from "lucide-react";
 import { ToastProvider } from "@/components/Toast";
 import type { MemeTrend } from "@/app/app/page";
 import { readTokenNav, cacheTokenNav } from "@/lib/tokenNav";
 import { readTokenFavorites, TOKEN_FAVORITES_EVENT } from "@/lib/tokenFavorites";
 import { SOLANA_MINT_RE } from "@/lib/market";
 import { chainOf, EVM_ADDR_RE } from "@/lib/chains";
-import FollowingSidebar from "@/components/FollowingSidebar";
 import { TokenIcon } from "@/components/TokenIcon";
 import SheetBoundary from "@/components/SheetBoundary";
 
@@ -37,14 +36,13 @@ const TokenTradeDock = dynamic(loadTradeDock, {
   ),
 });
 
-type SideTab = "tokens" | "signals" | "saved" | "following";
+type SideTab = "tokens" | "signals" | "saved";
 type MobileTab = "chart" | "trade" | "market";
 
 const SIDE_TABS: { key: SideTab; label: string; icon: React.ReactNode }[] = [
   { key: "tokens", label: "Market", icon: <Flame size={13} /> },
   { key: "signals", label: "Signals", icon: <Radar size={13} /> },
   { key: "saved", label: "Saved", icon: <Bookmark size={13} /> },
-  { key: "following", label: "Following", icon: <Users size={13} /> },
 ];
 
 export default function TokenPage() {
@@ -154,7 +152,6 @@ export default function TokenPage() {
       <div className="wx-side-body">
         {sideTab === "tokens" && <TokenMarketList onSelectMeme={go} selectedMeme={meme} />}
         {sideTab === "signals" && <SignalsSidebar onSelectMeme={go} selectedMeme={meme} />}
-        {sideTab === "following" && <FollowingSidebar />}
         {sideTab === "saved" &&
           (favorites.length ? (
             <div className="wx-side-scroll">

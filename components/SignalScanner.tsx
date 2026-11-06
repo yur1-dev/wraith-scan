@@ -8,7 +8,7 @@
 
 import { riskLevel, signalBand } from "@/lib/scoreBand";
 import { swrRead, swrWrite } from "@/lib/swrCache";
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Flame, LayoutGrid, List, Lock, Radar, RefreshCw, Sparkles, Zap } from "lucide-react";
 import type { MemeTrend } from "@/app/app/page";
 import { changeColor, fmtAge, fmtPct, fmtUsd, type MarketToken } from "@/lib/market";
@@ -20,6 +20,7 @@ import { CHAINS } from "@/lib/chains";
 import { useWraithTier } from "@/hooks/useWraithTier";
 import TierGlyph from "@/components/TierGlyph";
 import { TIERS } from "@/lib/tiers";
+import PatternsPanel from "@/components/PatternsPanel";
 
 const chainName = (k?: string) => (!k || k === "solana" ? "Solana" : CHAINS[k]?.name ?? k);
 
@@ -29,6 +30,8 @@ interface Signal {
   tier: "HOT" | "WATCH";
   tags: string[];
   risks: string[];
+  patterns?: string[];
+  odds?: number;
 }
 
 type Filter = "all" | "hot" | "fresh" | "volume" | "safe";
@@ -230,10 +233,8 @@ function useLiveSignals(base: Signal[]): Signal[] {
 
 export default function SignalScanner({
   onSelectMeme,
-  deepScan,
 }: {
   onSelectMeme: (meme: MemeTrend) => void;
-  deepScan: ReactNode;
 }) {
   const { signals: baseSignals, loading, error, updatedAt, reload } = useSignals();
   const signals = useLiveSignals(baseSignals);
@@ -327,7 +328,7 @@ export default function SignalScanner({
               <button type="button" className={view === "list" ? "on" : ""} onClick={() => setView("list")} aria-label="Table view" title="Table"><List size={14} /></button>
             </div>
             <button type="button" className={`sg-btn${deep ? " on" : ""}`} onClick={() => setDeep((d) => !d)} title="Slower AI + celebrity/X scan. Uses API credits, so it only runs when you open it.">
-              <Sparkles size={13} /> Deep scan
+              <Sparkles size={13} /> Patterns
             </button>
             <button type="button" className="sg-btn primary" onClick={() => void reload()}>
               <RefreshCw size={13} /> Refresh
@@ -336,7 +337,7 @@ export default function SignalScanner({
         </header>
 
         {deep ? (
-          <div className={`sg-deep ${view}`}>{deepScan}</div>
+          <div className={`sg-deep ${view}`}><PatternsPanel signals={signals} onOpen={open} /></div>
         ) : (
           <>
             <div className="sg-filters sg-chains" role="tablist" aria-label="Chain">

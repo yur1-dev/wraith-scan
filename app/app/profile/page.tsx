@@ -283,16 +283,25 @@ export default function ProfilePage() {
     }
   }, [connection, embeddedSolanaAddress, publicKey]);
 
+  // show the numbers from the last visit right away, then refresh them (the request waits for the profile to know your id)
+  useEffect(() => {
+    const last = readLast<{ followers: number; following: number }>("social_counts");
+    if (last && typeof last.followers === "number" && typeof last.following === "number") setSocialCounts(last);
+  }, []);
   useEffect(() => {
     if (!userId) return;
     let active = true;
     fetch(`/api/traders/following?traderId=${encodeURIComponent(userId)}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((result) => {
-        if (active && result) setSocialCounts({
-          followers: typeof result.followers === "number" ? result.followers : 0,
-          following: typeof result.followingCount === "number" ? result.followingCount : 0,
-        });
+        if (active && result) {
+          const next = {
+            followers: typeof result.followers === "number" ? result.followers : 0,
+            following: typeof result.followingCount === "number" ? result.followingCount : 0,
+          };
+          setSocialCounts(next);
+          writeLast("social_counts", next);
+        }
       })
       .catch(() => {});
     return () => { active = false; };

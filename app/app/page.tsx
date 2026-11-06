@@ -9,7 +9,6 @@ import { ToastProvider } from "@/components/Toast";
 
 const Header = dynamic(() => import("@/components/Header"), { ssr: false });
 const TokenBoard = dynamic(() => import("@/components/TokenBoard"), { ssr: false });
-const MemeScanner = dynamic(() => import("@/components/MemeScanner"), { ssr: false });
 const WinsBoard = dynamic(() => import("@/components/WinsBoard"), { ssr: false });
 const SignalScanner = dynamic(() => import("@/components/SignalScanner"), { ssr: false });
 const HotCalloutsFeed = dynamic(() => import("@/components/HotCalloutsFeed"), { ssr: false });
@@ -118,7 +117,6 @@ export default function Home() {
           <div className="wx-scanner-layout">
             <SignalScanner
               onSelectMeme={handleSelectMeme}
-              deepScan={<MemeScanner onSelectMeme={handleSelectMeme} selectedMeme={selected} />}
             />
           </div>
         )}

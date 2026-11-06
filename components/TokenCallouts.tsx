@@ -5,8 +5,10 @@ import { CALLOUT_POSTED_EVENT, useLiveRefresh } from "@/lib/useLiveRefresh";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { ImageIcon, Repeat2, MessageCircle } from "lucide-react";
+import { ImageIcon, Repeat2, MessageCircle, Smile } from "lucide-react";
 import { shrinkImage } from "@/lib/shrinkImage";
+import MemeMaker from "@/components/MemeMaker";
+import StickerSheet from "@/components/StickerSheet";
 
 interface CalloutPosition {
   amountSol: number;
@@ -75,6 +77,10 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [memeOpen, setMemeOpen] = useState(false);
+  const [replySticker, setReplySticker] = useState<string | null>(null);
+  const [replySheet, setReplySheet] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
   const [posting, setPosting] = useState(false);
   const [postErr, setPostErr] = useState("");
   const [commentOpen, setCommentOpen] = useState<string | null>(null);
@@ -203,16 +209,17 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
   };
 
   const submitComment = async (callout: Callout) => {
-    if (!commentText.trim() || posting) return;
+    if ((!commentText.trim() && !replySticker) || posting) return;
     setPosting(true);
     try {
       const r = await fetch("/api/callouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mint, text: commentText.trim(), mcapAtPost: currentMcap ?? null, parentId: callout.id }),
+        body: JSON.stringify({ mint, text: commentText.trim(), mcapAtPost: currentMcap ?? null, parentId: callout.id, imageUrl: replySticker }),
       });
       if (r.ok) {
         setCommentText("");
+        setReplySticker(null);
         setCommentOpen(null);
         setPostErr("");
         await load();
@@ -261,6 +268,9 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
               </button>
               <button type="button" onClick={() => fileInputRef.current?.click()} title="Attach a photo" aria-label="Attach a photo"><ImageIcon size={18} /></button>
               <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={(e) => { handleImage(e.target.files?.[0]); e.target.value = ""; }} />
+              <button type="button" className="fb-txt" onClick={() => setMemeOpen(true)} title="Make a meme" aria-label="Make a meme">MEME</button>
+              <button type="button" onClick={() => setGifOpen((v) => !v)} title="Stickers and GIFs" aria-label="Stickers and GIFs" aria-expanded={gifOpen}><Smile size={18} /></button>
+              {gifOpen && <StickerSheet onClose={() => setGifOpen(false)} onPick={(d) => { setImagePreview(d); setGifOpen(false); }} />}
               {emojiOpen && (
                 <div className="fb-emoji" role="menu">
                   {["🚀","🔥","💎","🙌","📈","📉","😂","😭","🤡","👀","💀","🫡","🤝","⚠️","✅","❌","🐋","🦍","🌕","💰","🧠","🎯","😎","🤑"].map((em) => (
@@ -270,6 +280,7 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
               )}
             </div>
             {postErr && <span className="callouts-err">{postErr}</span>}
+            {memeOpen && <MemeMaker onClose={() => setMemeOpen(false)} onDone={(d) => { setImagePreview(d); setMemeOpen(false); }} />}
             {text.length > TEXT_MAX - 40 && <span className="fb-count">{text.length}/{TEXT_MAX}</span>}
             <button type="button" className="fb-send" onClick={() => void post()} disabled={posting || !text.trim()} aria-label="Send" title="Send (Enter)">
               {posting ? <span className="fb-spin" /> : <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l-.01 6.5L15 12 3.39 13.9z"/></svg>}
@@ -412,17 +423,26 @@ export function TokenCallouts({ mint, currentMcap }: { mint: string; currentMcap
                   rows={2}
                   autoFocus
                 />
+                {replySticker && (
+                  <div className="fi-pending">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={replySticker} alt="Selected sticker" />
+                    <button type="button" onClick={() => setReplySticker(null)} aria-label="Remove sticker">✕</button>
+                  </div>
+                )}
                 <div className="callouts-compose-foot">
+                  <button type="button" className="fi-react" onClick={() => setReplySheet((v) => !v)} aria-label="Stickers and GIFs" aria-expanded={replySheet}><Smile size={16} /></button>
                   <span className="callouts-charcount">{commentText.length}/{TEXT_MAX}</span>
                   <button
                     type="button"
                     className="callouts-post-btn"
                     onClick={() => void submitComment(c)}
-                    disabled={posting || !commentText.trim()}
+                    disabled={posting || (!commentText.trim() && !replySticker)}
                   >
                     {posting ? "Posting…" : "Reply"}
                   </button>
                 </div>
+                {replySheet && <StickerSheet onClose={() => setReplySheet(false)} onPick={(d) => { setReplySticker(d); setReplySheet(false); }} />}
                 {postErr && <div style={{ marginTop: 6, fontSize: 12, color: "#f87171" }}>{postErr}</div>}
               </div>
             )}

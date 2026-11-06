@@ -13,6 +13,7 @@ import { getSolUsd, IGNORED_MINTS, IGNORED_SYMBOLS } from "@/lib/marketProviders
 import { evmCandidates } from "@/lib/evmScan";
 import { dexCandidates, jupiterCandidates, jupiterEnrich, pumpCandidates, type Candidate, type ScanMeta } from "@/lib/scannerSources";
 import { callGet } from "@/lib/internalCall";
+import { annotateFeatures, patternLabel, retrainIfDue, type Annotated } from "@/lib/signalLearning";
 import { edge } from "@/lib/edge";
 
 export type SignalTier = "HOT" | "WATCH";
@@ -25,6 +26,10 @@ export interface Signal {
   meta?: ScanMeta;
   /** dev history, buyer-flow and proven-wallet intel (Solana only) */
   intel?: SignalIntel;
+  /** pattern ids detected on this token (see lib/signalModel PATTERNS) */
+  patterns?: string[];
+  /** learned chance (%) of reaching 2x; only present once the model has beaten chance on unseen calls */
+  odds?: number;
 }
 
 const CACHE_MS = 30_000;
@@ -40,6 +45,7 @@ async function persistOnce(built: Built): Promise<void> {
   persisted = built;
   await recordSignals(built.records).catch(() => undefined);
   await refreshCalls().catch(() => undefined);
+  void retrainIfDue().catch(() => undefined); // learns from matured calls, at most every 6h
 }
 const HOT_MIN = Number(process.env.SIGNAL_HOT_MIN) || 72;
 
@@ -242,6 +248,25 @@ async function build(origin: string): Promise<Built> {
     sg.tier = sg.score >= HOT_MIN && vetted ? "HOT" : "WATCH";
     if (sg.intel?.block) sg.risks = [sg.intel.block, ...sg.risks].slice(0, 3);
   }
+  // Pattern recognition + learned odds. The learned nudge is capped and only applies once the model beats chance on unseen calls.
+  const feats = top.map((sg) => featuresOf(sg.token, sg.meta ?? {}, sg.intel, now));
+  const notes = await annotateFeatures(feats).catch(() => feats.map((): Annotated => ({ patterns: [], adj: 0 })));
+  top.forEach((sg, i) => {
+    const n = notes[i];
+    if (!n) return;
+    sg.patterns = n.patterns;
+    if (n.odds !== undefined) sg.odds = n.odds;
+    if (n.adj) {
+      sg.score = Math.round(clamp(sg.score + n.adj, 0, 100));
+      const isSol = !sg.token.chain || sg.token.chain === "solana";
+      const vetted = isSol ? !!sg.intel && !sg.intel.block : true;
+      sg.tier = sg.score >= HOT_MIN && vetted ? "HOT" : "WATCH";
+    }
+    const good = n.patterns.filter((id) => !id.startsWith("trap-")).slice(0, 2).map(patternLabel);
+    const traps = n.patterns.filter((id) => id.startsWith("trap-")).slice(0, 1).map(patternLabel);
+    if (good.length) sg.tags = [...good, ...sg.tags.filter((t) => !good.includes(t))].slice(0, 5);
+    if (traps.length) sg.risks = [...sg.risks, ...traps.filter((t) => !sg.risks.includes(t))].slice(0, 3);
+  });
   top.sort((a, b) => b.score - a.score);
 
   const records: RecordInput[] = top.map((sg) => ({

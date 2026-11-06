@@ -11,7 +11,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     if (!parent) return NextResponse.json({ error: "Callout not found." }, { status: 404 });
 
     const docs = await db.collection("callouts")
-      .find({ parentId: id }, { projection: { _id: 1, userId: 1, text: 1, createdAt: 1 } })
+      .find({ parentId: id }, { projection: { _id: 1, userId: 1, text: 1, createdAt: 1, imageUrl: 1, replyToId: 1, replyToName: 1 } })
       .sort({ createdAt: 1 })
       .limit(50)
       .toArray();
@@ -31,6 +31,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
         username: p?.username ?? null,
         avatarDataUrl: p?.avatarDataUrl || p?.avatarUrl || "",
         text: d.text,
+        imageUrl: typeof d.imageUrl === "string" ? d.imageUrl : null,
+        replyToId: typeof d.replyToId === "string" ? d.replyToId : null,
+        replyToName: typeof d.replyToName === "string" ? d.replyToName : null,
         createdAt: d.createdAt,
       };
     });

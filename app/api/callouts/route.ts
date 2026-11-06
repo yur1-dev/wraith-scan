@@ -195,16 +195,17 @@ export async function POST(request: NextRequest) {
     return jsonError("Invalid JSON.", 400);
   }
 
-  const { mint, text, mcapAtPost, imageUrl, parentId } = body as Record<string, unknown>;
+  const { mint, text, mcapAtPost, imageUrl, parentId, replyTo } = body as Record<string, unknown>;
   if (typeof mint === "string" && EVM_RE.test(mint)) return jsonError("Posting intel on EVM tokens is coming soon. You can read it here.", 403);
   if (typeof mint !== "string" || !MINT_RE.test(mint)) return jsonError("Invalid mint.", 400);
-  if (typeof text !== "string" || !text.trim()) return jsonError("Text is required.", 400);
-  const trimmed = text.trim().slice(0, TEXT_MAX);
+  const trimmed = typeof text === "string" ? text.trim().slice(0, TEXT_MAX) : "";
 
   const safeImageUrl =
     typeof imageUrl === "string" && imageUrl.length <= IMAGE_MAX_CHARS && IMAGE_RE.test(imageUrl)
       ? imageUrl
       : null;
+  // a sticker / GIF / meme can stand on its own, but a post with neither text nor image is empty
+  if (!trimmed && !safeImageUrl) return jsonError("Text is required.", 400);
 
   try {
     const db = await getDb();
@@ -264,6 +265,15 @@ export async function POST(request: NextRequest) {
     };
     if (safeImageUrl) doc.imageUrl = safeImageUrl;
     if (typeof parentId === "string" && /^[a-f0-9]{24}$/.test(parentId)) doc.parentId = parentId;
+    // replying to one specific comment in the thread: the target must really be a comment on this same callout
+    if (isReply && typeof replyTo === "string" && /^[a-f0-9]{24}$/.test(replyTo)) {
+      const target = await db.collection("callouts").findOne({ _id: new ObjectId(replyTo), parentId }, { projection: { userId: 1 } });
+      if (target) {
+        const tp = await db.collection("profiles").findOne({ userId: target.userId }, { projection: { displayName: 1, username: 1 } });
+        doc.replyToId = replyTo;
+        doc.replyToName = String(tp?.displayName || tp?.username || "trader").slice(0, 40);
+      }
+    }
 
     const result = await db.collection("callouts").insertOne(doc);
     return NextResponse.json({ id: result.insertedId.toHexString(), createdAt: now });

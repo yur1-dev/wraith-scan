@@ -7,14 +7,18 @@
  */
 import { config } from "dotenv";
 config({ path: ".env.local" });
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { MongoClient } from "mongodb";
-import type { PathRec } from "./relabel-paths";
+import type { PathRec } from "./pathlib";
 
 const APPLY = process.argv.includes("--apply");
 
 async function main() {
-  const paths = JSON.parse(readFileSync("scripts/.pilot/paths.json", "utf8")) as Record<string, PathRec>;
+  // two sources: GeckoTerminal candles, and a rebuild from on-chain trades. Use whichever covers more of the 24h for each call.
+  const load = (f: string) => (existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as Record<string, PathRec>) : {});
+  const gecko = load("scripts/.pilot/paths.json"), chain = load("scripts/.pilot/paths-helius.json");
+  const paths: Record<string, PathRec> = { ...chain };
+  for (const [k, v] of Object.entries(gecko)) if (v.ok && (!paths[k]?.ok || (v.coverMin ?? 1440) >= (paths[k].coverMin ?? 1440))) paths[k] = v;
   const recs = Object.values(paths).filter((r) => r.ok && r.p0 > 0);
   console.log(`${recs.length} calls with real price paths`);
   const c = new MongoClient(process.env.MONGODB_URI!); await c.connect();

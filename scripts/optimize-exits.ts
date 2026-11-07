@@ -53,10 +53,19 @@ const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`;
 const label = (p: Policy) => `${p.tp ? `TP +${p.tp}%` : "no TP"} | ${p.sl ? `SL -${p.sl}%` : "no SL"} | ${p.trail ? `trail -${p.trail}% after +${p.trailAfter}%` : "no trail"}${p.tp1 ? ` | part ${p.tp1Sell}% at +${p.tp1}%` : ""}${p.hold ? ` | time ${p.hold}m` : ""}`;
 
 function main() {
-  const file = "scripts/.pilot/candles.jsonl";
-  if (!existsSync(file)) { console.log("No candles yet. Run scripts/relabel-paths.ts first."); return; }
+  const files = ["scripts/.pilot/candles.jsonl", "scripts/.pilot/candles-helius.jsonl"].filter((f) => existsSync(f));
+  if (!files.length) { console.log("No candles yet. Run scripts/relabel-paths.ts or scripts/relabel-helius.ts first."); return; }
   const mode = process.argv[2] ?? "all";
-  let all = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Series).filter((x) => x.s.length >= 6);
+  // two sources: GeckoTerminal candles and candles built from on-chain trades. For a call that has both, keep the one covering more of the day.
+  const byAddr = new Map<string, Series & { cover?: number }>();
+  for (const f of files) {
+    for (const l of readFileSync(f, "utf8").split("\n").filter(Boolean)) {
+      const x = JSON.parse(l) as Series & { cover?: number };
+      const cur = byAddr.get(x.addr);
+      if (!cur || (x.cover ?? 1440) > (cur.cover ?? 1440)) byAddr.set(x.addr, x);
+    }
+  }
+  let all = [...byAddr.values()].filter((x) => x.s.length >= 6 && (x.cover ?? 1440) >= 180);
   if (mode === "public") all = all.filter((x) => x.engine === 2 && !x.shadow);
   all.sort((a, b) => a.at - b.at);
   if (all.length < 60) { console.log(`Only ${all.length} calls with candles so far (${mode}); need about 60+ for a first look, 300+ to trust it.`); return; }

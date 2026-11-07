@@ -9,11 +9,13 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 import { MongoClient } from "mongodb";
+import { existsSync, readFileSync } from "node:fs";
 import { auc, fitTrees, rawVector, scoreTrees, TREE_DEFAULTS, type Features, type TreeOpts } from "../lib/signalModel";
 
-interface Call { address: string; symbol: string; name: string; at: number; f: Features; ratioPeak: number; ratioLast: number; score: number | null; tier: string }
+interface Call { address: string; symbol: string; name: string; at: number; f: Features; ratioPeak: number; legacyPeak: number; hasPath: boolean; ratioLast: number; score: number | null; tier: string }
 const H = 3_600_000;
-const GROUPS = new Set((process.argv[2] ?? "base,tune,feat,target,ens").split(","));
+const PATHS = process.argv.includes("--paths"); // use REAL price paths (candles / on-chain trades) to correct each call's peak
+const GROUPS = new Set((process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "base,tune,feat,target,ens").split(","));
 
 // ── data ─────────────────────────────────────────────────────────────────────────────────────
 async function load(): Promise<Call[]> {
@@ -22,11 +24,19 @@ async function load(): Promise<Call[]> {
     .find({ engine: 2, badData: { $ne: true }, spottedMcap: { $gt: 0 }, features: { $exists: true }, spottedAt: { $lt: Date.now() - 24 * H } },
       { projection: { address: 1, symbol: 1, name: 1, features: 1, spottedAt: 1, spottedMcap: 1, peakMcap: 1, lastMcap: 1, score: 1, tier: 1 } }).sort({ spottedAt: 1 }).toArray();
   await c.close();
-  return docs.map((d) => ({
-    address: d.address as string, symbol: String(d.symbol ?? ""), name: String(d.name ?? ""), at: d.spottedAt as number, f: (d.features ?? {}) as Features,
-    ratioPeak: Math.max(d.peakMcap as number, d.lastMcap as number) / (d.spottedMcap as number), ratioLast: (d.lastMcap as number) / (d.spottedMcap as number),
-    score: typeof d.score === "number" ? d.score : null, tier: String(d.tier ?? ""),
-  }));
+  // real paths: GeckoTerminal candles, and the on-chain-trade rebuild; for each call keep the one covering more of the day
+  const load = (f: string) => (existsSync(f) ? (JSON.parse(readFileSync(f, "utf8")) as Record<string, { ok: boolean; peak24h: number; coverMin?: number }>) : {});
+  const g = load("scripts/.pilot/paths.json"), h = load("scripts/.pilot/paths-helius.json");
+  const pathOf = (a: string) => { const x = g[a], y = h[a]; if (x?.ok && (!y?.ok || (x.coverMin ?? 1440) >= (y.coverMin ?? 1440))) return x; return y?.ok ? y : null; };
+  return docs.map((d) => {
+    const legacy = Math.max(d.peakMcap as number, d.lastMcap as number) / (d.spottedMcap as number);
+    const p = PATHS ? pathOf(d.address as string) : null;
+    return {
+      address: d.address as string, symbol: String(d.symbol ?? ""), name: String(d.name ?? ""), at: d.spottedAt as number, f: (d.features ?? {}) as Features,
+      ratioPeak: p ? Math.max(legacy, p.peak24h) : legacy, legacyPeak: legacy, hasPath: !!p, ratioLast: (d.lastMcap as number) / (d.spottedMcap as number),
+      score: typeof d.score === "number" ? d.score : null, tier: String(d.tier ?? ""),
+    };
+  });
 }
 
 // ── regime / rank / theme features, each computed from calls BEFORE the one being described ─────
@@ -119,7 +129,14 @@ function report(base: Result | null, r: Result, calls: Call[], judge: Labeler) {
 }
 
 async function main() {
-  const raw = await load();
+  let raw = await load();
+  if (PATHS) {
+    const n0 = raw.length;
+    raw = raw.filter((c) => c.hasPath);
+    console.log(`PATH MODE: ${raw.length} of ${n0} calls have a real price path; using only those, with the 24h peak taken from the path`);
+    if (raw.length < 400) { console.log("Fewer than 400 calls with paths: results below are only a preview. Let the path jobs run longer for firm answers."); }
+    if (raw.length < 150) return;
+  }
   console.log(`${raw.length} calls (engine 2, older than 24h), ${new Date(raw[0].at).toISOString().slice(0, 10)} to ${new Date(raw[raw.length - 1].at).toISOString().slice(0, 10)}`);
   const L2: Labeler = (c) => (c.ratioPeak >= 2 ? 1 : 0);
   console.log(`2x winners ${raw.filter((c) => L2(c)).length} (${(mean(raw.map(L2)) * 100).toFixed(1)}%), collapsed ${raw.filter((c) => c.ratioLast <= 0.2).length}`);
@@ -129,6 +146,12 @@ async function main() {
   console.log("\n== BASELINE ==");
   const base = runConfig("baseline (live settings)", raw, L2, TREE_DEFAULTS);
   report(null, base, raw, L2);
+  if (PATHS) {
+    // the same model trained on the OLD sparse labels, but judged against the corrected ones: how much did the label noise cost?
+    const Lold: Labeler = (c) => (c.legacyPeak >= 2 ? 1 : 0);
+    report(base, runConfig("trained on OLD (sparse) labels", raw, Lold, TREE_DEFAULTS), raw, L2);
+    console.log(`  (2x winners by the old labels ${raw.filter((c) => c.legacyPeak >= 2).length}, by the corrected labels ${raw.filter((c) => c.ratioPeak >= 2).length}, of ${raw.length} calls)`);
+  }
   if (raw.some((c) => c.score !== null)) {
     const sc: Result = { name: "scanner score alone", scores: base.idx.map((i) => raw[i].score ?? 0), labels: base.labels, foldAuc: [], idx: base.idx };
     report(null, sc, raw, L2);

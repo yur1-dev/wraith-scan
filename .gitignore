@@ -54,3 +54,8 @@ android-app/android/build/
 android-app/android/app/build/
 android-app/android/local.properties
 android-app/android/app/google-services.json
+
+# research output
+scripts/.pilot/
+scripts/.pilot-run.log
+scripts/.pilot-run*.log

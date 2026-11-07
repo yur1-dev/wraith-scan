@@ -160,11 +160,14 @@ export function scoreIntel(i: Pick<SignalIntel, "dev" | "flow" | "smart">): { ad
     if (flow.buyers >= 60) { adj += 3; tags.push(`${flow.buyers} buyers`); }
   }
   if (smart) {
-    if (smart.smart >= 3) { adj += 12; tags.push(`${smart.smart} proven wallets in`); }
-    else if (smart.smart === 2) { adj += 8; tags.push("2 proven wallets in"); }
-    else if (smart.smart === 1) { adj += 4; tags.push("1 proven wallet in"); }
-    if (smart.dumpers >= 5) { block = block ?? "Repeat dumper wallets"; risks.push(`${smart.dumpers} repeat-dumper wallets`); }
-    else if (smart.dumpers >= 3) { adj -= 12; risks.push(`${smart.dumpers} repeat-dumper wallets`); }
+    // Weights follow the 1,394-token walk-forward test (scripts/backtest-wallets.ts): proven wallets gave a modest edge for
+    // finding 2x winners (AUC ~0.58) and repeat dumpers were a weak, non-linear signal (AUC ~0.53; the 10+ dumper group had the
+    // HIGHEST 2x rate). So: small bonuses, small penalties, and no hard block on dumpers any more.
+    if (smart.smart >= 3) { adj += 6; tags.push(`${smart.smart} proven wallets in`); }
+    else if (smart.smart === 2) { adj += 4; tags.push("2 proven wallets in"); }
+    else if (smart.smart === 1) { adj += 2; tags.push("1 proven wallet in"); }
+    if (smart.dumpers >= 10) { adj -= 6; risks.push(`${smart.dumpers} repeat-dumper wallets`); }
+    else if (smart.dumpers >= 5) { adj -= 3; risks.push(`${smart.dumpers} repeat-dumper wallets`); }
   }
   return { adj, tags, risks, block };
 }

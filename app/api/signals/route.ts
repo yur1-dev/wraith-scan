@@ -30,6 +30,8 @@ export interface Signal {
   patterns?: string[];
   /** learned chance (%) of reaching 2x; only present once the model has beaten chance on unseen calls */
   odds?: number;
+  /** learned chance (%) that this call collapses below 20% of its price; only present once the rug model has proven itself */
+  rugRisk?: number;
 }
 
 const CACHE_MS = 30_000;
@@ -46,6 +48,8 @@ async function persistOnce(built: Built): Promise<void> {
   await recordSignals(built.records).catch(() => undefined);
   await refreshCalls().catch(() => undefined);
 }
+const RUG_BLOCK = Number(process.env.SIGNAL_RUG_BLOCK) || 60;
+const RUG_WARN = Number(process.env.SIGNAL_RUG_WARN) || 40;
 const HOT_MIN = Number(process.env.SIGNAL_HOT_MIN) || 72;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
@@ -260,6 +264,22 @@ async function build(origin: string): Promise<Built> {
       const isSol = !sg.token.chain || sg.token.chain === "solana";
       const vetted = isSol ? !!sg.intel && !sg.intel.block : true;
       sg.tier = sg.score >= HOT_MIN && vetted ? "HOT" : "WATCH";
+    }
+    // Rug guard: a call the model expects to collapse is never HOT and loses score. Tested on unseen calls: the riskiest fifth
+    // collapsed about 85% of the time, the safest fifth about 1%.
+    if (n.rugRisk !== undefined) {
+      sg.rugRisk = n.rugRisk;
+      if (n.rugRisk >= RUG_BLOCK) {
+        sg.score = Math.round(clamp(sg.score - 15, 0, 100));
+        sg.tier = "WATCH";
+        const msg = `High collapse risk (${n.rugRisk}%)`;
+        sg.risks = [msg, ...sg.risks.filter((r) => r !== msg)].slice(0, 3);
+      } else if (n.rugRisk >= RUG_WARN) {
+        sg.score = Math.round(clamp(sg.score - 6, 0, 100));
+        if (sg.tier === "HOT" && n.rugRisk >= RUG_WARN + 10) sg.tier = "WATCH";
+        const msg = `Elevated collapse risk (${n.rugRisk}%)`;
+        sg.risks = [...sg.risks.filter((r) => r !== msg), msg].slice(0, 3);
+      }
     }
     const good = n.patterns.filter((id) => !id.startsWith("trap-")).slice(0, 2).map(patternLabel);
     const traps = n.patterns.filter((id) => id.startsWith("trap-")).slice(0, 1).map(patternLabel);

@@ -33,6 +33,10 @@ export interface SignalCall {
   /** wallets that were buying when the call was made, for the wallet scoreboard (server only) */
   buyers?: string[];
   learned?: boolean;
+  /** the price source stopped returning this token for hours: treated as collapsed (rug / pulled liquidity) */
+  rugged?: boolean;
+  misses?: number;
+  lastSeenAt?: number;
 }
 
 const COLLECTION = "signal_calls";
@@ -153,7 +157,7 @@ export async function refreshCalls(force = false) {
       const due = await c
         .find(
           { $or: [{ shadow: { $ne: true }, engine: 2, spottedAt: { $gt: t0 - WINDOW_MS } }, { shadow: true, spottedAt: { $gt: t0 - 24 * 3_600_000 } }] },
-          { projection: { address: 1, chain: 1, lastMcap: 1, spottedMcap: 1, pendingMcap: 1 } },
+          { projection: { address: 1, chain: 1, lastMcap: 1, spottedMcap: 1, pendingMcap: 1, misses: 1, lastSeenAt: 1, rugged: 1, spottedAt: 1 } },
         )
         .sort({ lastCheck: 1 })
         .limit(90)
@@ -167,6 +171,20 @@ export async function refreshCalls(force = false) {
       }
       const now = Date.now();
       const prior = new Map(due.map((d) => [d.address, d as { lastMcap?: number; spottedMcap?: number; pendingMcap?: number }]));
+      // A rugged token disappears from the price source. It used to keep its last pre-rug price forever and look alive for days.
+      // When the source IS answering (other tokens came back) but this one has been missing for hours, record it as collapsed.
+      const GONE_AFTER_MISSES = 6, GONE_AFTER_MS = 45 * 60_000;
+      const goneOps = live.size >= 3 ? due.filter((d) => !live.has(d.address) && !(d as { rugged?: boolean }).rugged).map((d) => {
+        const x = d as { address: string; spottedMcap?: number; lastMcap?: number; misses?: number; lastSeenAt?: number; spottedAt?: number };
+        const misses = (x.misses ?? 0) + 1;
+        const seen = x.lastSeenAt ?? x.spottedAt ?? now;
+        if (misses >= GONE_AFTER_MISSES && now - seen >= GONE_AFTER_MS && x.spottedMcap && x.spottedMcap > 0) {
+          const floor = x.spottedMcap * 0.01;
+          return c.updateOne({ address: x.address }, { $set: { lastMcap: Math.min(x.lastMcap ?? floor, floor), lastCheck: now, rugged: true, misses } }).catch(() => undefined);
+        }
+        return c.updateOne({ address: x.address }, { $set: { lastCheck: now, misses } }).catch(() => undefined);
+      }) : [];
+      await Promise.all(goneOps);
       await Promise.all(
         [...live.entries()].map(([address, mcap]) => {
           if (!(mcap > 0) || !Number.isFinite(mcap)) return undefined;
@@ -179,7 +197,7 @@ export async function refreshCalls(force = false) {
             const confirmed = d?.pendingMcap && Math.abs(mcap / d.pendingMcap - 1) < 0.3;
             if (!confirmed) return c.updateOne({ address }, { $set: { pendingMcap: mcap, lastCheck: now } }).catch(() => undefined);
           }
-          return c.updateOne({ address }, { $set: { lastMcap: mcap, lastCheck: now }, $max: { peakMcap: mcap }, $unset: { pendingMcap: "" } }).catch(() => undefined);
+          return c.updateOne({ address }, { $set: { lastMcap: mcap, lastCheck: now, lastSeenAt: now, misses: 0 }, $max: { peakMcap: mcap }, $unset: { pendingMcap: "", rugged: "" } }).catch(() => undefined);
         }),
       );
     } finally {

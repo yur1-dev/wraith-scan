@@ -4,7 +4,7 @@ import { getDb } from "@/lib/mongoClient";
 import { fmtAge, fmtPct } from "@/lib/market";
 import type { Signal } from "@/app/api/signals/route";
 import type { SignalCall } from "@/lib/signalCalls";
-import { chainName, esc, fmtUsd, footer, header, rule, scoreBar, tokenKeyboard } from "@/lib/telegramUi";
+import { APP_URL, chainName, esc, fmtUsd, footer, header, rule, scoreBar, tokenKeyboard } from "@/lib/telegramUi";
 
 const TOKEN = () => process.env.TELEGRAM_BOT_TOKEN ?? "";
 export const WIN_LADDER = [2, 3, 5, 10, 25, 50, 100, 250, 500, 1000];
@@ -74,17 +74,18 @@ async function post(chat: string | number, text: string, opts: { imageUrl?: stri
  * never got the alert and the group never got its post. Now the group goes first, subscribers are sent in parallel batches paced
  * to Telegram's ~30 messages per second, anyone who blocked the bot is unlinked, and the run stops cleanly before the time limit.
  */
-export async function broadcast(kind: "signal" | "win", text: string, opts: { chain?: string; score?: number; markup?: Markup; imageUrl?: string }) {
+export async function broadcast(kind: "signal" | "win", text: string, opts: { chain?: string; score?: number; markup?: Markup; imageUrl?: string; teaser?: string }) {
   const db = await getDb();
   const chain = opts.chain ?? "solana";
 
-  // Optional public group/topic feed: set TELEGRAM_GROUP_CHAT_ID (e.g. -1001234567890) and, for a forum topic,
-  // TELEGRAM_GROUP_THREAD_ID. Wins always post there; signals only if TELEGRAM_GROUP_SIGNALS=1.
+  // Optional PUBLIC group/topic: marketing only. It never gets a signal, and a win goes out as a teaser (the result, with no contract
+  // address and no chart or swap links), so nobody can act on a call without holding the tier. Full messages go to subscribers' DMs
+  // and the private holders room only. TELEGRAM_GROUP_SIGNALS is ignored on purpose.
   const gid = process.env.TELEGRAM_GROUP_CHAT_ID;
-  if (gid && (kind === "win" || process.env.TELEGRAM_GROUP_SIGNALS === "1")) {
+  if (gid && kind === "win" && opts.teaser) {
     const thread = Number(process.env.TELEGRAM_GROUP_THREAD_ID);
     const extra = Number.isFinite(thread) && thread > 0 ? { message_thread_id: thread } : {};
-    const res = await post(gid, text, opts, extra);
+    const res = await post(gid, opts.teaser, { imageUrl: opts.imageUrl, markup: teaserKeyboard() }, extra);
     if (!res.ok) console.error("[telegram] group post failed", res.description);
   }
 
@@ -176,5 +177,22 @@ export function winMessage(c: Pick<SignalCall, "address" | "chain" | "symbol" | 
   ];
   return L.join("\n");
 }
+
+/** Public-channel version of a win: the proof, without anything you could trade from. */
+export function winTeaser(c: Pick<SignalCall, "symbol" | "spottedAt" | "spottedMcap" | "peakMcap" | "lastMcap">, milestone: number): string {
+  const x = c.lastMcap / c.spottedMcap;
+  const peakX = c.peakMcap / c.spottedMcap;
+  const spotted = new Date(c.spottedAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Manila" });
+  return [
+    header("🏆", `WRAITH WIN · ${milestone}x`, c.symbol, undefined, undefined),
+    `🚀 <b>${x.toFixed(x >= 10 ? 1 : 2)}x</b> from the call${peakX > x * 1.05 ? `   <i>(peak ${peakX.toFixed(peakX >= 10 ? 1 : 2)}x)</i>` : ""}`,
+    `📍 <b>Called</b>  ${fmtUsd(c.spottedMcap)}  <i>${spotted} PHT</i>`,
+    rule,
+    "🔒 <i>Contract and live alerts are for SPECTER and WRAITH holders.</i>",
+    "",
+    footer,
+  ].join("\n");
+}
+const teaserKeyboard = (): Markup => ({ inline_keyboard: [[{ text: "👻 Get alerts like this", url: `${APP_URL}/app` }]] }) as unknown as Markup;
 
 export const walletLine = (chain?: string) => chainName(chain);

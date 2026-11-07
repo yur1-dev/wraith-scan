@@ -8,7 +8,7 @@ import { callGet } from "@/lib/internalCall";
 import { getDb } from "@/lib/mongoClient";
 import { refreshCalls, type SignalCall } from "@/lib/signalCalls";
 import type { Signal } from "@/app/api/signals/route";
-import { broadcast, claim, milestoneFor, signalMessage, winMessage } from "@/lib/telegramBot";
+import { broadcast, claim, milestoneFor, signalMessage, winMessage, winTeaser } from "@/lib/telegramBot";
 import { tokenKeyboard } from "@/lib/telegramUi";
 import { runPushAlerts, pushBroadcast } from "@/lib/push";
 import { signQuery } from "@/lib/signedUrl";
@@ -104,7 +104,7 @@ export async function GET(req: NextRequest) {
       if (!m) continue;
       if (!(await claim(`win:${c.address}:${m}`))) continue;
       if (first) continue;
-      const r = await broadcast("win", winMessage(c, m), { chain: c.chain ?? "solana", markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "win", sym: c.symbol, x: c.lastMcap / c.spottedMcap, called: c.spottedMcap, now: c.lastMcap, peak: c.peakMcap, chain: c.chain ?? "solana" }) });
+      const r = await broadcast("win", winMessage(c, m), { teaser: winTeaser(c, m), chain: c.chain ?? "solana", markup: tokenKeyboard(c.address, c.chain ?? "solana"), imageUrl: bannerUrl(req.nextUrl.origin, { kind: "win", sym: c.symbol, x: c.lastMcap / c.spottedMcap, called: c.spottedMcap, now: c.lastMcap, peak: c.peakMcap, chain: c.chain ?? "solana" }) });
       out.wins++; out.sent += r.sent;
       await pushBroadcast({ title: `🏆 ${m}x $${c.symbol}`, body: `${(c.lastMcap / c.spottedMcap).toFixed(2)}x from the call`, url: `/app/token/${c.address}`, tag: `w:${c.address}:${m}` }, "signal").catch(() => 0);
     }

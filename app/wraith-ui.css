@@ -310,3 +310,40 @@
 .wx-pager-btns button:disabled { opacity: .35; cursor: default; }
 .wx-pager-btns .dots { color: var(--text-dim); padding: 0 2px; }
 .wx-age-chip { margin-left: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(255,123,61,.4); background: rgba(255,123,61,.1); color: #ff9a5c; font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: none; vertical-align: middle; }
+
+/* ── Search rows: simple, like Fomo ── */
+.wx-sr { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 16px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-family: inherit; transition: background .08s; }
+.wx-sr:hover, .wx-sr.active, .wx-sr:focus-visible { background: rgba(255,255,255,.05); outline: none; }
+.wx-sr-av { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--surface-2, #1b1b1e); border: 1px solid var(--border); }
+.wx-sr-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wx-sr-av b { color: var(--orange); font-size: 15px; }
+.wx-sr-id { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.wx-sr-sym { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 800; letter-spacing: -.01em; overflow: hidden; white-space: nowrap; }
+.wx-sr-chain { display: inline-grid; place-items: center; font-style: normal; opacity: .9; }
+.wx-sr-name { color: var(--text-muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wx-sr-mc { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; }
+.wx-sr-mc em { font-style: normal; font-size: 10px; font-weight: 800; padding: 2px 5px; border-radius: 5px; border: 1px solid var(--border); color: var(--text-dim); }
+.wx-sr-px { flex: 0 0 auto; min-width: 86px; display: grid; gap: 2px; text-align: right; }
+.wx-sr-px b { font-size: 14px; font-weight: 700; }
+.wx-sr-px small { font-size: 12.5px; font-weight: 600; }
+.wx-sr-px small.up { color: #22c55e; }
+.wx-sr-px small.dn { color: #ef4444; }
+@media (max-width: 520px) { .wx-sr { padding: 10px 14px; gap: 10px; } .wx-sr-mc { display: none; } }
+
+/* Search box: Paste and ESC chips on desktop too, like Fomo */
+@media (min-width: 768px) {
+  .wx-cs-mob { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; cursor: pointer; }
+  .wx-cs-paste, .wx-cs-close { height: 26px; width: auto; padding: 0 9px; border-radius: 7px; background: var(--surface-2, #1b1b1e); color: var(--text-muted); border: 1px solid var(--border); font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+  .wx-cs-close { font-size: 0; }
+  .wx-cs-close::after { content: "ESC"; font-size: 11px; }
+  .wx-cs-paste:hover, .wx-cs-close:hover { color: var(--text); }
+}
+/* Recents header: plain and quiet */
+.wx-cs-rq-head span { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+
+/* beat the older ".wx-cs-mob{display:none}" rule so the chips actually show on desktop */
+@media (min-width: 768px) {
+  .wx-cs-drop .wx-cs-mob { display: inline-flex !important; }
+  .wx-cs-drop .wx-cs-tabs { gap: 4px; padding: 10px 14px 4px; }
+  .wx-cs-drop .wx-cs-tabs button { border-radius: 999px !important; padding: 5px 13px !important; font-size: 12.5px !important; font-weight: 700 !important; letter-spacing: 0 !important; }
+}

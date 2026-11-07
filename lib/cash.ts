@@ -1,4 +1,5 @@
 "use client";
+import { fetchSolPrice } from "@/lib/solPriceClient";
 
 import { useEffect, useState } from "react";
 import { DISPLAY_CURRENCIES, isDisplayCurrency, type DisplayCurrency } from "@/lib/currencies";
@@ -35,7 +36,7 @@ let cache = { at: 0, cur: "USD" as DisplayCurrency, perSol: 0 };
 async function loadPerSol(cur: DisplayCurrency): Promise<number> {
   if (cache.perSol > 0 && cache.cur === cur && Date.now() - cache.at < 30_000) return cache.perSol;
   const [sol, fx] = await Promise.all([
-    fetch("/api/sol-price", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+    fetchSolPrice(),
     cur === "USD" ? Promise.resolve({ rate: 1 }) : fetch(`/api/fx?currency=${cur}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),
   ]);
   const solUsd = Number(sol?.solUsd), rate = Number((fx as { rate?: unknown } | null)?.rate);

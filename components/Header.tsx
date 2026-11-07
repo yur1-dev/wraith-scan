@@ -244,248 +244,43 @@ function TradingModeBadge({ locked }: { locked: boolean }) {
   );
 }
 
+// One calm row, like Fomo: picture, ticker + name, market cap, price and change. No address, copy, DEX or OPEN button.
 function TokenRow({
   token,
-  isLast,
-  copiedAddr,
   onSelect,
-  onCopy,
-  onOpenDex,
-  showOpenCta,
 }: {
   token: TokenResult;
-  isLast: boolean;
-  copiedAddr: string | null;
+  isLast?: boolean;
+  copiedAddr?: string | null;
   onSelect: (t: TokenResult) => void;
-  onCopy: (e: React.MouseEvent, addr: string) => void;
-  onOpenDex: (e: React.MouseEvent, t: TokenResult) => void;
-  showOpenCta: boolean;
+  onCopy?: (e: React.MouseEvent, addr: string) => void;
+  onOpenDex?: (e: React.MouseEvent, t: TokenResult) => void;
+  showOpenCta?: boolean;
 }) {
+  const up = token.priceChange24h >= 0;
   return (
-    <div style={{ borderBottom: isLast ? "none" : "1px solid #0d0d0d" }}>
-      <div
-        onClick={() => onSelect(token)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 11,
-          padding: "10px 14px 6px",
-          cursor: "pointer",
-          transition: "background .1s",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "#0d0d0d";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "transparent";
-        }}
-      >
-        <div style={{ flexShrink: 0, width: 32, height: 32 }}>
-          {token.icon ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={token.icon}
-              alt={token.symbol}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: "50%",
-                objectFit: "cover",
-                border: "1px solid #1a1a1a",
-                display: "block",
-              }}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: "50%",
-                background: "rgba(var(--accent-rgb),0.1)",
-                border: "1px solid rgba(var(--accent-rgb),0.24)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--accent-text)",
-                fontSize: 12,
-                fontWeight: 700,
-                ...MONO,
-              }}
-            >
-              {token.symbol[0]}
-            </div>
-          )}
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="wx-tr-sym"
-            style={{
-              color: "#d0d0d0",
-              fontSize: 12,
-              fontWeight: 700,
-              ...MONO,
-              letterSpacing: ".04em",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {token.symbol}
-            {token.chainId && (
-              <span style={{ marginLeft: 8, display: "inline-flex", alignItems: "center", gap: 4, verticalAlign: "middle", fontSize: 9, fontWeight: 700, letterSpacing: ".04em", color: "#9a9aa6", textTransform: "uppercase" }}>
-                <ChainLogo chain={token.chainId} size={14} />
-                {chainOf(token.chainId)?.name ?? (token.chainId === "solana" ? "Solana" : token.chainId)}
-              </span>
-            )}
-          </div>
-          <div className="wx-tr-name"
-            style={{
-              color: "#2e2e2e",
-              fontSize: 9,
-              ...MONO,
-              marginTop: 2,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {token.name}
-          </div>
-        </div>
-
-        <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ color: "#888", fontSize: 11, ...MONO }}>
-            {formatPrice(token.priceUsd)}
-          </div>
-          <div
-            style={{
-              fontSize: 9,
-              ...MONO,
-              marginTop: 2,
-              color: token.priceChange24h >= 0 ? "#00c47a" : "#ff4444",
-            }}
-          >
-            {token.priceChange24h >= 0 ? "+" : ""}
-            {token.priceChange24h.toFixed(1)}%
-          </div>
-        </div>
-
-        <div className="wx-tr-mc"
-          style={{
-            background: "#0d0d0d",
-            border: "1px solid #161616",
-            borderRadius: 4,
-            padding: "3px 8px",
-            color: "#383838",
-            fontSize: 9,
-            ...MONO,
-            flexShrink: 0,
-            minWidth: 56,
-            textAlign: "center",
-          }}
-        >
-          {formatMcap(token.marketCap)}
-        </div>
-
-        {showOpenCta && (
-          <div className="wx-tr-open"
-            style={{
-              background: "rgba(var(--accent-rgb),0.06)",
-              border: "1px solid rgba(var(--accent-rgb),0.24)",
-              borderRadius: 4,
-              padding: "3px 8px",
-              color: "var(--accent-text)",
-              fontSize: 9,
-              ...MONO,
-              flexShrink: 0,
-              letterSpacing: ".06em",
-              whiteSpace: "nowrap",
-            }}
-          >
-            OPEN →
-          </div>
+    <button type="button" className="wx-sr" data-nav-item onClick={() => onSelect(token)}>
+      <span className="wx-sr-av">
+        {token.icon ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={token.icon} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        ) : (
+          <b>{token.symbol[0]}</b>
         )}
-      </div>
-
-      <div className="wx-tr-addr"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "0 14px 8px 57px",
-        }}
-      >
-        <span
-          style={{
-            color: "#b8a59b",
-            fontSize: 9,
-            ...MONO,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
-          {token.address}
+      </span>
+      <span className="wx-sr-id">
+        <span className="wx-sr-sym">
+          {token.symbol}
+          {token.chainId && <i className="wx-sr-chain" title={chainOf(token.chainId)?.name ?? token.chainId}><ChainLogo chain={token.chainId} size={14} /></i>}
         </span>
-
-        <button
-          onClick={(e) => onCopy(e, token.address)}
-          style={{
-            background: "transparent",
-            border: "1px solid #181818",
-            borderRadius: 3,
-            padding: "2px 7px",
-            color: copiedAddr === token.address ? "#00c47a" : "#2a2a2a",
-            fontSize: 8,
-            ...MONO,
-            cursor: "pointer",
-            letterSpacing: ".06em",
-            flexShrink: 0,
-            transition: "all .15s",
-          }}
-          onMouseEnter={(e) => {
-            if (copiedAddr !== token.address)
-              e.currentTarget.style.color = "#555";
-          }}
-          onMouseLeave={(e) => {
-            if (copiedAddr !== token.address)
-              e.currentTarget.style.color = "#2a2a2a";
-          }}
-        >
-          {copiedAddr === token.address ? "COPIED" : "COPY CA"}
-        </button>
-
-        <button
-          onClick={(e) => onOpenDex(e, token)}
-          style={{
-            background: "transparent",
-            border: "1px solid #181818",
-            borderRadius: 3,
-            padding: "2px 7px",
-            color: "#2a2a2a",
-            fontSize: 8,
-            ...MONO,
-            cursor: "pointer",
-            letterSpacing: ".06em",
-            flexShrink: 0,
-            transition: "all .15s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = "#555";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = "#2a2a2a";
-          }}
-        >
-          DEX ↗
-        </button>
-      </div>
-    </div>
+        <span className="wx-sr-name">{token.name}</span>
+      </span>
+      <span className="wx-sr-mc"><em>MC</em>{formatMcap(token.marketCap)}</span>
+      <span className="wx-sr-px">
+        <b>{formatPrice(token.priceUsd)}</b>
+        <small className={up ? "up" : "dn"}>{up ? "+" : ""}{token.priceChange24h.toFixed(2)}%</small>
+      </span>
+    </button>
   );
 }
 
@@ -1271,7 +1066,7 @@ function CoinSearch({
               )}
               {recentQ.length > 0 && (
                 <div className="wx-cs-rq">
-                  <div className="wx-cs-rq-head"><span>RECENT SEARCHES</span></div>
+                  <div className="wx-cs-rq-head"><span>Recent searches</span></div>
                   {recentQ.map((q) => (
                     <div key={q} className="wx-cs-rq-row">
                       <button type="button" className="wx-cs-rq-main" onClick={() => { setQuery(q); setActiveIdx(-1); }}>
@@ -1297,13 +1092,13 @@ function CoinSearch({
                       letterSpacing: ".14em",
                     }}
                   >
-                    <span>RECENTLY VIEWED</span>
+                    <span>Recents</span>
                     <button
                       type="button"
                       onClick={clearRecent}
                       style={{ background: "transparent", border: 0, color: "#7d6e66", cursor: "pointer", fontSize: 9, ...MONO, letterSpacing: ".1em" }}
                     >
-                      CLEAR
+                      Clear all
                     </button>
                   </div>
                   {recent.map((token, i) => (

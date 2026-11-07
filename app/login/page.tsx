@@ -67,6 +67,7 @@ function LoginInner() {
   const [syncing, setSyncing] = useState(false);
   const redirected = useRef(false);
   const [oauthStale, setOauthStale] = useState(false);
+  const [opening, setOpening] = useState(false);
   useEffect(() => { const t = setTimeout(() => setOauthStale(true), 7000); return () => clearTimeout(t); }, []);
   const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
   const data = useLandingData();
@@ -110,7 +111,7 @@ function LoginInner() {
   // Coming back from Google: show "Signing you in…" right away instead of flashing the button again.
   const returningFromOAuth = searchParams.has("privy_oauth_code") || searchParams.has("privy_oauth_state");
   // "returning from Google" only counts for a few seconds: if Privy never finishes, the button must work again.
-  const busy = syncing || (returningFromOAuth && !syncError && !oauthStale);
+  const busy = syncing || opening || (returningFromOAuth && !syncError && !oauthStale);
 
   return (
     <div className="wl2">
@@ -158,10 +159,13 @@ function LoginInner() {
                 u.searchParams.set("app", "1");
                 window.history.replaceState(null, "", `${u.pathname}${u.search}`);
               }
+              // Answer the tap immediately: Privy needs a moment to build the Google link before the screen can leave.
+              setOpening(true);
+              window.setTimeout(() => setOpening(false), 9000); // never leave the button stuck if Google does not open
               login();
             }}
           >
-            {busy ? "Signing you in…" : (<><GoogleIcon />Continue with Google</>)}
+            {opening && !syncing ? "Opening Google…" : busy ? "Signing you in…" : (<><GoogleIcon />Continue with Google</>)}
           </button>
 
           {data && data.stats.calls > 0 && (

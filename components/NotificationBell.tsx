@@ -14,6 +14,7 @@ import { Bell, X } from "lucide-react";
 import { readTokenFavorites } from "@/lib/tokenFavorites";
 import PushToggle from "@/components/PushToggle";
 import { enablePush, isStandalone, pushAvailable } from "@/lib/pushClient";
+import { pushState, restoreState, watchFavorites } from "@/lib/userStateSync";
 
 type Kind = "trader" | "callout" | "saved" | "signal";
 interface Notif { id: string; kind: Kind; title: string; body: string; href: string; ts: number; img?: string }
@@ -74,6 +75,11 @@ export default function NotificationBell() {
     setMounted(true);
     setItems(read<Notif[]>(KEY, []));
     setSeen(read<number>(SEEN, 0));
+    // After a reinstall this device is empty: bring the history and saved tokens back from the account.
+    void restoreState().then((filled) => {
+      if (filled) { setItems(read<Notif[]>(KEY, [])); setSeen(read<number>(SEEN, 0)); }
+    });
+    return watchFavorites();
   }, []);
 
   // Installed app: ask "Allow notifications?" by itself on the first tap, like other apps do.
@@ -179,6 +185,7 @@ export default function NotificationBell() {
       await Promise.all(jobs);
 
       write(KNOWN, [...known].slice(-400));
+      pushState();
       if (fresh.length) {
         setItems((prev) => {
           const next = [...fresh, ...prev].sort((a, b) => b.ts - a.ts).slice(0, 60);
@@ -206,11 +213,11 @@ export default function NotificationBell() {
   const toggle = () => {
     setOpen((o) => {
       const next = !o;
-      if (next) { const now = Date.now(); setSeen(now); write(SEEN, now); }
+      if (next) { const now = Date.now(); setSeen(now); write(SEEN, now); pushState(); }
       return next;
     });
   };
-  const clearAll = () => { setItems([]); write(KEY, []); };
+  const clearAll = () => { setItems([]); write(KEY, []); pushState(); };
   const go = (n: Notif) => { setOpen(false); router.push(n.href); };
 
   if (!mounted) return null;

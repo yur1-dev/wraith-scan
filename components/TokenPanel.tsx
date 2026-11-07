@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import type { MemeTrend } from "@/app/app/page";
 import TokenChart from "@/components/TokenChart";
 import { snapCache } from "@/lib/prefetchChart";
+import { fetchSolPrice } from "@/lib/solPriceClient";
 import { swrRead, swrWrite } from "@/lib/swrCache";
 import { TokenDetailTabs, type AnalysisEntry, type IntelLink, type TradeRow } from "@/components/TokenDetailTabs";
 import { TokenIcon } from "@/components/TokenIcon";
@@ -385,8 +386,7 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
   useEffect(() => {
     let alive = true;
     const load = () =>
-      fetch("/api/sol-price", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
+      fetchSolPrice()
         .then((d: { solUsd?: number } | null) => { if (alive && d?.solUsd) solUsdRef.current = d.solUsd; })
         .catch(() => undefined);
     void load();

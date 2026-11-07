@@ -21,7 +21,20 @@ const NUMERIC: { key: string; log?: boolean }[] = [
 /** "was this indicator available at all" flags: availability itself carries information (e.g. Solana + vetted) */
 const HAS = ["holders", "organic", "flowBuyers", "smart", "devCreated", "buyShare"];
 
-export const FEATURE_NAMES = [...NUMERIC.map((n) => n.key), ...HAS.map((k) => `has:${k}`)];
+/**
+ * Launch / early-buyer features from the first 30 minutes of a token's trades (see scripts/research-augmented.ts).
+ * They are appended AFTER everything above, so a model saved before they existed keeps reading the same positions and still works.
+ * Missing values are fine: most live calls will not have them yet.
+ */
+const EXTRA: { key: string; log?: boolean }[] = [
+  { key: "wProven" }, { key: "wHolders" }, { key: "wDump" }, { key: "wSniper" }, { key: "wEarly", log: true }, { key: "wBig" }, { key: "wHold" },
+  // market regime (how the last day of calls turned out) and where this call ranks among the last day's calls: see lib/signalRegime.ts
+  { key: "regWin12" }, { key: "regWin36" }, { key: "regCol12" }, { key: "regN12", log: true },
+  { key: "rkVol" }, { key: "rkLiq" }, { key: "rkH1" }, { key: "rkM5" }, { key: "rkTraders" }, { key: "rkBuy" }, { key: "rkMcap" }, { key: "rkHolders" }, { key: "rkAge" },
+  { key: "thWin" }, { key: "thN", log: true },
+];
+
+export const FEATURE_NAMES = [...NUMERIC.map((n) => n.key), ...HAS.map((k) => `has:${k}`), ...EXTRA.map((n) => n.key)];
 
 const slog = (x: number) => Math.sign(x) * Math.log1p(Math.abs(x));
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -34,6 +47,10 @@ export function rawVector(f: Features): number[] {
     out.push(v === null ? NaN : n.log ? slog(v) : v);
   }
   for (const k of HAS) out.push(num(f[k]) === null ? 0 : 1);
+  for (const n of EXTRA) {
+    const v = num(f[n.key]);
+    out.push(v === null ? NaN : n.log ? slog(v) : v);
+  }
   return out;
 }
 
@@ -85,18 +102,21 @@ export function auc(scores: number[], labels: number[]): number {
 // ── boosted small trees ───────────────────────────────────────────────────────────────────────
 // Trees, unlike a straight-line (logistic) model, can learn "this indicator only matters when that one is high",
 // and need no scaling. On this track record, 5 walk-forward blocks gave AUC ~0.60 against ~0.53 for the old model.
-const ROUNDS = 250, DEPTH = 3, LR = 0.03, MIN_LEAF = 40, LAMBDA = 12;
+export interface TreeOpts { rounds: number; depth: number; lr: number; minLeaf: number; lambda: number; subsample: number }
+/** The settings the live model uses. Research scripts pass other settings to compare them on calls the model never saw. */
+export const TREE_DEFAULTS: TreeOpts = { rounds: 250, depth: 3, lr: 0.03, minLeaf: 40, lambda: 12, subsample: 0.7 };
+const LR = TREE_DEFAULTS.lr;
 
-function buildTree(X: number[][], g: number[], h: number[], idx: number[], depth: number, gains: number[]): Tree {
+function buildTree(X: number[][], g: number[], h: number[], idx: number[], depth: number, gains: number[], o: TreeOpts): Tree {
   const G = idx.reduce((a, i) => a + g[i], 0), H = idx.reduce((a, i) => a + h[i], 0);
-  const leaf: Tree = { v: -G / (H + LAMBDA) };
-  if (depth >= DEPTH || idx.length < MIN_LEAF * 2) return leaf;
+  const leaf: Tree = { v: -G / (H + o.lambda) };
+  if (depth >= o.depth || idx.length < o.minLeaf * 2) return leaf;
   let best = { gain: 1e-6, j: -1, t: 0 };
   const d = X[0].length;
   for (let j = 0; j < d; j++) {
     const sorted: number[] = [];
     for (const i of idx) { const v = X[i][j]; if (Number.isFinite(v)) sorted.push(v); }
-    if (sorted.length < MIN_LEAF * 2) continue;
+    if (sorted.length < o.minLeaf * 2) continue;
     sorted.sort((a, b) => a - b);
     const cands = new Set<number>();
     for (let q = 1; q < 12; q++) cands.add(sorted[Math.floor((sorted.length * q) / 12)]);
@@ -104,9 +124,9 @@ function buildTree(X: number[][], g: number[], h: number[], idx: number[], depth
       let gl = 0, hl = 0, nl = 0;
       for (const i of idx) { const v = X[i][j]; if (!Number.isFinite(v) || v <= t) { gl += g[i]; hl += h[i]; nl++; } }
       const nr = idx.length - nl;
-      if (nl < MIN_LEAF || nr < MIN_LEAF) continue;
+      if (nl < o.minLeaf || nr < o.minLeaf) continue;
       const gr = G - gl, hr = H - hl;
-      const gain = (gl * gl) / (hl + LAMBDA) + (gr * gr) / (hr + LAMBDA) - (G * G) / (H + LAMBDA);
+      const gain = (gl * gl) / (hl + o.lambda) + (gr * gr) / (hr + o.lambda) - (G * G) / (H + o.lambda);
       if (gain > best.gain) best = { gain, j, t };
     }
   }
@@ -114,29 +134,31 @@ function buildTree(X: number[][], g: number[], h: number[], idx: number[], depth
   gains[best.j] += best.gain;
   const L: number[] = [], R: number[] = [];
   for (const i of idx) { const v = X[i][best.j]; (!Number.isFinite(v) || v <= best.t ? L : R).push(i); }
-  return { j: best.j, t: best.t, l: buildTree(X, g, h, L, depth + 1, gains), r: buildTree(X, g, h, R, depth + 1, gains) };
+  return { j: best.j, t: best.t, l: buildTree(X, g, h, L, depth + 1, gains, o), r: buildTree(X, g, h, R, depth + 1, gains, o) };
 }
 const walk = (n: Tree, x: number[]): number =>
   n.v !== undefined ? n.v : walk(!Number.isFinite(x[n.j as number]) || x[n.j as number] <= (n.t as number) ? (n.l as Tree) : (n.r as Tree), x);
 
-function fitTrees(X: number[][], y: number[]): { f0: number; trees: Tree[]; gains: number[] } {
+export function fitTrees(X: number[][], y: number[], o: TreeOpts = TREE_DEFAULTS, w?: number[]): { f0: number; trees: Tree[]; gains: number[] } {
   const n = X.length, d = X[0].length;
   const p0 = Math.min(0.95, Math.max(0.01, y.reduce((a, v) => a + v, 0) / n));
   const f0 = Math.log(p0 / (1 - p0));
   const F = new Array(n).fill(f0), trees: Tree[] = [], gains = new Array(d).fill(0);
   const g = new Array(n), h = new Array(n);
-  for (let r = 0; r < ROUNDS; r++) {
-    for (let i = 0; i < n; i++) { const p = sigmoid(F[i]); g[i] = p - y[i]; h[i] = Math.max(p * (1 - p), 1e-4); }
-    // each tree sees a different 70% of the calls, which keeps it from memorising
+  const keep = Math.round(o.subsample * 100);
+  for (let r = 0; r < o.rounds; r++) {
+    for (let i = 0; i < n; i++) { const p = sigmoid(F[i]); const wi = w ? w[i] : 1; g[i] = (p - y[i]) * wi; h[i] = Math.max(p * (1 - p), 1e-4) * wi; }
+    // each tree sees a different share of the calls, which keeps it from memorising
     const sub: number[] = [];
-    for (let i = 0; i < n; i++) if ((i * 2654435761 + r * 40503) % 100 < 70) sub.push(i);
-    const t = buildTree(X, g, h, sub, 0, gains);
+    for (let i = 0; i < n; i++) if ((i * 2654435761 + r * 40503) % 100 < keep) sub.push(i);
+    const t = buildTree(X, g, h, sub, 0, gains, o);
     trees.push(t);
-    for (let i = 0; i < n; i++) F[i] += LR * walk(t, X[i]);
+    for (let i = 0; i < n; i++) F[i] += o.lr * walk(t, X[i]);
   }
   return { f0, trees, gains };
 }
-const score = (f0: number, trees: Tree[], x: number[]) => f0 + trees.reduce((a, t) => a + LR * walk(t, x), 0);
+export const scoreTrees = (f0: number, trees: Tree[], x: number[], lr: number = LR) => f0 + trees.reduce((a, t) => a + lr * walk(t, x), 0);
+const score = (f0: number, trees: Tree[], x: number[]) => scoreTrees(f0, trees, x, LR);
 
 export interface TrainRow { features: Features; win: boolean; at: number }
 

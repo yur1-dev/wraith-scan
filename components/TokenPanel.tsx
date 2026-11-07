@@ -23,6 +23,7 @@ import { readTokenFavorites, toggleTokenFavorite, TOKEN_FAVORITES_EVENT } from "
 import { changeColor, fmtAge, fmtCount, fmtPct, fmtPrice, fmtUsd, shortAddr } from "@/lib/market";
 import { useLiveTrades } from "@/lib/useLiveTrades";
 import { PublicKey } from "@solana/web3.js";
+import WalletWatch from "@/components/WalletWatch";
 import { SOLANA_WS_PUSH } from "@/lib/publicRpc";
 
 interface Windowed<T> {
@@ -749,6 +750,8 @@ export default function TokenPanel({ selectedMeme }: { selectedMeme: MemeTrend |
       {snapState === "error" && !snap && <div className="wx-note warn">Market data is slow to respond. Retrying…</div>}
 
       {/* ── chart ── */}
+      {/* wallets Wraith has seen dump (or win) before, shown where you read the chart, not only in the buy panel */}
+      <div style={{ padding: "0 12px" }}><WalletWatch mint={mint} /></div>
       <section className="wx-chart-card" aria-label="Price chart">
         <TokenChart mint={mint} onCurve={snap?.onCurve ?? false} livePrice={snap?.priceUsd ?? null} supply={snap?.supply ?? null} spottedMcap={spotted?.spottedMcap ?? null} spottedAt={spotted?.spottedAt ?? null}
           trades={trades}

@@ -20,6 +20,8 @@ export interface LearningSnapshot {
   rug: Omit<SignalModel, "mean" | "std" | "w" | "names" | "trees"> | null;
   patterns: PatternStat[];
   coverage: { calls: number; withIntel: number; withIntelPct: number };
+  /** every retrain so far (newest last): how many calls it learned from and its score on calls it never saw */
+  history: { at: number; calls: number; auc: number | null; active: boolean; rugAuc: number | null }[];
   at: number;
 }
 
@@ -53,7 +55,7 @@ export async function retrainIfDue(force = false): Promise<void> {
     try {
       const db = await getDb();
       const col = db.collection(COLLECTION);
-      const cur = await col.findOne({ _id: "current" as never }, { projection: { at: 1 } });
+      const cur = await col.findOne({ _id: "current" as never }, { projection: { at: 1, model: 1, rug: 1 } });
       if (!force && cur?.at && Date.now() - new Date(cur.at as Date).getTime() < RETRAIN_EVERY_MS) return;
       const docs = await db
         .collection("signal_calls")
@@ -67,15 +69,28 @@ export async function retrainIfDue(force = false): Promise<void> {
         at: d.spottedAt as number,
       }));
       const withIntel = rows.filter((r) => typeof r.features.smart === "number" || typeof r.features.flowBuyers === "number").length;
-      const model = trainModel(rows);
+      const trained = trainModel(rows);
       // Rug model: same trees, different question. "Will this call end below 20% of its call price?" Needs a full day to judge.
       const oldDocs = docs.filter((d) => (d.spottedAt as number) < Date.now() - RUG_MATURE_MS);
-      const rug = trainModel(oldDocs.map((d) => ({ features: (d.features as Features) ?? {}, win: d.lastMcap / d.spottedMcap <= RUG_LEVEL, at: d.spottedAt as number })));
+      const trainedRug = trainModel(oldDocs.map((d) => ({ features: (d.features as Features) ?? {}, win: d.lastMcap / d.spottedMcap <= RUG_LEVEL, at: d.spottedAt as number })));
+      // Champion / challenger: a retrain may IMPROVE the live model but must never replace one that beats chance with one that does not
+      // (a data glitch or a bad week would otherwise switch the model off or make it worse until the next retrain).
+      const curModel = cur?.model as SignalModel | undefined, curRug = cur?.rug as SignalModel | undefined;
+      const keepModel = !!curModel?.active && !trained?.active;
+      const keepRug = !!curRug?.active && !trainedRug?.active;
+      const model = keepModel ? curModel! : trained;
+      const rug = keepRug ? curRug! : trainedRug;
       await col.updateOne(
         { _id: "current" as never },
         { $set: { model, rug, patterns: patternStats(rows), coverage: { calls: rows.length, withIntel, withIntelPct: rows.length ? Math.round((withIntel / rows.length) * 1000) / 10 : 0 }, at: new Date() } },
         { upsert: true },
       );
+      // A record of every retrain, so "is it learning?" has a visible answer: how the score on unseen calls moves as calls pile up.
+      await db.collection("signal_model_history").insertOne({
+        at: Date.now(), calls: rows.length, wins: rows.filter((r) => r.win).length,
+        auc: trained?.holdout.auc ?? null, active: !!trained?.active, topQ: trained?.holdout.topQuartileRate ?? null, bottomQ: trained?.holdout.bottomQuartileRate ?? null,
+        rugAuc: trainedRug?.holdout.auc ?? null, rugActive: !!trainedRug?.active, keptOldModel: keepModel, keptOldRug: keepRug,
+      }).catch(() => undefined);
       mem = null;
     } catch (e) {
       console.warn("[signal-learning] retrain failed", e instanceof Error ? e.message : e);
@@ -101,11 +116,16 @@ export async function annotateFeatures(list: Features[]): Promise<Annotated[]> {
 
 export async function learningSnapshot(): Promise<LearningSnapshot> {
   const m = await load();
+  let history: LearningSnapshot["history"] = [];
+  try {
+    const rows = await (await getDb()).collection("signal_model_history").find({}, { projection: { _id: 0, at: 1, calls: 1, auc: 1, active: 1, rugAuc: 1 } }).sort({ at: -1 }).limit(40).toArray();
+    history = (rows.reverse() as unknown) as LearningSnapshot["history"];
+  } catch { /* history is optional */ }
   const model = m.model ? (({ mean: _mean, std: _std, w: _w, names: _names, trees: _trees, ...rest }) => rest)(m.model) : null;
   // pattern labels exist even before the first training run
   const patterns = m.patterns.length ? m.patterns : PATTERNS.map((p) => ({ id: p.id, label: p.label, hint: p.hint, trap: p.id.startsWith("trap-"), calls: 0, wins: 0, rate: null, lift: null }));
   const rug = m.rug ? (({ mean: _mean, std: _std, w: _w, names: _names, trees: _trees, ...rest }) => rest)(m.rug) : null;
-  return { model, rug, patterns, coverage: m.coverage, at: Date.now() };
+  return { model, rug, patterns, coverage: m.coverage, history, at: Date.now() };
 }
 
 export const patternLabel = (id: string) => PATTERNS.find((p) => p.id === id)?.label ?? id;

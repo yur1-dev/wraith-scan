@@ -42,6 +42,8 @@ export interface SignalCall {
 const COLLECTION = "signal_calls";
 const WINDOW_MS = 7 * 24 * 3_600_000;
 const REFRESH_EVERY_MS = 8_000;
+/** calls re-priced per run (30 per DexScreener request, all requests in parallel) */
+const REFRESH_BATCH = 270;
 let lastRefresh = 0;
 let refreshing: Promise<void> | null = null;
 let indexed = false;
@@ -154,13 +156,25 @@ export async function refreshCalls(force = false) {
     try {
       const c = await col();
       const t0 = Date.now();
+      // Who needs a fresh price NOW. Young calls move fast and are where peaks happen, so they are re-priced almost every run; older
+      // ones less often. This used to be "the 90 least recently checked", which left the median tracked call unpriced for 5+ hours:
+      // peaks were missed and real winners were stored as non-winners, which is bad food for the learning model.
+      const MIN = 60_000, HR = 3_600_000;
+      const active = { $or: [{ shadow: { $ne: true }, engine: 2, spottedAt: { $gt: t0 - WINDOW_MS } }, { shadow: true, spottedAt: { $gt: t0 - 24 * HR } }] };
+      const stale = {
+        $or: [
+          { spottedAt: { $gt: t0 - 6 * HR }, lastCheck: { $lt: t0 - 45_000 } },
+          { spottedAt: { $gt: t0 - 48 * HR, $lte: t0 - 6 * HR }, lastCheck: { $lt: t0 - 8 * MIN } },
+          { spottedAt: { $lte: t0 - 48 * HR }, lastCheck: { $lt: t0 - 45 * MIN } },
+        ],
+      };
       const due = await c
         .find(
-          { $or: [{ shadow: { $ne: true }, engine: 2, spottedAt: { $gt: t0 - WINDOW_MS } }, { shadow: true, spottedAt: { $gt: t0 - 24 * 3_600_000 } }] },
-          { projection: { address: 1, chain: 1, lastMcap: 1, spottedMcap: 1, pendingMcap: 1, misses: 1, lastSeenAt: 1, rugged: 1, spottedAt: 1 } },
+          { $and: [active, stale] },
+          { projection: { address: 1, chain: 1, lastMcap: 1, spottedMcap: 1, pendingMcap: 1, misses: 1, lastSeenAt: 1, rugged: 1, spottedAt: 1, peakMcap: 1, hit2xAt: 1, hitHalfAt: 1 } },
         )
         .sort({ lastCheck: 1 })
-        .limit(90)
+        .limit(REFRESH_BATCH)
         .toArray();
       if (!due.length) return;
       const chunks: typeof due[] = [];
@@ -173,7 +187,7 @@ export async function refreshCalls(force = false) {
       const prior = new Map(due.map((d) => [d.address, d as { lastMcap?: number; spottedMcap?: number; pendingMcap?: number }]));
       // A rugged token disappears from the price source. It used to keep its last pre-rug price forever and look alive for days.
       // When the source IS answering (other tokens came back) but this one has been missing for hours, record it as collapsed.
-      const GONE_AFTER_MISSES = 6, GONE_AFTER_MS = 45 * 60_000;
+      const GONE_AFTER_MISSES = 3, GONE_AFTER_MS = 45 * 60_000;
       const goneOps = live.size >= 3 ? due.filter((d) => !live.has(d.address) && !(d as { rugged?: boolean }).rugged).map((d) => {
         const x = d as { address: string; spottedMcap?: number; lastMcap?: number; misses?: number; lastSeenAt?: number; spottedAt?: number };
         const misses = (x.misses ?? 0) + 1;
@@ -197,7 +211,17 @@ export async function refreshCalls(force = false) {
             const confirmed = d?.pendingMcap && Math.abs(mcap / d.pendingMcap - 1) < 0.3;
             if (!confirmed) return c.updateOne({ address }, { $set: { pendingMcap: mcap, lastCheck: now } }).catch(() => undefined);
           }
-          return c.updateOne({ address }, { $set: { lastMcap: mcap, lastCheck: now, lastSeenAt: now, misses: 0 }, $max: { peakMcap: mcap }, $unset: { pendingMcap: "", rugged: "" } }).catch(() => undefined);
+          // Path, not only the end points: WHEN it first doubled and WHEN it first lost half. "Doubled before losing half" is the
+          // question a trader actually cares about, and it is learnable from these timestamps (peak/last alone cannot tell the order).
+          const pd = d as { spottedMcap?: number; peakMcap?: number; hit2xAt?: number; hitHalfAt?: number } | undefined;
+          const sm = pd?.spottedMcap ?? 0;
+          const path: Record<string, number> = {};
+          if (sm > 0) {
+            if (!pd?.hit2xAt && mcap >= sm * 2) path.hit2xAt = now;
+            if (!pd?.hitHalfAt && mcap <= sm * 0.5) path.hitHalfAt = now;
+            if (mcap > (pd?.peakMcap ?? sm)) path.peakAt = now;
+          }
+          return c.updateOne({ address }, { $set: { lastMcap: mcap, lastCheck: now, lastSeenAt: now, misses: 0, ...path }, $max: { peakMcap: mcap }, $min: { troughMcap: mcap }, $unset: { pendingMcap: "", rugged: "" } }).catch(() => undefined);
         }),
       );
     } finally {

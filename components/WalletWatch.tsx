@@ -2,6 +2,7 @@
 
 // A warning right where you buy: are wallets Wraith has seen dump before already in this token, or proven ones?
 // Reads the same wallet intel as the Analysis tab (cached on the server), and stays silent when there is nothing to say.
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import WalletAvatar from "@/components/WalletAvatar";
@@ -47,7 +48,7 @@ export default function WalletWatch({ mint }: { mint: string }) {
       </div>
       {faces.length > 0 && (
         <span className="ww-faces">
-          {faces.map((f) => <span key={f.wallet} title={`${walletName(f.wallet)} · ${f.dumps} dumps / ${f.wins} wins in ${f.n} calls`}><WalletAvatar address={f.wallet} size={26} /></span>)}
+          {faces.map((f) => <Link key={f.wallet} href={`/app/w/${f.wallet}`} title={`${walletName(f.wallet)} · ${f.dumps} dumps / ${f.wins} wins in ${f.n} calls`}><WalletAvatar address={f.wallet} size={26} /></Link>)}
         </span>
       )}
     </div>

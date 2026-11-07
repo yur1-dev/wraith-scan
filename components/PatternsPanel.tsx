@@ -2,6 +2,7 @@
 
 // Patterns view: what the scanner has learned from its own track record. Everything shown here is measured from real,
 // matured calls (did the token reach 2x from the price it was flagged at?). Nothing is a promise about the future.
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Brain, Copy, ExternalLink, FlaskConical, ShieldAlert, Target, Wallet } from "lucide-react";
 import { fmtUsd, type MarketToken } from "@/lib/market";
@@ -18,6 +19,30 @@ interface Learning {
   };
   patterns: PatternStat[];
   coverage: { calls: number; withIntel: number; withIntelPct: number };
+  history?: { at: number; calls: number; auc: number | null; active: boolean; rugAuc: number | null }[];
+}
+
+/** Is it learning? Each dot is one retrain: its score on calls it never saw, against a coin flip (the dashed line). */
+function LearningCurve({ h }: { h: NonNullable<Learning["history"]> }) {
+  const pts = h.filter((p) => p.auc !== null);
+  if (pts.length < 2) return null;
+  const W = 300, H = 74, pad = 8;
+  const lo = Math.min(0.45, ...pts.map((p) => p.auc as number)), hi = Math.max(0.7, ...pts.map((p) => p.auc as number));
+  const x = (i: number) => pad + (i / (pts.length - 1)) * (W - pad * 2);
+  const y = (v: number) => H - pad - ((v - lo) / (hi - lo)) * (H - pad * 2);
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.auc as number).toFixed(1)}`).join(" ");
+  const first = pts[0], last = pts[pts.length - 1];
+  return (
+    <div className="pc-curve">
+      <div className="pc-curve-head"><b>Is it learning?</b><span>{first.calls.toLocaleString()} → {last.calls.toLocaleString()} calls · score {(first.auc as number).toFixed(2)} → {(last.auc as number).toFixed(2)}</span></div>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Score on unseen calls after each retrain">
+        <line x1={pad} x2={W - pad} y1={y(0.5)} y2={y(0.5)} stroke="currentColor" strokeOpacity=".25" strokeDasharray="4 4" />
+        <path d={d} fill="none" stroke="var(--orange)" strokeWidth="2" strokeLinejoin="round" />
+        {pts.map((p, i) => <circle key={p.at} cx={x(i)} cy={y(p.auc as number)} r="2.6" fill={p.active ? "var(--orange)" : "var(--text-dim)"} />)}
+      </svg>
+      <p>Each dot is one retrain, scored only on calls it had never seen. The dashed line is a coin flip (0.50). Dots that are grey were not good enough to change any scores.</p>
+    </div>
+  );
 }
 interface Sig { token: MarketToken; score: number; tier: "HOT" | "WATCH"; tags: string[]; risks: string[]; patterns?: string[]; odds?: number }
 
@@ -69,9 +94,9 @@ function Wallets() {
                 return (
                   <div key={r.wallet} className="pw-card">
                     <span className="pw-rank">{i + 1}</span>
-                    <WalletAvatar address={r.wallet} kind={kind} size={44} />
+                    <Link href={`/app/w/${r.wallet}`} aria-label={`Open ${walletName(r.wallet)}`}><WalletAvatar address={r.wallet} kind={kind} size={44} /></Link>
                     <div className="pw-main">
-                      <div className="pw-title"><b>{walletName(r.wallet)}</b><code title={r.wallet}>{shortAddr(r.wallet)}</code></div>
+                      <div className="pw-title"><Link href={`/app/w/${r.wallet}`} className="pw-name"><b>{walletName(r.wallet)}</b></Link><code title={r.wallet}>{shortAddr(r.wallet)}</code></div>
                       <div className="pw-tags">
                         <span className="pw-kind" style={{ color: info.color, borderColor: info.color }} title={info.blurb}>{info.label}</span>
                         {r.holdPct !== null && <span>holds {r.holdPct}%</span>}
@@ -144,6 +169,8 @@ export default function PatternsPanel({ signals, onOpen }: { signals: Sig[]; onO
               <span>{m?.active ? "Beats chance on later calls it never saw, so it nudges scores by up to ±6 and shows win odds. The edge is modest: treat it as a tilt, not a guarantee." : "Not better than chance yet, so it is NOT changing any scores. It retrains daily as calls finish."}</span>
             </div>
           </div>
+
+          {data.history && <LearningCurve h={data.history} />}
 
           {data.coverage.calls > 0 && data.coverage.withIntelPct < 40 && (
             <div className="pt-note">

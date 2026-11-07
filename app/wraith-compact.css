@@ -467,5 +467,67 @@ html.wx-native::after {
 .ww-txt b { font-size: 13px; }
 .ww-txt span { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
 .ww-faces { flex: 0 0 auto; display: flex; }
-.ww-faces > span { margin-left: -8px; }
-.ww-faces > span:first-child { margin-left: 0; }
+.ww-faces > a { margin-left: -8px; }
+.ww-faces > a:first-child { margin-left: 0; }
+
+/* Wallet profile page */
+.wp-shell { max-width: 880px; margin: 0 auto; padding: 14px 16px calc(120px + var(--sai-bottom, 0px)); display: grid; gap: 14px; }
+.wp-back { color: var(--text-muted); font-size: 13px; font-weight: 700; text-decoration: none; }
+.wp-head { display: flex; gap: 16px; align-items: center; padding: 16px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+.wp-id { min-width: 0; display: grid; gap: 6px; }
+.wp-id h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+.wp-addr { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 12px; }
+.wp-addr code { font-family: var(--font-mono, monospace); }
+.wp-addr button, .wp-addr a { display: inline-grid; place-items: center; min-width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; text-decoration: none; }
+.wp-tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.wp-badge { padding: 3px 10px; border: 1px dashed var(--border-strong, rgba(255,255,255,.25)); border-radius: 999px; font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-decoration: none; }
+.wp-badge.on { border-style: solid; border-color: var(--orange); color: var(--orange); }
+.wp-blurb { margin: 0; font-size: 12.5px; color: var(--text-dim); }
+.wp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.wp-stats > div { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); display: grid; gap: 3px; }
+.wp-stats b { font-size: 20px; }
+.wp-stats small { font-size: 11px; color: var(--text-dim); }
+.wp-stats .up, .wp-tok-nums .up { color: #22c55e; }
+.wp-stats .down, .wp-tok-nums .down { color: #ef4444; }
+.wp-block { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 12px 14px; }
+.wp-block h2 { margin: 0 0 6px; font-size: 14px; }
+.wp-list { display: grid; }
+.wp-tok { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); color: var(--text); text-decoration: none; }
+.wp-tok:first-child { border-top: 0; }
+.wp-tok-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.wp-tok-main b { font-size: 14px; }
+.wp-tok-main span { font-size: 12px; color: var(--text-dim); }
+.wp-tok-nums { flex: 0 0 auto; display: grid; gap: 2px; text-align: right; font-size: 12px; color: var(--text-muted); }
+.wp-tok-nums em { font-style: normal; font-weight: 700; }
+.wp-foot { margin: 8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }
+.wp-skel { display: grid; gap: 12px; }
+.wp-skel i { display: block; height: 90px; border-radius: 16px; background: rgba(255,255,255,.055); animation: wx-shimmer 1.4s ease-in-out infinite; }
+@media (max-width: 520px) { .wp-head { gap: 12px; padding: 14px; } .wp-id h1 { font-size: 19px; } .wp-stats { grid-template-columns: repeat(2, 1fr); } }
+
+.pw-name { color: inherit; text-decoration: none; }
+.pw-name:hover b { text-decoration: underline; }
+
+/* keep the cards readable on wide desktop screens */
+.pw-body { max-width: 900px; }
+.pw-card .pw-bar { max-width: 420px; }
+
+/* Wallet profile: net worth, holdings, back button, loading blocks */
+button.wp-back { background: transparent; border: 0; padding: 4px 0; cursor: pointer; font-family: inherit; text-align: left; justify-self: start; }
+.wp-stats .wp-big { grid-column: span 2; background: linear-gradient(135deg, rgba(255,123,61,.14), transparent); border-color: rgba(255,123,61,.4); }
+.wp-stats .wp-big b { font-size: 26px; }
+.wp-sk { height: 62px; border-radius: 12px; background: rgba(255,255,255,.055); animation: wx-shimmer 1.4s ease-in-out infinite; }
+.wp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wp-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2, rgba(255,255,255,.03)); color: var(--text); text-decoration: none; }
+.wp-chip span { display: grid; line-height: 1.15; }
+.wp-chip b { font-size: 13px; }
+.wp-chip small { font-size: 11px; color: var(--text-dim); }
+.wp-skel i { height: 56px; }
+@media (max-width: 520px) { .wp-stats .wp-big { grid-column: span 2; } }
+
+/* Patterns: "Is it learning?" curve */
+.pc-curve { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-muted); }
+.pc-curve-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; margin-bottom: 6px; }
+.pc-curve-head b { color: var(--text); font-size: 14px; }
+.pc-curve-head span { font-size: 12px; color: var(--text-dim); }
+.pc-curve svg { width: 100%; height: 74px; display: block; }
+.pc-curve p { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }

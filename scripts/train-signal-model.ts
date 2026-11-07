@@ -35,8 +35,18 @@ async function main() {
   console.log("strongest effects:", model.top.map((t) => `${t.name} ${t.w > 0 ? "+" : ""}${t.w}`).join(", "));
   console.log("\npattern                       calls   2x rate   lift");
   for (const p of patternStats(rows)) console.log(`${p.label.padEnd(28)} ${String(p.calls).padStart(6)}   ${p.rate === null ? "  n/a " : (p.rate * 100).toFixed(1).padStart(5) + "%"}   ${p.lift ?? "-"}`);
+  // Rug model: "will this call end below 20% of its call price?" Judged only on calls a full day old.
+  const rugRows: TrainRow[] = docs
+    .filter((d) => d.spottedAt < now - 24 * 3_600_000)
+    .map((d) => ({ features: d.features ?? {}, win: d.lastMcap / d.spottedMcap <= 0.2, at: d.spottedAt }));
+  const rug = trainModel(rugRows);
+  if (rug) {
+    const r = rug.holdout;
+    console.log(`\nRUG MODEL (collapse = ends below 20% of call price): calls ${rug.n}, collapsed ${(rug.base * 100).toFixed(0)}%`);
+    console.log(`held-out: AUC ${r.auc}  riskiest quarter collapsed ${(r.topQuartileRate * 100).toFixed(0)}%  safest quarter ${(r.bottomQuartileRate * 100).toFixed(0)}%  ${rug.active ? "ACTIVE" : "INACTIVE"}`);
+  } else console.log("\nrug model: not enough calls yet");
   if (process.argv.includes("--save")) {
-    await db.collection("signal_model").updateOne({ _id: "current" as never }, { $set: { model, patterns: patternStats(rows), at: new Date() } }, { upsert: true });
+    await db.collection("signal_model").updateOne({ _id: "current" as never }, { $set: { model, rug, patterns: patternStats(rows), at: new Date() } }, { upsert: true });
     console.log("\nsaved to signal_model/current");
   }
   await client.close();

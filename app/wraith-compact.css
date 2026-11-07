@@ -414,3 +414,58 @@ html.wx-native::after {
   .wl2-chains span > * { max-width: 62%; max-height: 62%; }
   .wl2-card .wl-legal { margin-top: clamp(10px, 2dvh, 18px); padding-top: 0; font-size: 10.5px; line-height: 1.5; }
 }
+
+/* Patterns table: the trap icon sits on the same line as its label, vertically centred with the first line of text */
+.pt-name .pt-title { display: flex; align-items: flex-start; gap: 6px; }
+.pt-name .pt-title svg { flex: 0 0 auto; margin: 0; margin-top: .16em; vertical-align: baseline; color: var(--loss); }
+.pt-name .pt-title > span { min-width: 0; }
+
+/* Patterns: wallets behind the signals */
+.pw { margin-top: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.pw-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; background: transparent; border: 0; color: var(--text); text-align: left; cursor: pointer; font-family: inherit; }
+.pw-head > svg { flex: 0 0 auto; color: var(--orange); }
+.pw-head > span { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.pw-head b { font-size: 14px; }
+.pw-head em { font-style: normal; font-size: 12px; color: var(--text-dim); }
+.pw-head i { font-style: normal; font-size: 12px; font-weight: 700; color: var(--text-muted); }
+.pw-body { padding: 0 14px 12px; border-top: 1px solid var(--border); }
+.pw-tabs { display: flex; gap: 6px; margin: 12px 0 8px; }
+.pw-tabs button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.pw-tabs button.on { background: var(--surface-2, #1b1b1e); color: var(--text); border-color: var(--border-strong, rgba(255,255,255,.2)); }
+.pw-hint { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+.pw-list { display: grid; }
+.pw-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); }
+.pw-row code { flex: 0 0 auto; font-family: var(--font-mono, monospace); font-size: 13px; color: var(--text); }
+.pw-rec { flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: var(--text-muted); }
+.pw-rec b { color: var(--text); }
+.pw-row button, .pw-row a { flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; text-decoration: none; }
+
+/* Wallet cards: avatar, name, type, record */
+.wa { position: relative; display: inline-block; flex: 0 0 auto; }
+.wa svg { display: block; border-radius: 50%; }
+.wa-kind { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 11px; border: 2px solid var(--surface, #141416); line-height: 1; }
+.pw-card { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--border); }
+.pw-rank { flex: 0 0 22px; text-align: center; font-size: 12px; font-weight: 800; color: var(--text-dim); }
+.pw-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
+.pw-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pw-title b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-title code { font-family: var(--font-mono, monospace); font-size: 11.5px; color: var(--text-dim); }
+.pw-tags { display: flex; flex-wrap: wrap; gap: 5px 8px; font-size: 11.5px; color: var(--text-dim); align-items: center; }
+.pw-kind { padding: 1px 7px; border: 1px solid; border-radius: 999px; font-weight: 800; font-size: 10.5px; letter-spacing: .02em; }
+.pw-bar { height: 5px; border-radius: 99px; background: rgba(255,255,255,.07); overflow: hidden; }
+.pw-bar i { display: block; height: 100%; border-radius: 99px; }
+.pw-bar i.good { background: #22c55e; }
+.pw-bar i.bad { background: #ef4444; }
+.pw-act { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
+.pw-card .pw-rec { font-size: 12px; }
+@media (min-width: 760px) { .pw-act { flex-direction: row; } }
+
+/* Wallet warning strip in the buy panel */
+.ww { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid; border-radius: 12px; }
+.ww-ico { flex: 0 0 auto; display: grid; place-items: center; }
+.ww-txt { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.ww-txt b { font-size: 13px; }
+.ww-txt span { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.ww-faces { flex: 0 0 auto; display: flex; }
+.ww-faces > span { margin-left: -8px; }
+.ww-faces > span:first-child { margin-left: 0; }

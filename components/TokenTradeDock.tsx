@@ -22,6 +22,7 @@ import { execEvmRoute, friendlyError, lifiQuote, SOLANA_LIFI_ID, waitForRoute } 
 import { useCashSources } from "@/lib/useCashSources";
 import { useWraithTier } from "@/hooks/useWraithTier";
 import ExitBox, { type ExitPrefs } from "@/components/ExitBox";
+import WalletWatch from "@/components/WalletWatch";
 import SizeHint from "@/components/SizeHint";
 import { getLiveUsdPrice } from "@/lib/livePrice";
 import { getMcap } from "@/lib/getTokenPrice";
@@ -463,6 +464,7 @@ function EmbeddedTradeDock({ meme, initialMode }: Props) {
 
         {mode === "buy" ? (
           <>
+            <WalletWatch mint={mint} />
             <div style={{ display: "flex", justifyContent: "space-between", margin: "0 1px 10px", color: "var(--text-muted)", fontSize: 11 }}>
               <span>Cash value available</span>
               <strong style={{ color: "var(--text)" }}>{!cash.loaded || currencyRate === null ? "Loading..." : formatCurrency(cash.total * currencyRate, displayCurrency)}</strong>

@@ -120,8 +120,11 @@ export function computeFlow(swaps: Swap[], now = Date.now()): { flow: FlowIntel;
 
 // ── 3. proven wallets (learned in lib/walletLearn.ts) ─────────────────────────────────────────────────────────
 export const SMART_MIN_N = 3;
-export function isSmart(s: { n?: number; wins?: number }): boolean {
-  return (s.n ?? 0) >= SMART_MIN_N && (s.wins ?? 0) / (s.n ?? 1) >= 0.3;
+export function isSmart(s: { n?: number; wins?: number; dumps?: number }): boolean {
+  const n = s.n ?? 0;
+  // A wallet that is in winners AND ends in a 50%+ loss most of the time is a bot that buys everything, not a skilled buyer.
+  const dumpy = n > 0 && (s.dumps ?? 0) / n >= 0.6;
+  return n >= SMART_MIN_N && (s.wins ?? 0) / (n || 1) >= 0.3 && !dumpy;
 }
 export function isDumper(s: { n?: number; dumps?: number }): boolean {
   return (s.n ?? 0) >= 4 && (s.dumps ?? 0) / (s.n ?? 1) >= 0.75;

@@ -12,7 +12,7 @@ import { createPublicClient, createWalletClient, custom, encodeFunctionData, for
 import { Check, LoaderCircle } from "lucide-react";
 import ChainLogo from "@/components/ChainLogo";
 import CashLogo from "@/components/CashLogo";
-import { CASH_TOKENS, DEPOSIT_CHAINS, VIEM_CHAINS, rpcFor } from "@/lib/cashTokens";
+import { ARC_USDC_ERC20, CASH_TOKENS, DEPOSIT_CHAINS, VIEM_CHAINS, lifiSource, rpcFor } from "@/lib/cashTokens";
 import { execEvmRoute, friendlyError, lifiQuote, NATIVE_ADDR, SOLANA_LIFI_ID, waitForRoute, withGasFallback, type LifiQuote } from "@/lib/lifi";
 import { useEnsureGas, useSponsoredSend } from "@/lib/useSponsoredSend";
 import { useCashSources } from "@/lib/useCashSources";
@@ -93,12 +93,13 @@ export default function WithdrawCash({ onDone }: { onDone?: () => void }) {
     const sol = src.kind === "solana";
     const from = sol ? solAddress : evmAddress;
     if (!from) return null;
+    const ls = lifiSource(src);
     return {
-      fromKey: src.chain, sol, native: src.native, fromToken: src.address,
+      fromKey: src.chain, sol, native: ls.native, fromToken: ls.token,
       fromId: sol ? SOLANA_LIFI_ID : VIEM_CHAINS[src.chain].id,
       toId: destIsSol ? SOLANA_LIFI_ID : VIEM_CHAINS[destKey].id,
-      toToken: destToken.native ? NATIVE_ADDR : destToken.address,
-      fromRaw: parseUnits(amt.toFixed(Math.min(src.decimals, 6)), src.decimals), from,
+      toToken: destToken.native ? ARC_USDC_ERC20 : destToken.address,
+      fromRaw: parseUnits(amt.toFixed(Math.min(ls.decimals, 6)), ls.decimals), from,
     };
   }, [src, amtOk, amt, rcpOk, direct, solAddress, evmAddress, destIsSol, destKey, destToken]);
 

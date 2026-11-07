@@ -29,6 +29,17 @@ export const CASH_TOKENS: CashToken[] = [
   { chain: "robinhood", symbol: "USDG", address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", decimals: 6 },
 ];
 
+/**
+ * Arc's gas token is USDC. Its balance and plain sends use 18 decimals (native), but LI.FI and every router see it as the
+ * ERC-20 at this address with 6 decimals, and spend it through an approval. For any LI.FI route use this form, never the native one.
+ */
+export const ARC_PUBLIC_RPC = "https://rpc.mainnet.arc.io";
+export const ARC_USDC_ERC20 = "0x3600000000000000000000000000000000000000";
+export function lifiSource(s: { chain: string; native: boolean; address: string; decimals: number }) {
+  if (s.chain === "arc" && s.native) return { token: ARC_USDC_ERC20, native: false, decimals: 6 };
+  return { token: s.address, native: s.native, decimals: s.decimals };
+}
+
 export const VIEM_CHAINS: Record<string, Chain> = {
   ethereum: mainnet,
   base,
@@ -42,7 +53,7 @@ export const VIEM_CHAINS: Record<string, Chain> = {
 export function rpcFor(chain: Chain): string | null {
   const first = chain.rpcUrls.default.http[0];
   if (first) return first;
-  if (chain.id === arc.id) return process.env.NEXT_PUBLIC_ARC_RPC || null;
+  if (chain.id === arc.id) return process.env.NEXT_PUBLIC_ARC_RPC || ARC_PUBLIC_RPC;
   return null;
 }
 

@@ -154,6 +154,40 @@ export default function TestnetLab() {
     } finally { setBusyKey(null); }
   };
 
+  // Withdraw check: send devnet SOL out of the Wraith wallet, then confirm the balance really dropped by amount + fee.
+  const [wTo, setWTo] = useState("");
+  const [wAmt, setWAmt] = useState("0.01");
+  const [wRes, setWRes] = useState<string | null>(null);
+  const [depSeen, setDepSeen] = useState<string | null>(null);
+  const [lastSol, setLastSol] = useState<number | null>(null);
+  useEffect(() => {
+    // Deposit check: any increase in the devnet balance (faucet or an outside transfer) is reported as received.
+    if (sol !== null && lastSol !== null && sol > lastSol + 1e-9) setDepSeen(`+${fmt(sol - lastSol, 6)} SOL arrived`);
+    if (sol !== null) setLastSol(sol);
+  }, [sol]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const withdraw = async () => {
+    if (!owner || busyKey) return;
+    let to: PublicKey;
+    try { to = new PublicKey(wTo.trim()); } catch { push("Not a valid Solana address.", "warning"); return; }
+    const amt = Number(wAmt);
+    if (!(amt > 0)) { push("Enter a SOL amount.", "warning"); return; }
+    if (sol !== null && amt + 0.001 > sol) { push("Not enough devnet SOL for amount + fee.", "warning"); return; }
+    setBusyKey("withdraw"); setWRes(null);
+    try {
+      const before = await conn.getBalance(owner, "confirmed");
+      const sig = await sendSigned([SystemProgram.transfer({ fromPubkey: owner, toPubkey: to, lamports: Math.round(amt * 1e9) })]);
+      const after = await conn.getBalance(owner, "confirmed");
+      const spent = (before - after) / 1e9;
+      const ok = Math.abs(spent - amt) < 0.001;
+      setWRes(`${ok ? "PASS" : "CHECK"}: balance dropped ${fmt(spent, 6)} SOL (sent ${fmt(amt, 6)} + fee). ${explorer(sig)}`);
+      push(ok ? "Withdraw works" : "Sent, but the balance change looks off", ok ? "success" : "warning", { actionLabel: "VIEW TX", onAction: () => window.open(explorer(sig), "_blank", "noopener,noreferrer"), timeoutMs: 7000 });
+      await refresh();
+    } catch (e) {
+      setWRes(`FAIL: ${e instanceof Error ? e.message : "Withdraw failed."}`);
+    } finally { setBusyKey(null); }
+  };
+
   const copy = async () => {
     if (!address) return;
     try { await navigator.clipboard.writeText(address); push("Address copied", "success"); } catch { /* ignore */ }
@@ -203,6 +237,26 @@ export default function TestnetLab() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {authenticated && (
+        <div className="tn-card">
+          <div><strong>Deposit and withdraw check</strong></div>
+          <p style={{ margin: "6px 0", fontSize: 12, opacity: 0.8 }}>
+            Deposit: tap “Get devnet SOL” above, or send devnet SOL to your address. It is reported here when it lands.
+            Withdraw: send devnet SOL to any address and the lab checks your balance dropped by exactly amount + fee.
+          </p>
+          {depSeen && <p style={{ margin: "4px 0", fontSize: 12, color: "var(--green, #3ddc84)" }}>Deposit works: {depSeen}</p>}
+          <div className="tn-actions">
+            <input aria-label="Recipient address" placeholder="Recipient devnet address" value={wTo} onChange={(e) => setWTo(e.target.value)} style={{ flex: 1, minWidth: 0 }} spellCheck={false} />
+            <input aria-label="SOL to send" inputMode="decimal" value={wAmt} onChange={(e) => setWAmt(e.target.value)} style={{ width: 70 }} />
+            <span>SOL</span>
+            <button type="button" className="tn-btn" disabled={!wallet || !!busyKey || !wTo.trim()} onClick={() => void withdraw()}>
+              {busyKey === "withdraw" ? <LoaderCircle size={14} className="animate-spin" /> : "Withdraw"}
+            </button>
+          </div>
+          {wRes && <p style={{ margin: "8px 0 0", fontSize: 12, wordBreak: "break-all" }}>{wRes}</p>}
         </div>
       )}
 

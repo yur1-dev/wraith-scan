@@ -2,7 +2,7 @@
 
 import "../site.css";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import ChainLogo from "@/components/ChainLogo";
 import { CallsTable, ChartReal, Coin, LiveBoard, fmtUsd, useLandingData, xf } from "@/components/landing/Mocks";
@@ -62,6 +62,7 @@ function GoogleIcon() {
 function LoginInner() {
   const { status, login, syncAppSession } = useWraithSession();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const redirected = useRef(false);
@@ -84,8 +85,9 @@ function LoginInner() {
           await syncAppSession();
           if (cancelled || redirected.current) return;
           redirected.current = true;
-          // Full page load: guarantees the fresh cookie is used and no cached "go to /login" redirect is reused.
-          window.location.replace(callbackUrl);
+          // In-app navigation: no second page load, so no second loading screen. refresh() drops any cached "go to /login" redirect.
+          router.replace(callbackUrl);
+          router.refresh();
           return;
         } catch (err) {
           last = err;
@@ -100,9 +102,12 @@ function LoginInner() {
     return () => {
       cancelled = true;
     };
-  }, [status, syncAppSession, callbackUrl]);
+  }, [status, syncAppSession, callbackUrl, router]);
 
   if (status === "loading") return null;
+  // Coming back from Google: show "Signing you in…" right away instead of flashing the button again.
+  const returningFromOAuth = searchParams.has("privy_oauth_code") || searchParams.has("privy_oauth_state");
+  const busy = syncing || (returningFromOAuth && !syncError);
 
   return (
     <div className="wl2">
@@ -137,7 +142,7 @@ function LoginInner() {
 
           <button
             className="ws-btn primary wl-g"
-            disabled={syncing}
+            disabled={busy}
             onClick={() => {
               setSyncError(null);
               if (status === "authenticated") {
@@ -153,7 +158,7 @@ function LoginInner() {
               login();
             }}
           >
-            {syncing ? "Signing you in…" : (<><GoogleIcon />Continue with Google</>)}
+            {busy ? "Signing you in…" : (<><GoogleIcon />Continue with Google</>)}
           </button>
 
           {data && data.stats.calls > 0 && (

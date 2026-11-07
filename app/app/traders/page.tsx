@@ -32,10 +32,10 @@ type Trader = {
 
 type Period = "d1" | "d7" | "d30" | "all";
 const PERIODS: { key: Period; label: string; long: string }[] = [
+  { key: "all", label: "All", long: "All-time" },
   { key: "d1", label: "24H", long: "Daily" },
   { key: "d7", label: "7D", long: "Weekly" },
   { key: "d30", label: "30D", long: "Monthly" },
-  { key: "all", label: "All", long: "All-time" },
 ];
 
 function Ghost({ className }: { className?: string }) {

@@ -14,7 +14,7 @@ import { LoaderCircle, Wallet } from "lucide-react";
 import ChainLogo from "@/components/ChainLogo";
 import { FINE_PRINT, NO_CASH_NOTE, PositionBlock } from "@/components/DockParts";
 const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
-import { VIEM_CHAINS, rpcFor } from "@/lib/cashTokens";
+import { ARC_USDC_ERC20, VIEM_CHAINS, lifiSource, rpcFor } from "@/lib/cashTokens";
 import { friendlyError, execEvmRoute, lifiQuote, NATIVE_ADDR, SOLANA_LIFI_ID, waitForRoute, withGasFallback, type LifiQuote } from "@/lib/lifi";
 import { useEnsureGas, useSponsoredSend } from "@/lib/useSponsoredSend";
 import { useCashSources } from "@/lib/useCashSources";
@@ -104,12 +104,13 @@ export default function EvmBuyPanel({ chainKey, tokenAddress, symbol, priceUsd, 
       if (!src || !(amountUsd > 0) || amountUsd > src.balance + 1e-9) return null;
       const sol = src.kind === "solana";
       if (sol && !solAddress) return null;
-      return { fromKey: src.chain, fromId: sol ? SOLANA_LIFI_ID : VIEM_CHAINS[src.chain].id, toId, fromToken: src.address, native: src.native, sol, fromRaw: parseUnits(amountUsd.toFixed(Math.min(src.decimals, 8)), src.decimals), toToken: tokenAddress, fromAddr: sol ? (solAddress as string) : evm, toAddr: evm as string };
+      const ls = lifiSource(src);
+      return { fromKey: src.chain, fromId: sol ? SOLANA_LIFI_ID : VIEM_CHAINS[src.chain].id, toId, fromToken: ls.token, native: ls.native, sol, fromRaw: parseUnits(amountUsd.toFixed(Math.min(ls.decimals, 8)), ls.decimals), toToken: tokenAddress, fromAddr: sol ? (solAddress as string) : evm, toAddr: evm as string };
     }
     if (!bal || bal.raw === BigInt(0) || !sellDest) return null;
     const raw = (bal.raw * BigInt(sellPct)) / BigInt(100);
     if (raw <= BigInt(0)) return null;
-    return { fromKey: chainKey, fromId: toId, toId, fromToken: tokenAddress, native: false, sol: false, fromRaw: raw, toToken: sellDest.native ? NATIVE_ADDR : sellDest.address, fromAddr: evm as string, toAddr: evm as string };
+    return { fromKey: chainKey, fromId: toId, toId, fromToken: tokenAddress, native: false, sol: false, fromRaw: raw, toToken: sellDest.native ? ARC_USDC_ERC20 : sellDest.address, fromAddr: evm as string, toAddr: evm as string };
   }, [evm, solAddress, mode, src, amountUsd, bal, sellPct, sellDest, chainKey, tokenAddress]);
 
   useEffect(() => {

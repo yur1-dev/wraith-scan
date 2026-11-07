@@ -66,6 +66,8 @@ function LoginInner() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const redirected = useRef(false);
+  const [oauthStale, setOauthStale] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setOauthStale(true), 7000); return () => clearTimeout(t); }, []);
   const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
   const data = useLandingData();
 
@@ -107,7 +109,8 @@ function LoginInner() {
   if (status === "loading") return null;
   // Coming back from Google: show "Signing you in…" right away instead of flashing the button again.
   const returningFromOAuth = searchParams.has("privy_oauth_code") || searchParams.has("privy_oauth_state");
-  const busy = syncing || (returningFromOAuth && !syncError);
+  // "returning from Google" only counts for a few seconds: if Privy never finishes, the button must work again.
+  const busy = syncing || (returningFromOAuth && !syncError && !oauthStale);
 
   return (
     <div className="wl2">

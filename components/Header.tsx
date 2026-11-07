@@ -36,7 +36,8 @@ import { useLinkWithPasskey, useMfaEnrollment, usePrivy, useUser as usePrivyUser
 import StyledSelect from "./StyledSelect";
 import EmbeddedWalletBalanceChip from "./EmbeddedWalletBalanceChip";
 import MobileTabBar from "./MobileTabBar";
-import { chainOf } from "@/lib/chains";
+import { chainOf, EVM_ADDR_RE } from "@/lib/chains";
+import { SOLANA_MINT_RE } from "@/lib/market";
 import ChainLogo from "@/components/ChainLogo";
 import EmbeddedWalletOverview from "./EmbeddedWalletOverview";
 import EmbeddedWalletTransfers from "./EmbeddedWalletTransfers";
@@ -582,10 +583,35 @@ function CoinSearch({
     setLoading(true);
     setError(null);
     try {
+      // A pasted contract address: look the token up directly (the text search is unreliable for addresses and misses new tokens).
+      const isAddr = SOLANA_MINT_RE.test(trimmed) || EVM_ADDR_RE.test(trimmed);
       const res = await fetch(
-        `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(trimmed)}`,
+        isAddr
+          ? `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(trimmed)}`
+          : `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(trimmed)}`,
       );
       const data = await res.json();
+      if (isAddr && (!data.pairs || data.pairs.length === 0) && SOLANA_MINT_RE.test(trimmed)) {
+        // Not on DexScreener yet (e.g. still on the pump.fun curve): use Wraith's own snapshot so it still shows up.
+        const snap = await fetch(`/api/token-price?mint=${encodeURIComponent(trimmed)}`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (snap && (Number(snap.priceUsd) > 0 || Number(snap.marketCap) > 0 || snap.symbol)) {
+          setResults([{
+            address: trimmed,
+            name: cleanName(String(snap.name ?? "Unknown")),
+            symbol: cleanSym(String(snap.symbol ?? "???")),
+            icon: typeof snap.image === "string" ? snap.image : undefined,
+            priceUsd: Number(snap.priceUsd) || 0,
+            marketCap: Number(snap.marketCap) || 0,
+            liquidity: Number(snap.liquidity) || 0,
+            volume24h: Number(snap.volume24h) || 0,
+            priceChange24h: Number(snap.priceChange24h ?? snap.priceChange) || 0,
+            chainId: "solana",
+            pairAddress: "",
+          }]);
+          setLoading(false);
+          return;
+        }
+      }
       if (!data.pairs || data.pairs.length === 0) {
         setResults([]);
         setError("No tokens found");
@@ -683,7 +709,7 @@ function CoinSearch({
       } else {
         void searchTraders(query, searchMode === "saved");
       }
-    }, 300);
+    }, SOLANA_MINT_RE.test(query.trim()) || EVM_ADDR_RE.test(query.trim()) ? 0 : 180);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };

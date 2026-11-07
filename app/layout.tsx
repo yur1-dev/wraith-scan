@@ -11,6 +11,7 @@ import "./wraith-compact.css";
 import WalletProvider from "@/components/WalletProvider";
 import BootSplash from "@/components/BootSplash";
 import NativePush from "@/components/NativePush";
+import ScrollRestore from "@/components/ScrollRestore";
 import NativeLinks from "@/components/NativeLinks";
 import OpenInApp from "@/components/OpenInApp";
 import FcmLink from "@/components/FcmLink";
@@ -92,6 +93,7 @@ export default function RootLayout({
         <BootSplash />
         <FcmLink />
         <NativePush />
+        <ScrollRestore />
         <NativeLinks />
         <OpenInApp />
         <SwRegister />

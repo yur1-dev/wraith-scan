@@ -775,7 +775,16 @@ export default function TokenChart({
         if (!res.ok) throw new Error(String(res.status));
         const data: { candles?: ChartCandle[]; source?: string; stale?: boolean } = await res.json();
         if (id !== reqRef.current) return;
-        const rows = Array.isArray(data.candles) ? data.candles : [];
+        let rows = Array.isArray(data.candles) ? data.candles : [];
+        // Sanity check against the live price. The last candle is minutes old, so it can only be a few % from the live price.
+        // If it is off by 8x or more, the series came from the wrong pool or the wrong units (this is how a $253K token showed
+        // $968M). Rescale so the chart ends at the real price instead of showing a number that is plainly wrong.
+        const lp = livePriceRef.current;
+        const lastC = rows.length ? rows[rows.length - 1].c : 0;
+        if (lp && lastC > 0) {
+          const r = lp / lastC;
+          if (r > 8 || r < 1 / 8) rows = rows.map((c) => ({ ...c, o: c.o * r, h: c.h * r, l: c.l * r, c: c.c * r }));
+        }
         setSource(data.source ?? "");
         setStale(Boolean(data.stale));
         if (rows.length) {

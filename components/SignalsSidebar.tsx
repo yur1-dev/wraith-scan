@@ -50,7 +50,7 @@ export default function SignalsSidebar({ onSelectMeme, selectedMeme }: { onSelec
         const meme = toMeme(t);
         const active = selectedMeme?.contractAddress === t.address;
         return (
-          <div key={t.address} role="button" tabIndex={0} className={`wx-side-row${active ? " active" : ""}`} onClick={() => onSelectMeme(meme)} onKeyDown={(e) => { if (e.key === "Enter") onSelectMeme(meme); }} onMouseEnter={() => prefetchChart(t.address, t.onCurve)}>
+          <div key={t.address} role="button" tabIndex={0} className={`wx-side-row${active ? " active" : ""}`} onClick={() => onSelectMeme(meme)} onKeyDown={(e) => { if (e.key === "Enter") onSelectMeme(meme); }} onMouseEnter={() => prefetchChart(t.address, t.onCurve)} onTouchStart={() => prefetchChart(t.address, t.onCurve, true)}>
             <TokenIcon contractAddress={t.address} imageUrl={t.imageUrl} symbol={t.symbol} size={36} />
             <span className="mid">
               <strong>{t.symbol} <i className={`sg-tier ${s.tier === "HOT" ? "hot" : ""}`}>{s.tier}</i></strong>

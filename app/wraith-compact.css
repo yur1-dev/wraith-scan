@@ -397,3 +397,20 @@ html.wx-native::after {
   }
   .profile-hero .profile-title-block > h1 { margin-top: 10px; }
 }
+
+/* Phone sign-in must fit ONE screen with no scrolling, and the chain row must never clip. */
+@media (max-width: 640px) {
+  html:has(.wl2), body:has(.wl2) { height: 100dvh; overflow: hidden; }
+  .wl2 { height: 100dvh; min-height: 0; overflow: hidden; }
+  .wl2-main { height: 100dvh; min-height: 0; padding: calc(var(--sai-top) + 12px) 22px calc(var(--sai-bottom) + 12px); overflow: hidden; }
+  .wl2 .wl2-card { min-height: 0 !important; height: 100%; justify-content: center; }
+  .wl2 .wl2-card .logo { width: clamp(84px, 15dvh, 120px); height: clamp(84px, 15dvh, 120px); margin: 0 0 clamp(8px, 2dvh, 18px) !important; }
+  .wl2-card h1 { font-size: clamp(24px, 4.2dvh, 30px); }
+  .wl2-card .lead { margin-top: 8px; font-size: 13.5px; line-height: 1.5; }
+  .wl2-card .wl-g { margin-top: clamp(16px, 3dvh, 28px); height: 54px; flex: 0 0 auto; }
+  .wl2-stats { margin-top: clamp(12px, 2.4dvh, 20px); }
+  .wl2 .wl2-card .wl2-chains { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; width: 100%; margin: clamp(12px, 2.4dvh, 20px) 0 0; }
+  .wl2-chains span { width: 100% !important; height: auto !important; aspect-ratio: 1; min-width: 0; }
+  .wl2-chains span > * { max-width: 62%; max-height: 62%; }
+  .wl2-card .wl-legal { margin-top: clamp(10px, 2dvh, 18px); padding-top: 0; font-size: 10.5px; line-height: 1.5; }
+}

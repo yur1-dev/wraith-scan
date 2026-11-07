@@ -100,7 +100,7 @@ function CardBase({ token, onOpen, quickSol }: { token: MarketToken; onOpen: () 
       role="link"
       tabIndex={0}
       onClick={onOpen}
-      onMouseEnter={() => prefetchChart(token.address, token.onCurve)}
+      onMouseEnter={() => prefetchChart(token.address, token.onCurve)} onTouchStart={() => prefetchChart(token.address, token.onCurve, true)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -154,7 +154,7 @@ function RowBase({ token, onOpen, quickSol, hover }: { token: MarketToken; onOpe
       className="wx-trow"
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === "Enter") onOpen(); }}
-      onMouseEnter={() => prefetchChart(token.address, token.onCurve)}
+      onMouseEnter={() => prefetchChart(token.address, token.onCurve)} onTouchStart={() => prefetchChart(token.address, token.onCurve, true)}
     >
       <span className="wx-trow-id" onMouseEnter={(e) => hover.enter(e, token)} onMouseLeave={hover.leave}>
         <TokenIcon contractAddress={token.address} imageUrl={token.imageUrl} symbol={token.symbol} size={34} />

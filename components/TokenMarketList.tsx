@@ -60,7 +60,7 @@ export default function TokenMarketList({
           tokens.map((t) => {
             const active = selectedMeme?.contractAddress === t.address;
             return (
-              <div key={t.address} role="button" tabIndex={0} className={`wx-side-row${active ? " active" : ""}`} onClick={() => onSelectMeme(toMeme(t))} onKeyDown={(e) => { if (e.key === "Enter") onSelectMeme(toMeme(t)); }} onMouseEnter={() => prefetchChart(t.address, t.onCurve)}>
+              <div key={t.address} role="button" tabIndex={0} className={`wx-side-row${active ? " active" : ""}`} onClick={() => onSelectMeme(toMeme(t))} onKeyDown={(e) => { if (e.key === "Enter") onSelectMeme(toMeme(t)); }} onMouseEnter={() => prefetchChart(t.address, t.onCurve)} onTouchStart={() => prefetchChart(t.address, t.onCurve, true)}>
                 <TokenIcon contractAddress={t.address} imageUrl={t.imageUrl} symbol={t.symbol} size={36} />
                 <span className="mid">
                   <strong>{t.symbol}</strong>

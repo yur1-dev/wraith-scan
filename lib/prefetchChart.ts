@@ -14,7 +14,7 @@ const seen = new Map<string, number>();
  * Passing over rows cancels earlier ones, and fires are spaced out so we never burn the shared
  * GeckoTerminal allowance (30 req/min) just by moving the mouse.
  */
-export function prefetchChart(mint: string, onCurve = false) {
+export function prefetchChart(mint: string, onCurve = false, immediate = false) {
   if (typeof window === "undefined" || !mint) return;
   if (timer) clearTimeout(timer);
   // snapshot is cheap (server-cached): warm it immediately on hover, no dwell
@@ -24,11 +24,12 @@ export function prefetchChart(mint: string, onCurve = false) {
       .then((d) => { if (d) snapCache.set(mint, { data: d, ts: Date.now() }); })
       .catch(() => undefined);
   }
+  // a finger touching a row is a much stronger signal than the mouse passing over it: no dwell, no spacing
   timer = setTimeout(() => {
     timer = null;
     const now = Date.now();
     if (now - (seen.get(mint) ?? 0) < 60_000) return;
-    if (now - lastFire < 4000) return;
+    if (!immediate && now - lastFire < 4000) return;
     lastFire = now;
     seen.set(mint, now);
     if (seen.size > 200) seen.clear();
@@ -36,5 +37,5 @@ export function prefetchChart(mint: string, onCurve = false) {
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { candles?: Candle[] } | null) => { if (d?.candles?.length) seedCandles(mint, "15m", d.candles); })
       .catch(() => undefined);
-  }, 350);
+  }, immediate ? 0 : 350);
 }

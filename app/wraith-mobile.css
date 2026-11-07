@@ -989,3 +989,44 @@ a, button, [role="button"], [role="link"], [role="tab"], .wx-tcard, .sg-card, .w
   .wx-token-name .wx-badge.muted { display: none; }
   .wx-token-id > div { min-width: 0; flex: 1 1 auto; }
 }
+
+/* ── Instant tap feedback (phones/app only) ──
+   Every tappable thing answers the finger on touch-down, not on release, so the app feels alive. */
+@media (hover: none) and (pointer: coarse) {
+  a, button, [role="button"], summary, label[for], select { touch-action: manipulation; }
+  a, button, [role="button"], [role="tab"], .wx-tappable {
+    transition: transform .09s ease-out, opacity .09s ease-out, background-color .12s ease-out, filter .09s ease-out;
+  }
+  button:not(:disabled):active, a:active, [role="button"]:active, [role="tab"]:active {
+    transform: scale(.965);
+    opacity: .86;
+  }
+  /* big full-width rows should dim, not shrink */
+  tr:active, li > a:active, .wx-notif-row:active { transform: none; opacity: .8; }
+  /* sticky hover looks like a stuck tap on touch screens */
+  *:hover { transition-duration: .09s; }
+  /* smooth, native-feeling scrolling inside panels */
+  * { -webkit-overflow-scrolling: touch; }
+  .wx-tabbar-pill a:active, .wx-tabbar-search:active { transform: scale(.9); opacity: 1; }
+  .wx-tabbar-pill a, .wx-tabbar-search { transition: transform .1s cubic-bezier(.3, 1.4, .5, 1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  button:active, a:active { transform: none !important; }
+}
+
+/* Chart tools on phones: every tool visible and finger-sized (it was one scrolling row with the tools hidden off to the right). */
+@media (max-width: 767px) {
+  .wx-chart-toolbar { flex-wrap: wrap !important; overflow: visible !important; row-gap: 4px; padding: 6px 8px 4px; }
+  .wx-chart-toolbar .wx-seg button { min-height: 34px; }
+  .wx-chart-toolbar .wx-icon-btn {
+    width: 40px !important; height: 40px !important; border: 1px solid var(--border) !important; background: var(--surface) !important;
+    border-radius: 10px; display: inline-grid; place-items: center;
+  }
+  .wx-chart-toolbar .wx-icon-btn svg { width: 18px; height: 18px; }
+  .wx-chart-toolbar .wx-icon-btn.on { border-color: var(--orange) !important; background: rgba(255,123,61,.16) !important; color: var(--orange); }
+  /* give the chart a little more room now the toolbar can take two rows */
+  .wraith-dashboard .wx-chart-card { height: calc(100dvh - 250px); min-height: 380px; }
+  /* drawing handles/labels are small by default; let them be touched */
+  .wx-draw-del { min-width: 36px; min-height: 36px; }
+  .wx-chart-card canvas { touch-action: pan-y pinch-zoom; }
+}

@@ -21,7 +21,9 @@ import { VIEM_CHAINS } from "@/lib/cashTokens";
 import { execEvmRoute, friendlyError, lifiQuote, SOLANA_LIFI_ID, waitForRoute } from "@/lib/lifi";
 import { useCashSources } from "@/lib/useCashSources";
 import { useWraithTier } from "@/hooks/useWraithTier";
-import ExitBox from "@/components/ExitBox";
+import ExitBox, { type ExitPrefs } from "@/components/ExitBox";
+import SizeHint from "@/components/SizeHint";
+import { getLiveUsdPrice } from "@/lib/livePrice";
 import { getMcap } from "@/lib/getTokenPrice";
 import { armLiveExit, disarmLiveExit, EXIT_PREFS_KEY, LIVE_EXIT_FIRED, LIVE_EXITS_EVENT, readRules, type LiveExitRule } from "@/lib/liveExits";
 import { parseUnits } from "viem";
@@ -126,7 +128,7 @@ function EmbeddedTradeDock({ meme, initialMode }: Props) {
   const [busy, setBusy] = useState(false);
   const { canUse } = useWraithTier();
   const [exitOn, setExitOn] = useState(false);
-  const [exitPrefs, setExitPrefs] = useState({ tp: "100", sl: "30", trail: "0" });
+  const [exitPrefs, setExitPrefs] = useState<ExitPrefs>({ tp: "100", sl: "30", trail: "0", tp1: "0", tp1Sell: "40", hold: "0", risk: "1" });
   const [armedRule, setArmedRule] = useState<LiveExitRule | null>(null);
   useEffect(() => {
     try { const p = JSON.parse(localStorage.getItem(EXIT_PREFS_KEY) || "null"); if (p && typeof p === "object") { setExitPrefs((c) => ({ ...c, ...p.prefs })); setExitOn(!!p.on); } } catch { /* none */ }
@@ -138,7 +140,7 @@ function EmbeddedTradeDock({ meme, initialMode }: Props) {
     const fired = (e: Event) => {
       const d = (e as CustomEvent).detail as { kind: string; symbol: string; mint: string; pnl: number };
       if (d.mint !== mint) return;
-      const label = d.kind === "tp" ? "Take-profit hit" : d.kind === "sl" ? "Stop-loss hit" : d.kind === "trail" ? "Trailing stop hit" : d.kind === "gone" ? "Auto-exit cancelled — no tokens left" : "Auto-exit failed — sell manually";
+      const label = d.kind === "tp1" ? "First target hit, part sold" : d.kind === "time" ? "Time stop hit" : d.kind === "tp" ? "Take-profit hit" : d.kind === "sl" ? "Stop-loss hit" : d.kind === "trail" ? "Trailing stop hit" : d.kind === "gone" ? "Auto-exit cancelled — no tokens left" : "Auto-exit failed — sell manually";
       push(`${label} · ${d.symbol} ${d.pnl >= 0 ? "+" : ""}${d.pnl.toFixed(0)}%`, d.kind === "failed" ? "error" : d.kind === "sl" ? "warning" : "success", { timeoutMs: 9000 });
     };
     window.addEventListener(LIVE_EXITS_EVENT, sync);
@@ -395,9 +397,17 @@ function EmbeddedTradeDock({ meme, initialMode }: Props) {
       });
       if (mode === "buy" && exitOn && canUse("auto_sell")) {
         const tp = Math.max(0, Number(exitPrefs.tp) || 0), sl = Math.min(95, Math.max(0, Number(exitPrefs.sl) || 0)), trail = Math.min(95, Math.max(0, Number(exitPrefs.trail) || 0));
-        if (tp || sl || trail) {
-          void getMcap(mint, { skipJupiter: true }).then((mc) => {
-            if (mc > 0) { armLiveExit({ mint, symbol, entryMcap: mc, tpPct: tp, slPct: sl, trailPct: trail }); push("Auto-exit armed — keep Wraith open", "info", { timeoutMs: 4000 }); }
+        const tp1 = Math.max(0, Number(exitPrefs.tp1) || 0), tp1Sell = Math.min(99, Math.max(1, Number(exitPrefs.tp1Sell) || 40)), hold = Math.max(0, Number(exitPrefs.hold) || 0);
+        if (tp || sl || trail || tp1 || hold) {
+          // Measure exits from the price actually paid (from the signed quote), not from a cached screen price taken after the fact.
+          const tokens = Number(result.outAmount) / 10 ** (tokenBalance?.decimals || 6);
+          const fillPrice = tokens > 0 ? amountUsd / tokens : 0;
+          void Promise.all([getLiveUsdPrice(mint), getMcap(mint, { skipJupiter: true }).catch(() => 0)]).then(([live, mc]) => {
+            // trust the fill price only when it agrees with the live price (guards against a wrong token-decimals guess)
+            const entryPrice = fillPrice > 0 && (live <= 0 || (fillPrice / live > 0.5 && fillPrice / live < 2)) ? fillPrice : live;
+            const common = { mint, symbol, tpPct: tp, slPct: sl, trailPct: trail, ...(tp1 ? { tp1Pct: tp1, tp1SellPct: tp1Sell } : {}), ...(hold ? { maxHoldMin: hold } : {}) };
+            if (entryPrice > 0) { armLiveExit({ ...common, entryMcap: mc > 0 ? mc : 0, entryPrice }); push("Auto-exit armed. Keep Wraith open.", "info", { timeoutMs: 4000 }); }
+            else if (mc > 0) { armLiveExit({ ...common, entryMcap: mc }); push("Auto-exit armed. Keep Wraith open.", "info", { timeoutMs: 4000 }); }
             else push("Couldn't read the price, auto-exit NOT armed", "warning");
           });
         }
@@ -473,6 +483,7 @@ function EmbeddedTradeDock({ meme, initialMode }: Props) {
                 return <button type="button" key={presetUsd} disabled={currencyRate === null} onClick={() => setAmountCash(cashValue.toFixed(2))} style={{ padding: "8px 2px", border: `1px solid ${Math.abs(Number(amountCash) - cashValue) < 0.005 ? "var(--orange)" : "var(--border)"}`, borderRadius: 8, color: Math.abs(Number(amountCash) - cashValue) < 0.005 ? "var(--orange-hot)" : "var(--text-muted)", background: "var(--surface)", cursor: "pointer", fontSize: 11 }}>{currencyRate !== null ? formatCurrency(cashValue, displayCurrency) : "—"}</button>;
               })}
             </div>
+            <SizeHint balance={src ? src.balance * (currencyRate ?? 1) : null} stopPct={exitOn ? Number(exitPrefs.sl) || 0 : 0} risk={Number(exitPrefs.risk) || 1} setRisk={(r) => setExitPrefs((p) => ({ ...p, risk: String(r) }))} liquidity={marketSnapshot?.liquidity != null && currencyRate ? marketSnapshot.liquidity * currencyRate : null} symbol={symbol} fmt={(v) => formatCurrency(v, displayCurrency)} onUse={(v) => setAmountCash(v.toFixed(2))} />
             <ExitBox mint={mint} symbol={symbol} on={exitOn} setOn={setExitOn} prefs={exitPrefs} setPrefs={setExitPrefs} allowed={canUse("auto_sell")} armed={armedRule} />
           </>
         ) : (

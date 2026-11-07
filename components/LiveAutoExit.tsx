@@ -1,7 +1,8 @@
 "use client";
 
-// Executes live auto-exit rules (TP / SL / trailing) with the user's embedded Solana wallet.
-// Runs only while Wraith is open and the tier has `auto_sell`. Sells 100% of the token back to USDC.
+// Executes live auto-exit rules (stop-loss, trailing stop, take-profit, optional partial take-profit and time stop) with the
+// user's embedded Solana wallet. Runs only while Wraith is open and the tier has `auto_sell`.
+// The decisions live in lib/exitLogic.ts (tested); this file reads prices and carries out the sale.
 
 import { useEffect, useMemo, useRef } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
@@ -9,12 +10,32 @@ import { VersionedTransaction, PublicKey } from "@solana/web3.js";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
 import { getMcap } from "@/lib/getTokenPrice";
+import { getLiveUsdPrice } from "@/lib/livePrice";
 import { executeQuickSell, SwapError } from "@/lib/jupiterSwap";
 import { LIVE_EXIT_FIRED, readRules, writeRules, type LiveExitRule } from "@/lib/liveExits";
+import { retryDelayMs, slippageFor, stepExit, type ExitCore, type ExitReason } from "@/lib/exitLogic";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const TICK_MS = 4000;
-const MAX_FAILS = 3;
+const TICK_MS = 3000;
+
+// A rule is measured in USD price when it knows the real fill price, otherwise (older rules, the sniper) in market cap.
+const usesPrice = (r: LiveExitRule) => (r.entryPrice ?? 0) > 0;
+const toCore = (r: LiveExitRule): ExitCore => ({
+  entry: usesPrice(r) ? (r.entryPrice as number) : r.entryMcap,
+  peak: usesPrice(r) ? (r.peakPrice ?? (r.entryPrice as number)) : r.peakMcap,
+  armedAt: r.armedAt,
+  tpPct: r.tpPct, slPct: r.slPct, trailPct: r.trailPct,
+  tp1Pct: r.tp1Pct, tp1SellPct: r.tp1SellPct, tp1Done: r.tp1Done, maxHoldMin: r.maxHoldMin,
+  lastGood: r.lastGood, suspect: r.suspect, breach: r.breach,
+});
+const fromCore = (r: LiveExitRule, c: Partial<ExitCore>): LiveExitRule => {
+  const next: LiveExitRule = { ...r };
+  if ("peak" in c && c.peak !== undefined) { if (usesPrice(r)) next.peakPrice = c.peak; else next.peakMcap = c.peak; }
+  for (const k of ["tp1Done", "lastGood", "suspect", "breach"] as const) if (k in c) (next as Record<string, unknown>)[k] = c[k];
+  return next;
+};
+const sameState = (a: LiveExitRule, b: LiveExitRule) =>
+  a.peakMcap === b.peakMcap && a.peakPrice === b.peakPrice && a.suspect === b.suspect && a.breach?.n === b.breach?.n && a.breach?.reason === b.breach?.reason && a.tp1Done === b.tp1Done;
 
 export default function LiveAutoExit({ enabled }: { enabled: boolean }) {
   const { user } = usePrivy();
@@ -39,46 +60,58 @@ export default function LiveAutoExit({ enabled }: { enabled: boolean }) {
         return VersionedTransaction.deserialize(r.signedTransaction);
       },
     };
-    const fire = (kind: "tp" | "sl" | "trail" | "failed" | "gone", rule: LiveExitRule, pnl: number, sig?: string) =>
+    const fire = (kind: ExitReason | "failed" | "gone", rule: LiveExitRule, pnl: number, sig?: string) =>
       window.dispatchEvent(new CustomEvent(LIVE_EXIT_FIRED, { detail: { kind, symbol: rule.symbol, mint: rule.mint, pnl, sig } }));
+    // always work on the latest saved copy of the rule (a tick can take seconds)
     const patch = (id: string, f: (r: LiveExitRule) => LiveExitRule | null) =>
-      writeRules(readRules().flatMap((r) => (r.id === id ? (f(r) ? [f(r) as LiveExitRule] : []) : [r])));
+      writeRules(readRules().flatMap((r) => { if (r.id !== id) return [r]; const n = f(r); return n ? [n] : []; }));
 
     const tick = async () => {
       if (document.hidden) return;
+      const now = Date.now();
       for (const rule of readRules().filter((r) => !r.sandbox)) {
         if (selling.current.has(rule.id)) continue;
-        const mc = await getMcap(rule.mint, { skipJupiter: true }).catch(() => 0);
-        if (!(mc > 0)) continue;
-        const peak = Math.max(rule.peakMcap, mc);
-        const pnl = (mc / rule.entryMcap - 1) * 100;
-        let kind: "tp" | "sl" | "trail" | null = null;
-        if (rule.tpPct > 0 && pnl >= rule.tpPct) kind = "tp";
-        else if (rule.slPct > 0 && pnl <= -rule.slPct) kind = "sl";
-        else if (rule.trailPct > 0 && peak > rule.entryMcap && mc <= peak * (1 - rule.trailPct / 100)) kind = "trail";
-        if (!kind) {
-          if (peak !== rule.peakMcap) patch(rule.id, (r) => ({ ...r, peakMcap: peak }));
+        if (rule.nextTryAt && now < rule.nextTryAt) continue;
+        const reading = usesPrice(rule)
+          ? await getLiveUsdPrice(rule.mint).catch(() => 0)
+          : await getMcap(rule.mint, { skipJupiter: true }).catch(() => 0);
+        const core = toCore(rule);
+        const step = stepExit(core, reading, now);
+        const pnl = reading > 0 ? (reading / core.entry - 1) * 100 : 0;
+
+        if (!step.decision.sell) {
+          const next = fromCore(rule, step.patch);
+          if (!sameState(rule, next)) patch(rule.id, (r) => fromCore(r, step.patch));
           continue;
         }
+
+        const d = step.decision;
         selling.current.add(rule.id);
         try {
-          const res = await executeQuickSell(rule.mint, 100, signer, connection, { outputMint: USDC_MINT });
-          patch(rule.id, () => null);
-          fire(kind, rule, pnl, res.signature);
+          const res = await executeQuickSell(rule.mint, d.pct, signer, connection, { outputMint: USDC_MINT, slippageBps: slippageFor(rule.fails) });
+          if (d.pct >= 100) patch(rule.id, () => null);
+          else patch(rule.id, (r) => ({ ...fromCore(r, { ...step.patch, ...step.afterSell }), fails: 0, nextTryAt: undefined }));
+          fire(d.reason, rule, pnl, res.signature);
           void fetch("/api/token-activity", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ mint: rule.mint, side: "sell", signature: res.signature }),
           }).then(() => window.dispatchEvent(new Event("wraith:trade-recorded"))).catch(() => undefined);
         } catch (e) {
           if (e instanceof SwapError && e.code === "NO_TOKENS") { patch(rule.id, () => null); fire("gone", rule, pnl); }
-          else if (rule.fails + 1 >= MAX_FAILS) { patch(rule.id, () => null); fire("failed", rule, pnl); }
-          else patch(rule.id, (r) => ({ ...r, fails: r.fails + 1 }));
+          else {
+            // Keep the rule armed. Retry with a wider slippage and a growing pause; tell the user once it keeps failing.
+            const fails = rule.fails + 1;
+            patch(rule.id, (r) => ({ ...r, fails, nextTryAt: Date.now() + retryDelayMs(fails) }));
+            if (fails === 3) fire("failed", rule, pnl);
+          }
         } finally { selling.current.delete(rule.id); }
       }
     };
     void tick();
     const id = window.setInterval(() => void tick(), TICK_MS);
-    return () => window.clearInterval(id);
+    const onVisible = () => { if (!document.hidden) void tick(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
   }, [enabled, address, wallet, signTransaction, connection]);
 
   return null;

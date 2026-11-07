@@ -208,6 +208,22 @@ export function trainModel(rows: TrainRow[], now = Date.now()): SignalModel | nu
   };
 }
 
+/** Walk-forward scores for the later blocks (each scored by a model that only saw earlier calls). For honest performance reports. */
+export function outOfSampleScores(rows: TrainRow[]): { score: number; row: TrainRow }[] {
+  const usable = rows.filter((r) => r.features && Object.keys(r.features).length).sort((a, b) => a.at - b.at);
+  if (usable.length < 300) return [];
+  const raw = usable.map((r) => rawVector(r.features));
+  const y = usable.map((r) => (r.win ? 1 : 0));
+  const n = usable.length, start = Math.floor(n * 0.45), folds = 4, block = Math.floor((n - start) / folds);
+  const out: { score: number; row: TrainRow }[] = [];
+  for (let k = 0; k < folds; k++) {
+    const a = start + k * block, b = k === folds - 1 ? n : a + block;
+    const { f0, trees } = fitTrees(raw.slice(0, a), y.slice(0, a));
+    for (let i = a; i < b; i++) out.push({ score: score(f0, trees, raw[i]), row: usable[i] });
+  }
+  return out;
+}
+
 /** P(reaches 2x) for one token's indicators. */
 export function predict(model: SignalModel, f: Features): number {
   const r = rawVector(f);

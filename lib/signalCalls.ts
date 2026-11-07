@@ -120,6 +120,7 @@ export async function recordSignals(signals: RecordInput[]) {
     const now = Date.now();
     for (const { s, shadow: isShadow } of fresh) {
       const mcap = liveCaps.get(s.token.address) ?? s.token.mcap;
+      if (!(mcap > 0) || !Number.isFinite(mcap)) continue; // never record a call with no price
       const base = {
         chain: s.token.chain && s.token.chain !== "solana" ? s.token.chain : "solana",
         symbol: s.token.symbol.toUpperCase(),
@@ -152,7 +153,7 @@ export async function refreshCalls(force = false) {
       const due = await c
         .find(
           { $or: [{ shadow: { $ne: true }, engine: 2, spottedAt: { $gt: t0 - WINDOW_MS } }, { shadow: true, spottedAt: { $gt: t0 - 24 * 3_600_000 } }] },
-          { projection: { address: 1, chain: 1 } },
+          { projection: { address: 1, chain: 1, lastMcap: 1, spottedMcap: 1, pendingMcap: 1 } },
         )
         .sort({ lastCheck: 1 })
         .limit(90)
@@ -165,10 +166,21 @@ export async function refreshCalls(force = false) {
         for (const [k, v] of part) live.set(k, v);
       }
       const now = Date.now();
+      const prior = new Map(due.map((d) => [d.address, d as { lastMcap?: number; spottedMcap?: number; pendingMcap?: number }]));
       await Promise.all(
-        [...live.entries()].map(([address, mcap]) =>
-          c.updateOne({ address }, { $set: { lastMcap: mcap, lastCheck: now }, $max: { peakMcap: mcap } }).catch(() => undefined),
-        ),
+        [...live.entries()].map(([address, mcap]) => {
+          if (!(mcap > 0) || !Number.isFinite(mcap)) return undefined;
+          const d = prior.get(address);
+          const prev = d?.lastMcap && d.lastMcap > 0 ? d.lastMcap : d?.spottedMcap ?? 0;
+          // A bad reading (wrong pair, wrong supply, a glitchy tick) used to be written as-is, and the peak is kept forever, so one
+          // bad number became a fake "100,000x win". A jump of 25x either way must show up on the NEXT reading too before it counts.
+          const jump = prev > 0 ? mcap / prev : 1;
+          if (jump > 25 || jump < 1 / 25) {
+            const confirmed = d?.pendingMcap && Math.abs(mcap / d.pendingMcap - 1) < 0.3;
+            if (!confirmed) return c.updateOne({ address }, { $set: { pendingMcap: mcap, lastCheck: now } }).catch(() => undefined);
+          }
+          return c.updateOne({ address }, { $set: { lastMcap: mcap, lastCheck: now }, $max: { peakMcap: mcap }, $unset: { pendingMcap: "" } }).catch(() => undefined);
+        }),
       );
     } finally {
       refreshing = null;
@@ -180,8 +192,8 @@ export async function refreshCalls(force = false) {
 export async function listCalls(limit = 120, mint?: string): Promise<SignalCall[]> {
   const c = await col();
   const filter = mint
-    ? { address: EVM_ADDR_RE.test(mint) ? mint.toLowerCase() : mint, shadow: { $ne: true }, engine: 2 }
-    : { spottedAt: { $gt: Date.now() - WINDOW_MS }, shadow: { $ne: true }, engine: 2 };
+    ? { address: EVM_ADDR_RE.test(mint) ? mint.toLowerCase() : mint, shadow: { $ne: true }, engine: 2, badData: { $ne: true } }
+    : { spottedAt: { $gt: Date.now() - WINDOW_MS }, shadow: { $ne: true }, engine: 2, badData: { $ne: true } };
   const docs = await c.find(filter, { projection: { _id: 0, features: 0, buyers: 0 } }).sort({ spottedAt: -1 }).limit(limit).toArray();
   return docs as SignalCall[];
 }

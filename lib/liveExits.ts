@@ -16,6 +16,20 @@ export type LiveExitRule = {
   trailPct: number; // sell when this % below the peak after entry (0 = off)
   armedAt: number;
   fails: number;
+  /** real fill price in USD per token. When present the rule is measured in price (exact); otherwise in market cap. */
+  entryPrice?: number;
+  peakPrice?: number;
+  /** optional first target: sell `tp1SellPct`% of the position at +`tp1Pct`%, then the rest runs with a break-even stop */
+  tp1Pct?: number;
+  tp1SellPct?: number;
+  tp1Done?: boolean;
+  /** optional time stop in minutes */
+  maxHoldMin?: number;
+  // working state kept by the monitor
+  lastGood?: number;
+  suspect?: number;
+  breach?: { reason: "sl" | "trail" | "tp" | "tp1" | "time"; n: number };
+  nextTryAt?: number;
   /** devnet test-mode rule: executed by the test dock, never by the mainnet monitor */
   sandbox?: boolean;
 };
@@ -32,7 +46,7 @@ export function writeRules(rules: LiveExitRule[]) {
 }
 export function armLiveExit(r: Omit<LiveExitRule, "id" | "armedAt" | "fails" | "peakMcap">) {
   const rules = readRules().filter((x) => x.mint !== r.mint);
-  rules.push({ ...r, id: `exit-${Date.now()}`, peakMcap: r.entryMcap, armedAt: Date.now(), fails: 0 });
+  rules.push({ ...r, id: `exit-${Date.now()}`, peakMcap: r.entryMcap, peakPrice: r.entryPrice, armedAt: Date.now(), fails: 0 });
   writeRules(rules);
 }
 export function disarmLiveExit(mint: string) {

@@ -8,7 +8,7 @@ type PushPlugin = {
   requestPermissions: () => Promise<{ receive: string }>;
   register: () => Promise<void>;
   createChannel?: (c: { id: string; name: string; importance: number }) => Promise<void>;
-  addListener: (ev: string, cb: (d: { value?: string }) => void) => Promise<unknown>;
+  addListener: (ev: string, cb: (d: { value?: string; notification?: { data?: { url?: string } } }) => void) => Promise<unknown>;
 };
 type Cap = { isNativePlatform?: () => boolean; Plugins?: { PushNotifications?: PushPlugin } };
 
@@ -33,6 +33,11 @@ export default function NativePush() {
           window.dispatchEvent(new Event("wraith:fcm-relink"));
         });
         await push.addListener("registrationError", () => undefined);
+        // tapping a notification opens the page it is about
+        await push.addListener("pushNotificationActionPerformed", (a) => {
+          const url = a.notification?.data?.url;
+          if (typeof url === "string" && url.startsWith("/") && !url.startsWith("//") && url !== location.pathname + location.search) window.location.assign(url);
+        });
         await push.createChannel?.({ id: "wraith", name: "Wraith alerts", importance: 4 }).catch(() => undefined);
         const p = await push.requestPermissions();
         if (p.receive === "granted") await push.register();

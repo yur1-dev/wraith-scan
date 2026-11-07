@@ -2,18 +2,20 @@
 
 import { disarmLiveExit, type LiveExitRule } from "@/lib/liveExits";
 
+export interface ExitPrefs { tp: string; sl: string; trail: string; tp1?: string; tp1Sell?: string; hold?: string; risk?: string }
+
 const MONO = { fontFamily: "var(--font-mono), 'IBM Plex Mono', monospace" };
 export default function ExitBox({ mint, symbol, on, setOn, prefs, setPrefs, allowed, armed }: {
   mint: string; symbol: string; on: boolean; setOn: (v: boolean) => void;
-  prefs: { tp: string; sl: string; trail: string }; setPrefs: (p: { tp: string; sl: string; trail: string }) => void;
+  prefs: ExitPrefs; setPrefs: (p: ExitPrefs) => void;
   allowed: boolean; armed: LiveExitRule | null;
 }) {
-  const field = (key: "tp" | "sl" | "trail", label: string, hint: string) => (
+  const field = (key: "tp" | "sl" | "trail" | "tp1" | "tp1Sell" | "hold", label: string, hint: string, unit = "%") => (
     <label style={{ flex: 1, minWidth: 0 }}>
       <span style={{ display: "block", color: "var(--text-muted)", fontSize: 9, marginBottom: 4 }}>{label}</span>
       <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", padding: "0 8px", height: 34 }}>
-        <input aria-label={hint} inputMode="decimal" value={prefs[key]} onChange={(e) => setPrefs({ ...prefs, [key]: e.target.value.replace(/[^0-9.]/g, "") })} style={{ width: "100%", minWidth: 0, background: "transparent", border: 0, outline: 0, color: "var(--text)", fontSize: 13, ...MONO }} />
-        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>%</span>
+        <input aria-label={hint} inputMode="decimal" value={prefs[key] ?? ""} onChange={(e) => setPrefs({ ...prefs, [key]: e.target.value.replace(/[^0-9.]/g, "") })} style={{ width: "100%", minWidth: 0, background: "transparent", border: 0, outline: 0, color: "var(--text)", fontSize: 13, ...MONO }} />
+        <span style={{ color: "var(--text-muted)", fontSize: 11, whiteSpace: "nowrap", flex: "none", marginLeft: 4 }}>{unit}</span>
       </div>
     </label>
   );
@@ -33,12 +35,17 @@ export default function ExitBox({ mint, symbol, on, setOn, prefs, setPrefs, allo
             {field("sl", "STOP LOSS −", "Stop loss percent")}
             {field("trail", "TRAIL −", "Trailing stop percent from peak")}
           </div>
-          <p style={{ margin: "8px 0 0", color: "var(--text-dim)", fontSize: 10, lineHeight: 1.5 }}>After the buy fills, Wraith sells 100% of {symbol} to USDC when a level hits. Works only while Wraith is open in a tab; 0 turns a level off.</p>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {field("tp1", "SELL PART AT +", "First target percent")}
+            {field("tp1Sell", "SELL HOW MUCH", "Share of the position to sell at the first target")}
+            {field("hold", "TIME STOP", "Sell everything after this many minutes", "min")}
+          </div>
+          <p style={{ margin: "8px 0 0", color: "var(--text-dim)", fontSize: 10, lineHeight: 1.5 }}>Exits are measured from the price you actually paid. Each level needs two price readings in a row before it sells (a single bad tick can not trigger it); a big crash sells at once. With a first target set, Wraith sells that share when it hits, then moves the stop up to break-even and keeps trailing the rest. Leave a box at 0 to turn it off. Works only while Wraith is open.</p>
         </>
       )}
       {armed && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--text-muted)" }}>
-          <span>● Armed: {armed.tpPct ? `TP +${armed.tpPct}% ` : ""}{armed.slPct ? `SL −${armed.slPct}% ` : ""}{armed.trailPct ? `Trail −${armed.trailPct}%` : ""}</span>
+          <span>● Armed: {armed.tp1Pct ? `${armed.tp1Done ? "✓ " : ""}Part +${armed.tp1Pct}% (${armed.tp1SellPct ?? 50}%) ` : ""}{armed.tpPct ? `TP +${armed.tpPct}% ` : ""}{armed.slPct ? `SL −${armed.slPct}% ` : ""}{armed.trailPct ? `Trail −${armed.trailPct}% ` : ""}{armed.maxHoldMin ? `Time ${armed.maxHoldMin}m` : ""}{armed.fails ? ` · retrying (${armed.fails})` : ""}</span>
           <button type="button" onClick={() => disarmLiveExit(mint)} style={{ background: "none", border: 0, color: "#e58d80", cursor: "pointer", fontSize: 10 }}>Cancel</button>
         </div>
       )}

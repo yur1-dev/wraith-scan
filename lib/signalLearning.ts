@@ -52,7 +52,7 @@ export async function retrainIfDue(force = false): Promise<void> {
       if (!force && cur?.at && Date.now() - new Date(cur.at as Date).getTime() < RETRAIN_EVERY_MS) return;
       const docs = await db
         .collection("signal_calls")
-        .find({ engine: 2, spottedMcap: { $gt: 0 }, spottedAt: { $lt: Date.now() - MATURE_MS } }, { projection: { features: 1, spottedAt: 1, spottedMcap: 1, peakMcap: 1, lastMcap: 1 } })
+        .find({ engine: 2, badData: { $ne: true }, spottedMcap: { $gt: 0 }, spottedAt: { $lt: Date.now() - MATURE_MS } }, { projection: { features: 1, spottedAt: 1, spottedMcap: 1, peakMcap: 1, lastMcap: 1 } })
         .sort({ spottedAt: -1 })
         .limit(6_000)
         .toArray();

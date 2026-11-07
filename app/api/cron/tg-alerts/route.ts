@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
     }
 
     // 2) win milestones across the last 7 days
-    const tracked = await calls.find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2 }).toArray();
+    const tracked = (await calls.find({ spottedAt: { $gt: Date.now() - 7 * 86_400_000 }, spottedMcap: { $gt: 0 }, shadow: { $ne: true }, engine: 2, badData: { $ne: true } }).toArray()).filter((c) => c.lastMcap / c.spottedMcap < 100);
     for (const c of tracked) {
       const m = milestoneFor(c.lastMcap / c.spottedMcap);
       if (!m) continue;

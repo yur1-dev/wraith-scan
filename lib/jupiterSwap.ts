@@ -197,7 +197,7 @@ export async function executeQuickSell(
   percent: number,
   wallet: SwapWallet,
   connection: Connection,
-  opts?: { outputMint?: string },
+  opts?: { outputMint?: string; slippageBps?: number },
 ): Promise<QuickBuyResult> {
   if (!wallet.publicKey || !wallet.signTransaction) {
     throw new SwapError("NO_WALLET", "Connect a wallet first");
@@ -220,7 +220,7 @@ export async function executeQuickSell(
     inputMint,
     outputMint: opts?.outputMint ?? SOL_MINT,
     amount: amount.toString(),
-    slippageBps: "500",
+    slippageBps: String(Math.min(5000, Math.max(50, Math.round(opts?.slippageBps ?? 500)))),
   });
   let quoteResponse: Response;
   try {

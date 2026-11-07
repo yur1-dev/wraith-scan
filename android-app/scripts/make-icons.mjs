@@ -44,4 +44,16 @@ fs.writeFileSync(path.join(RES, "drawable/splash.xml"), `<?xml version="1.0" enc
     <item android:gravity="center"><bitmap android:src="@drawable/splash_ghost" android:gravity="center"/></item>
 </layer-list>
 `);
+// notification small icon: Android wants a plain white silhouette on transparent (24dp)
+const stat = { mdpi: 24, hdpi: 36, xhdpi: 48, xxhdpi: 72, xxxhdpi: 96 };
+for (const [d, px] of Object.entries(stat)) {
+  const dir = path.join(RES, `drawable-${d}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const g = await sharp(SRC).trim().resize(Math.round(px * 0.8), Math.round(px * 0.8), { fit: "inside" }).ensureAlpha().toBuffer();
+  const { data, info } = await sharp(g).raw().toBuffer({ resolveWithObject: true });
+  for (let i = 0; i < data.length; i += 4) { const a = data[i + 3]; data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = a; }
+  const white = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
+  const out = await sharp({ create: { width: px, height: px, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: white, gravity: "center" }]).png().toBuffer();
+  fs.writeFileSync(path.join(dir, "ic_stat_wraith.png"), out);
+}
 console.log("icons done");
